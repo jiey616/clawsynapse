@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -137,21 +138,56 @@ func (a *OpenClawAdapter) logCommand(args []string) {
 func formatDeliverMessage(localNodeID string, req DeliverMessageRequest) string {
 	var b strings.Builder
 	b.WriteString("[clawsynapse")
-	if req.From != "" {
-		b.WriteString(" from=")
-		b.WriteString(req.From)
-	}
-	if localNodeID != "" {
-		b.WriteString(" to=")
-		b.WriteString(localNodeID)
-	}
-	if req.SessionKey != "" {
-		b.WriteString(" session=")
-		b.WriteString(req.SessionKey)
-	}
+	appendHeaderAttr(&b, "from", req.From)
+	appendHeaderAttr(&b, "to", localNodeID)
+	appendHeaderAttr(&b, "session", req.SessionKey)
+	appendMetadataHeaderAttrs(&b, req.Metadata)
 	b.WriteString("]\n")
 	b.WriteString(req.Message)
 	return b.String()
+}
+
+func appendHeaderAttr(b *strings.Builder, key string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+
+	b.WriteString(" ")
+	b.WriteString(key)
+	b.WriteString("=")
+	b.WriteString(value)
+}
+
+func appendMetadataHeaderAttrs(b *strings.Builder, metadata map[string]any) {
+	if len(metadata) == 0 {
+		return
+	}
+
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		b.WriteString(" ")
+		b.WriteString(key)
+		b.WriteString("=")
+		b.WriteString(formatMetadataValue(metadata[key]))
+	}
+}
+
+func formatMetadataValue(value any) string {
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s)
+	}
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		return strconv.Quote("metadata-error:" + err.Error())
+	}
+	return string(data)
 }
 
 func formatOpenClawCommandForLog(args []string) string {

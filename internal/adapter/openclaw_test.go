@@ -180,6 +180,22 @@ func TestFormatDeliverMessageWithSession(t *testing.T) {
 	}
 }
 
+func TestFormatDeliverMessageWithMetadata(t *testing.T) {
+	got := formatDeliverMessage("node-1", DeliverMessageRequest{
+		From:       "node-2",
+		Message:    "hello world",
+		SessionKey: "task-abc",
+		Metadata: map[string]any{
+			"priority": "high",
+			"source":   "chat",
+		},
+	})
+	want := "[clawsynapse from=node-2 to=node-1 session=task-abc priority=high source=chat]\nhello world"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestFormatDeliverMessageNoFrom(t *testing.T) {
 	got := formatDeliverMessage("node-1", DeliverMessageRequest{
 		Message: "test",
@@ -187,6 +203,21 @@ func TestFormatDeliverMessageNoFrom(t *testing.T) {
 	want := "[clawsynapse to=node-1]\ntest"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatDeliverMessageMetadataMarshalError(t *testing.T) {
+	got := formatDeliverMessage("node-1", DeliverMessageRequest{
+		Message: "test",
+		Metadata: map[string]any{
+			"bad": func() {},
+		},
+	})
+	if !strings.Contains(got, `bad="metadata-error:`) {
+		t.Fatalf("got %q, want metadata error marker", got)
+	}
+	if !strings.HasSuffix(got, "\ntest") {
+		t.Fatalf("got %q, want original message suffix", got)
 	}
 }
 
