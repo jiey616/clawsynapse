@@ -22,6 +22,7 @@ type fileConfig struct {
 	AnnounceTTL       string   `yaml:"announceTtl"`
 	TrustMode         string   `yaml:"trustMode"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
+	WebhookURL          string   `yaml:"webhookUrl"`
 	DeliverablePrefixes []string `yaml:"deliverablePrefixes"`
 	LogLevel            string   `yaml:"logLevel"`
 	LogFormat         string   `yaml:"logFormat"`
@@ -56,6 +57,7 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		IdentityPubPath: strings.TrimSpace(cfg.IdentityPubPath),
 		TrustMode:       strings.TrimSpace(cfg.TrustMode),
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
+		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
 		LogLevel:            strings.TrimSpace(cfg.LogLevel),
 		LogFormat:       strings.TrimSpace(cfg.LogFormat),
@@ -133,6 +135,7 @@ func loadValuesFromMap(values map[string]string) configValues {
 		AnnounceTTL:     parseDurationValue(values["ANNOUNCE_TTL_MS"], 0),
 		TrustMode:       strings.TrimSpace(values["TRUST_MODE"]),
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
+		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
 		DeliverablePrefixes: splitCSV(values["DELIVERABLE_PREFIXES"]),
 		LogLevel:            strings.TrimSpace(values["LOG_LEVEL"]),
 		LogFormat:       strings.TrimSpace(values["LOG_FORMAT"]),

@@ -114,6 +114,12 @@ func newAgentAdapter(cfg config.Config, log *slog.Logger) (adapter.AgentAdapter,
 			NodeID: cfg.NodeID,
 			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "openclaw")),
 		})
+	case "webhook":
+		return adapter.NewWebhookAdapter(adapter.WebhookConfig{
+			NodeID: cfg.NodeID,
+			URL:    cfg.WebhookURL,
+			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "webhook")),
+		})
 	default:
 		return nil, fmt.Errorf("unsupported agent adapter: %s", cfg.AgentAdapter)
 	}
