@@ -168,6 +168,18 @@ func TestFormatDeliverMessage(t *testing.T) {
 	}
 }
 
+func TestFormatDeliverMessageWithType(t *testing.T) {
+	got := formatDeliverMessage("node-1", DeliverMessageRequest{
+		Type:    "task.assign",
+		From:    "node-2",
+		Message: "do this",
+	})
+	want := "[clawsynapse type=task.assign from=node-2 to=node-1]\ndo this"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestFormatDeliverMessageWithSession(t *testing.T) {
 	got := formatDeliverMessage("node-1", DeliverMessageRequest{
 		From:       "node-2",

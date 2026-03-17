@@ -91,6 +91,7 @@ func dispatch(ctx context.Context, client *api.Client, args []string) (types.API
 func runPublish(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	target := fs.String("target", "", "target node id")
+	msgType := fs.String("type", "", "message type (e.g. chat.message, task.assign)")
 	message := fs.String("message", "", "message content")
 	sessionKey := fs.String("session-key", "", "session key")
 	var metadataFlags stringList
@@ -108,12 +109,16 @@ func runPublish(ctx context.Context, client *api.Client, args []string) (types.A
 	if err != nil {
 		return types.APIResult{}, err
 	}
-	return client.Post(ctx, "/v1/publish", map[string]any{
+	body := map[string]any{
 		"targetNode": *target,
 		"message":    *message,
 		"sessionKey": *sessionKey,
 		"metadata":   metadata,
-	})
+	}
+	if *msgType != "" {
+		body["type"] = *msgType
+	}
+	return client.Post(ctx, "/v1/publish", body)
 }
 
 func runAuth(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {

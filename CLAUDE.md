@@ -70,7 +70,7 @@ module: `auth | trust | discovery | control | msg | events | pubsub | transfer`
 
 ## 环境变量
 
-`NATS_SERVERS`, `NODE_ID`, `LOCAL_API_ADDR`, `HEARTBEAT_INTERVAL_MS`, `ANNOUNCE_TTL_MS`, `TRUST_MODE` (open|tofu|explicit)
+`NATS_SERVERS`, `NODE_ID`, `LOCAL_API_ADDR`, `HEARTBEAT_INTERVAL_MS`, `ANNOUNCE_TTL_MS`, `TRUST_MODE` (open|tofu|explicit), `DELIVERABLE_PREFIXES` (默认 `chat,task`)
 
 ## 编辑工作流
 

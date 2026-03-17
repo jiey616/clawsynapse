@@ -138,6 +138,7 @@ func (a *OpenClawAdapter) logCommand(args []string) {
 func formatDeliverMessage(localNodeID string, req DeliverMessageRequest) string {
 	var b strings.Builder
 	b.WriteString("[clawsynapse")
+	appendHeaderAttr(&b, "type", req.Type)
 	appendHeaderAttr(&b, "from", req.From)
 	appendHeaderAttr(&b, "to", localNodeID)
 	appendHeaderAttr(&b, "session", req.SessionKey)

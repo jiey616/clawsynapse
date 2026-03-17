@@ -457,8 +457,18 @@ type Envelope struct {
 
 ### `Envelope.type` 预留值
 
-- `chat.message`
-- `event.forward`
+可投递类型（会被转发给本地 Agent handler，由 `deliverablePrefixes` 配置项控制，默认 `chat,task`）：
+
+- `chat.message` — 聊天消息
+- `chat.stream` — 流式聊天
+- `task.assign` — 任务分配
+- `task.result` — 任务结果
+
+非投递类型（仅存入 inbox，不转发）：
+
+- `event.forward` — 事件转发
+
+可通过配置 `deliverablePrefixes` 扩展可投递前缀，详见环境变量 `DELIVERABLE_PREFIXES`。
 
 ### 字段说明
 

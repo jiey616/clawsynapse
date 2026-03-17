@@ -36,7 +36,7 @@ func TestPublishRejectsUntrustedPeer(t *testing.T) {
 		t.Fatalf("identity init failed: %v", err)
 	}
 
-	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "tofu")
+	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "tofu", nil)
 	if _, err := svc.Publish(PublishRequest{TargetNode: "node-beta", Message: "hello"}); err == nil {
 		t.Fatal("expected publish to fail for untrusted peer")
 	}
@@ -95,7 +95,7 @@ func TestAdapterMessageHandlerReturnsAcceptedWithRunID(t *testing.T) {
 	}
 }
 
-func TestMaybeDeliverForwardsAllChatMessages(t *testing.T) {
+func TestMaybeDeliverForwardsDeliverableTypes(t *testing.T) {
 	peers := discovery.NewRegistry()
 	base := t.TempDir()
 	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
@@ -104,21 +104,23 @@ func TestMaybeDeliverForwardsAllChatMessages(t *testing.T) {
 	}
 
 	delivered := make(chan string, 10)
-	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open")
+	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open", nil)
 	svc.SetMessageHandler(MessageHandlerFunc(func(msg IncomingMessage) (HandlerResult, error) {
-		delivered <- msg.Message
+		delivered <- msg.Type + "|" + msg.Message
 		return HandlerResult{Reply: "ok"}, nil
 	}))
 
 	svc.maybeDeliver(protocol.MessageEnvelope{Type: "chat.message", Content: "[reply] Task completed."})
 	svc.maybeDeliver(protocol.MessageEnvelope{Type: "chat.message", Content: "[end] Closing conversation."})
 	svc.maybeDeliver(protocol.MessageEnvelope{Type: "event.forward", Content: "ignored"})
+	svc.maybeDeliver(protocol.MessageEnvelope{Type: "task.assign", Content: "do this"})
 	svc.maybeDeliver(protocol.MessageEnvelope{Type: "chat.message", Content: "[request] Do something."})
 
 	want := map[string]bool{
-		"[reply] Task completed.":     false,
-		"[end] Closing conversation.": false,
-		"[request] Do something.":     false,
+		"chat.message|[reply] Task completed.":     false,
+		"chat.message|[end] Closing conversation.": false,
+		"chat.message|[request] Do something.":     false,
+		"task.assign|do this":                      false,
 	}
 
 	deadline := time.After(1 * time.Second)
@@ -137,6 +139,44 @@ func TestMaybeDeliverForwardsAllChatMessages(t *testing.T) {
 	for msg, got := range want {
 		if !got {
 			t.Fatalf("message %q was not delivered", msg)
+		}
+	}
+}
+
+func TestIsDeliverableType(t *testing.T) {
+	defaultPrefixes := []string{"chat", "task"}
+	cases := []struct {
+		typ  string
+		want bool
+	}{
+		{"chat.message", true},
+		{"chat.stream", true},
+		{"task.assign", true},
+		{"task.result", true},
+		{"event.forward", false},
+		{"discovery.announce", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isDeliverableType(tc.typ, defaultPrefixes); got != tc.want {
+			t.Fatalf("isDeliverableType(%q) = %v, want %v", tc.typ, got, tc.want)
+		}
+	}
+}
+
+func TestIsDeliverableTypeCustomPrefixes(t *testing.T) {
+	custom := []string{"control", "task"}
+	cases := []struct {
+		typ  string
+		want bool
+	}{
+		{"control.shutdown", true},
+		{"task.assign", true},
+		{"chat.message", false},
+	}
+	for _, tc := range cases {
+		if got := isDeliverableType(tc.typ, custom); got != tc.want {
+			t.Fatalf("isDeliverableType(%q, custom) = %v, want %v", tc.typ, got, tc.want)
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 type IncomingMessage struct {
 	MessageID  string
+	Type       string
 	From       string
 	To         string
 	Message    string
@@ -62,6 +63,7 @@ func (h *AdapterMessageHandler) HandleMessage(msg IncomingMessage) (HandlerResul
 	defer cancel()
 
 	result, err := h.adapter.DeliverMessage(ctx, adapter.DeliverMessageRequest{
+		Type:       msg.Type,
 		SessionKey: msg.SessionKey,
 		Message:    msg.Message,
 		From:       msg.From,

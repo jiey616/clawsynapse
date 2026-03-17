@@ -25,6 +25,7 @@ const contentPreviewLimit = 160
 
 type PublishRequest struct {
 	TargetNode string
+	Type       string
 	Message    string
 	SessionKey string
 	Metadata   map[string]any
@@ -36,19 +37,23 @@ type PublishResult struct {
 }
 
 type Service struct {
-	mu        sync.Mutex
-	log       *slog.Logger
-	peers     *discovery.Registry
-	bus       *natsbus.Client
-	nodeID    string
-	identity  *identity.Identity
-	trustMode string
-	inbox     []protocol.MessageEnvelope
-	handler   MessageHandler
+	mu                  sync.Mutex
+	log                 *slog.Logger
+	peers               *discovery.Registry
+	bus                 *natsbus.Client
+	nodeID              string
+	identity            *identity.Identity
+	trustMode           string
+	deliverablePrefixes []string
+	inbox               []protocol.MessageEnvelope
+	handler             MessageHandler
 }
 
-func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string) *Service {
-	return &Service{log: log, peers: peers, bus: bus, nodeID: nodeID, identity: id, trustMode: trustMode, inbox: []protocol.MessageEnvelope{}}
+func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string, deliverablePrefixes []string) *Service {
+	if len(deliverablePrefixes) == 0 {
+		deliverablePrefixes = []string{"chat", "task"}
+	}
+	return &Service{log: log, peers: peers, bus: bus, nodeID: nodeID, identity: id, trustMode: trustMode, deliverablePrefixes: deliverablePrefixes, inbox: []protocol.MessageEnvelope{}}
 }
 
 func (s *Service) SetMessageHandler(handler MessageHandler) {
@@ -94,9 +99,14 @@ func (s *Service) Publish(req PublishRequest) (PublishResult, error) {
 		sessionKey = newSessionKey()
 	}
 
+	msgType := req.Type
+	if msgType == "" {
+		msgType = "chat.message"
+	}
+
 	env := protocol.MessageEnvelope{
 		ID:              randID(),
-		Type:            "chat.message",
+		Type:            msgType,
 		From:            s.nodeID,
 		To:              req.TargetNode,
 		Content:         req.Message,
@@ -210,7 +220,7 @@ func (s *Service) acceptInbox(env protocol.MessageEnvelope) {
 }
 
 func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
-	if env.Type != "chat.message" {
+	if !isDeliverableType(env.Type, s.deliverablePrefixes) {
 		return
 	}
 	handler := s.messageHandler()
@@ -221,6 +231,7 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 	go func() {
 		_, err := handler.HandleMessage(IncomingMessage{
 			MessageID:  env.ID,
+			Type:       env.Type,
 			From:       env.From,
 			To:         env.To,
 			Message:    env.Content,
@@ -250,6 +261,17 @@ func (s *Service) messageHandler() MessageHandler {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.handler
+}
+
+// isDeliverableType returns true for message types that should be forwarded to local agent handlers.
+// Each prefix is a module name (e.g. "chat"); the type matches if it starts with "chat.".
+func isDeliverableType(t string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(t, p+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneMetadata(in map[string]any) map[string]any {

@@ -9,3 +9,6 @@ announceTtl: 30s
 dataDir: ~/.clawsynapse
 identityKeyPath: ~/.clawsynapse/identity.key
 identityPubPath: ~/.clawsynapse/identity.pub
+deliverablePrefixes:
+  - chat
+  - task

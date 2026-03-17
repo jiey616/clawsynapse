@@ -27,6 +27,7 @@ GET /v1/peers
 ```json
 {
   "targetNode": "node-beta",
+  "type": "chat.message",
   "message": "请汇总最新报告",
   "sessionKey": "nats:node-alpha:node-beta",
   "metadata": { "priority": "high" }

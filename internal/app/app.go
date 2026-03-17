@@ -83,7 +83,7 @@ func New(cfg config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init trust service: %w", err)
 	}
-	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, cfg.NodeID, id, cfg.TrustMode)
+	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, cfg.NodeID, id, cfg.TrustMode, cfg.DeliverablePrefixes)
 	agentAdapter, err := newAgentAdapter(cfg, log)
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)

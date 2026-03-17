@@ -19,6 +19,7 @@ const (
 	defaultAgentAdapter      = "default"
 	defaultLogLevel          = "info"
 	defaultLogFormat         = "json"
+	defaultDeliverablePrefixes = "chat,task"
 )
 
 type Config struct {
@@ -34,41 +35,44 @@ type Config struct {
 	AgentAdapter      string   `json:"agentAdapter"`
 	LogLevel          string   `json:"logLevel"`
 	LogFormat         string   `json:"logFormat"`
-	LogAddSource      bool     `json:"logAddSource"`
-	CheckConfig       bool     `json:"checkConfig"`
+	DeliverablePrefixes []string `json:"deliverablePrefixes"`
+	LogAddSource        bool     `json:"logAddSource"`
+	CheckConfig         bool     `json:"checkConfig"`
 }
 
 type runtimeConfig struct {
-	NodeID          string
-	NATSServers     []string
-	LocalAPIAddr    string
-	DataDir         string
-	IdentityKeyPath string
-	IdentityPubPath string
-	Heartbeat       time.Duration
-	AnnounceTTL     time.Duration
-	TrustMode       string
-	AgentAdapter    string
-	LogLevel        string
-	LogFormat       string
-	LogAddSource    bool
-	CheckConfig     bool
+	NodeID              string
+	NATSServers         []string
+	LocalAPIAddr        string
+	DataDir             string
+	IdentityKeyPath     string
+	IdentityPubPath     string
+	Heartbeat           time.Duration
+	AnnounceTTL         time.Duration
+	TrustMode           string
+	AgentAdapter        string
+	DeliverablePrefixes []string
+	LogLevel            string
+	LogFormat           string
+	LogAddSource        bool
+	CheckConfig         bool
 }
 
 type configValues struct {
-	NodeID          string
-	NATSServers     []string
-	LocalAPIAddr    string
-	DataDir         string
-	IdentityKeyPath string
-	IdentityPubPath string
-	Heartbeat       time.Duration
-	AnnounceTTL     time.Duration
-	TrustMode       string
-	AgentAdapter    string
-	LogLevel        string
-	LogFormat       string
-	LogAddSource    bool
+	NodeID              string
+	NATSServers         []string
+	LocalAPIAddr        string
+	DataDir             string
+	IdentityKeyPath     string
+	IdentityPubPath     string
+	Heartbeat           time.Duration
+	AnnounceTTL         time.Duration
+	TrustMode           string
+	AgentAdapter        string
+	DeliverablePrefixes []string
+	LogLevel            string
+	LogFormat           string
+	LogAddSource        bool
 }
 
 func (c Config) Runtime() runtimeConfig {
@@ -83,9 +87,10 @@ func (c Config) Runtime() runtimeConfig {
 		IdentityPubPath: c.IdentityPubPath,
 		Heartbeat:       h,
 		AnnounceTTL:     t,
-		TrustMode:       c.TrustMode,
-		AgentAdapter:    c.AgentAdapter,
-		LogLevel:        c.LogLevel,
+		TrustMode:           c.TrustMode,
+		AgentAdapter:        c.AgentAdapter,
+		DeliverablePrefixes: c.DeliverablePrefixes,
+		LogLevel:            c.LogLevel,
 		LogFormat:       c.LogFormat,
 		LogAddSource:    c.LogAddSource,
 		CheckConfig:     c.CheckConfig,
@@ -128,9 +133,10 @@ func LoadFromOS(args []string) (Config, error) {
 		agentAdapter    = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw")
 		logLevel        = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat       = fs.String("log-format", merged.LogFormat, "log format: json|text")
-		logAddSource    = fs.Bool("log-add-source", merged.LogAddSource, "include source location in logs")
-		_               = fs.String("config", configPath, "config file path")
-		checkConfig     = fs.Bool("check-config", false, "print config and exit")
+		deliverablePrefixes = fs.String("deliverable-prefixes", strings.Join(merged.DeliverablePrefixes, ","), "comma separated message type prefixes that are deliverable to agent handlers")
+		logAddSource        = fs.Bool("log-add-source", merged.LogAddSource, "include source location in logs")
+		_                   = fs.String("config", configPath, "config file path")
+		checkConfig         = fs.Bool("check-config", false, "print config and exit")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -189,8 +195,9 @@ func LoadFromOS(args []string) (Config, error) {
 		HeartbeatInterval: heartbeat.String(),
 		AnnounceTTL:       announceTTL.String(),
 		TrustMode:         mode,
-		AgentAdapter:      adapterName,
-		LogLevel:          level,
+		AgentAdapter:        adapterName,
+		DeliverablePrefixes: splitCSV(*deliverablePrefixes),
+		LogLevel:            level,
 		LogFormat:         format,
 		LogAddSource:      *logAddSource,
 		CheckConfig:       *checkConfig,
@@ -207,8 +214,9 @@ func defaultConfigValues(defaultDataDir string) configValues {
 		Heartbeat:       defaultHeartbeatInterval,
 		AnnounceTTL:     defaultAnnounceTTL,
 		TrustMode:       defaultTrustMode,
-		AgentAdapter:    defaultAgentAdapter,
-		LogLevel:        defaultLogLevel,
+		AgentAdapter:        defaultAgentAdapter,
+		DeliverablePrefixes: splitCSV(defaultDeliverablePrefixes),
+		LogLevel:            defaultLogLevel,
 		LogFormat:       defaultLogFormat,
 	}
 }
@@ -243,6 +251,9 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.AgentAdapter) != "" {
 		base.AgentAdapter = strings.TrimSpace(override.AgentAdapter)
+	}
+	if len(override.DeliverablePrefixes) > 0 {
+		base.DeliverablePrefixes = append([]string(nil), override.DeliverablePrefixes...)
 	}
 	if strings.TrimSpace(override.LogLevel) != "" {
 		base.LogLevel = strings.TrimSpace(override.LogLevel)

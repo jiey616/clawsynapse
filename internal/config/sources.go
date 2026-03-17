@@ -21,8 +21,9 @@ type fileConfig struct {
 	HeartbeatInterval string   `yaml:"heartbeatInterval"`
 	AnnounceTTL       string   `yaml:"announceTtl"`
 	TrustMode         string   `yaml:"trustMode"`
-	AgentAdapter      string   `yaml:"agentAdapter"`
-	LogLevel          string   `yaml:"logLevel"`
+	AgentAdapter        string   `yaml:"agentAdapter"`
+	DeliverablePrefixes []string `yaml:"deliverablePrefixes"`
+	LogLevel            string   `yaml:"logLevel"`
 	LogFormat         string   `yaml:"logFormat"`
 	LogAddSource      *bool    `yaml:"logAddSource"`
 }
@@ -54,8 +55,9 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		IdentityKeyPath: strings.TrimSpace(cfg.IdentityKeyPath),
 		IdentityPubPath: strings.TrimSpace(cfg.IdentityPubPath),
 		TrustMode:       strings.TrimSpace(cfg.TrustMode),
-		AgentAdapter:    strings.TrimSpace(cfg.AgentAdapter),
-		LogLevel:        strings.TrimSpace(cfg.LogLevel),
+		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
+		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
+		LogLevel:            strings.TrimSpace(cfg.LogLevel),
 		LogFormat:       strings.TrimSpace(cfg.LogFormat),
 	}
 	if cfg.LogAddSource != nil {
@@ -130,8 +132,9 @@ func loadValuesFromMap(values map[string]string) configValues {
 		Heartbeat:       parseDurationValue(values["HEARTBEAT_INTERVAL_MS"], 0),
 		AnnounceTTL:     parseDurationValue(values["ANNOUNCE_TTL_MS"], 0),
 		TrustMode:       strings.TrimSpace(values["TRUST_MODE"]),
-		AgentAdapter:    strings.TrimSpace(values["AGENT_ADAPTER"]),
-		LogLevel:        strings.TrimSpace(values["LOG_LEVEL"]),
+		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
+		DeliverablePrefixes: splitCSV(values["DELIVERABLE_PREFIXES"]),
+		LogLevel:            strings.TrimSpace(values["LOG_LEVEL"]),
 		LogFormat:       strings.TrimSpace(values["LOG_FORMAT"]),
 		LogAddSource:    parseBoolValue(values["LOG_ADD_SOURCE"]),
 	}

@@ -92,6 +92,15 @@ go run ./cmd/clawsynapse publish \
   --message "请汇总最新报告"
 ```
 
+指定消息类型（默认 `chat.message`）：
+
+```bash
+go run ./cmd/clawsynapse publish \
+  --target node-beta \
+  --type task.assign \
+  --message "请处理数据清洗任务"
+```
+
 带会话键与元数据：
 
 ```bash

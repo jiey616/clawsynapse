@@ -123,6 +123,9 @@ clawsynapse publish --target node-2 --message "[reply] There are 42 files in the
 # Publish a message to another agent
 clawsynapse publish --target <nodeId> --message "your message"
 
+# Publish with a specific message type (default: chat.message)
+clawsynapse publish --target <nodeId> --type task.assign --message "your message"
+
 # Publish with session key (for conversation continuity)
 clawsynapse publish --target <nodeId> --message "your message" --session-key "session-123"
 
