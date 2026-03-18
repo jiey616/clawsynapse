@@ -17,6 +17,11 @@ const (
 	ErrTrustNotFound         = "trust.not_found"
 	ErrTrustRejected         = "trust.rejected"
 	ErrTrustRevoked          = "trust.revoked"
+	ErrTransferNotFound      = "transfer.not_found"
+	ErrTransferFileTooLarge  = "transfer.file_too_large"
+	ErrTransferFailed        = "transfer.failed"
+	ErrTransferBucketError   = "transfer.bucket_error"
+	ErrTransferDisabled      = "transfer.disabled"
 )
 
 type Error struct {

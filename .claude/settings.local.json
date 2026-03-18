@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "WebFetch(domain:docs.nats.io)",
+      "Bash(gofmt -w .)",
+      "Bash(go vet:*)",
+      "Bash(curl -s http://127.0.0.1:18080/v1/transfer/AonoWI-ufMG4dsr7oCXc6g)",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }

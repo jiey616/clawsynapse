@@ -12,21 +12,24 @@ import (
 )
 
 type fileConfig struct {
-	NodeID            string   `yaml:"nodeId"`
-	NATSServers       []string `yaml:"natsServers"`
-	LocalAPIAddr      string   `yaml:"localApiAddr"`
-	DataDir           string   `yaml:"dataDir"`
-	IdentityKeyPath   string   `yaml:"identityKeyPath"`
-	IdentityPubPath   string   `yaml:"identityPubPath"`
-	HeartbeatInterval string   `yaml:"heartbeatInterval"`
-	AnnounceTTL       string   `yaml:"announceTtl"`
-	TrustMode         string   `yaml:"trustMode"`
+	NodeID              string   `yaml:"nodeId"`
+	NATSServers         []string `yaml:"natsServers"`
+	LocalAPIAddr        string   `yaml:"localApiAddr"`
+	DataDir             string   `yaml:"dataDir"`
+	IdentityKeyPath     string   `yaml:"identityKeyPath"`
+	IdentityPubPath     string   `yaml:"identityPubPath"`
+	HeartbeatInterval   string   `yaml:"heartbeatInterval"`
+	AnnounceTTL         string   `yaml:"announceTtl"`
+	TrustMode           string   `yaml:"trustMode"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	WebhookURL          string   `yaml:"webhookUrl"`
 	DeliverablePrefixes []string `yaml:"deliverablePrefixes"`
+	TransferDir         string   `yaml:"transferDir"`
+	TransferMaxFileSize *int64   `yaml:"transferMaxFileSize"`
+	TransferTTL         string   `yaml:"transferTtl"`
 	LogLevel            string   `yaml:"logLevel"`
-	LogFormat         string   `yaml:"logFormat"`
-	LogAddSource      *bool    `yaml:"logAddSource"`
+	LogFormat           string   `yaml:"logFormat"`
+	LogAddSource        *bool    `yaml:"logAddSource"`
 }
 
 func loadConfigValues(path string, required bool) (configValues, error) {
@@ -49,18 +52,19 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 	}
 
 	values := configValues{
-		NodeID:          strings.TrimSpace(cfg.NodeID),
-		NATSServers:     cloneStrings(cfg.NATSServers),
-		LocalAPIAddr:    strings.TrimSpace(cfg.LocalAPIAddr),
-		DataDir:         strings.TrimSpace(cfg.DataDir),
-		IdentityKeyPath: strings.TrimSpace(cfg.IdentityKeyPath),
-		IdentityPubPath: strings.TrimSpace(cfg.IdentityPubPath),
-		TrustMode:       strings.TrimSpace(cfg.TrustMode),
+		NodeID:              strings.TrimSpace(cfg.NodeID),
+		NATSServers:         cloneStrings(cfg.NATSServers),
+		LocalAPIAddr:        strings.TrimSpace(cfg.LocalAPIAddr),
+		DataDir:             strings.TrimSpace(cfg.DataDir),
+		IdentityKeyPath:     strings.TrimSpace(cfg.IdentityKeyPath),
+		IdentityPubPath:     strings.TrimSpace(cfg.IdentityPubPath),
+		TrustMode:           strings.TrimSpace(cfg.TrustMode),
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
 		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
+		TransferDir:         strings.TrimSpace(cfg.TransferDir),
 		LogLevel:            strings.TrimSpace(cfg.LogLevel),
-		LogFormat:       strings.TrimSpace(cfg.LogFormat),
+		LogFormat:           strings.TrimSpace(cfg.LogFormat),
 	}
 	if cfg.LogAddSource != nil {
 		values.LogAddSource = *cfg.LogAddSource
@@ -71,6 +75,12 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 	}
 	if cfg.AnnounceTTL != "" {
 		values.AnnounceTTL = parseDurationValue(cfg.AnnounceTTL, 0)
+	}
+	if cfg.TransferMaxFileSize != nil {
+		values.TransferMaxFileSize = *cfg.TransferMaxFileSize
+	}
+	if cfg.TransferTTL != "" {
+		values.TransferTTL = parseDurationValue(cfg.TransferTTL, 0)
 	}
 
 	return values, nil
@@ -125,21 +135,24 @@ func loadOSEnvValues() configValues {
 
 func loadValuesFromMap(values map[string]string) configValues {
 	return configValues{
-		NodeID:          strings.TrimSpace(values["NODE_ID"]),
-		NATSServers:     splitCSV(values["NATS_SERVERS"]),
-		LocalAPIAddr:    strings.TrimSpace(values["LOCAL_API_ADDR"]),
-		DataDir:         strings.TrimSpace(values["DATA_DIR"]),
-		IdentityKeyPath: strings.TrimSpace(values["IDENTITY_KEY_PATH"]),
-		IdentityPubPath: strings.TrimSpace(values["IDENTITY_PUB_PATH"]),
-		Heartbeat:       parseDurationValue(values["HEARTBEAT_INTERVAL_MS"], 0),
-		AnnounceTTL:     parseDurationValue(values["ANNOUNCE_TTL_MS"], 0),
-		TrustMode:       strings.TrimSpace(values["TRUST_MODE"]),
+		NodeID:              strings.TrimSpace(values["NODE_ID"]),
+		NATSServers:         splitCSV(values["NATS_SERVERS"]),
+		LocalAPIAddr:        strings.TrimSpace(values["LOCAL_API_ADDR"]),
+		DataDir:             strings.TrimSpace(values["DATA_DIR"]),
+		IdentityKeyPath:     strings.TrimSpace(values["IDENTITY_KEY_PATH"]),
+		IdentityPubPath:     strings.TrimSpace(values["IDENTITY_PUB_PATH"]),
+		Heartbeat:           parseDurationValue(values["HEARTBEAT_INTERVAL_MS"], 0),
+		AnnounceTTL:         parseDurationValue(values["ANNOUNCE_TTL_MS"], 0),
+		TrustMode:           strings.TrimSpace(values["TRUST_MODE"]),
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
 		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
 		DeliverablePrefixes: splitCSV(values["DELIVERABLE_PREFIXES"]),
+		TransferDir:         strings.TrimSpace(values["TRANSFER_DIR"]),
+		TransferMaxFileSize: parseIntValue(values["TRANSFER_MAX_FILE_SIZE"]),
+		TransferTTL:         parseDurationValue(values["TRANSFER_TTL"], 0),
 		LogLevel:            strings.TrimSpace(values["LOG_LEVEL"]),
-		LogFormat:       strings.TrimSpace(values["LOG_FORMAT"]),
-		LogAddSource:    parseBoolValue(values["LOG_ADD_SOURCE"]),
+		LogFormat:           strings.TrimSpace(values["LOG_FORMAT"]),
+		LogAddSource:        parseBoolValue(values["LOG_ADD_SOURCE"]),
 	}
 }
 
@@ -209,6 +222,18 @@ func cloneStrings(in []string) []string {
 		return nil
 	}
 	return out
+}
+
+func parseIntValue(v string) int64 {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func parseBoolValue(v string) bool {

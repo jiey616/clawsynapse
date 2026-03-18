@@ -36,6 +36,8 @@ type PublishResult struct {
 	SessionKey string
 }
 
+type TransferHandler func(env protocol.MessageEnvelope)
+
 type Service struct {
 	mu                  sync.Mutex
 	log                 *slog.Logger
@@ -47,6 +49,7 @@ type Service struct {
 	deliverablePrefixes []string
 	inbox               []protocol.MessageEnvelope
 	handler             MessageHandler
+	transferHandler     TransferHandler
 }
 
 func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string, deliverablePrefixes []string) *Service {
@@ -60,6 +63,12 @@ func (s *Service) SetMessageHandler(handler MessageHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handler = handler
+}
+
+func (s *Service) SetTransferHandler(h TransferHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transferHandler = h
 }
 
 func (s *Service) Start() error {
@@ -220,6 +229,16 @@ func (s *Service) acceptInbox(env protocol.MessageEnvelope) {
 }
 
 func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
+	if env.Type == "transfer.available" {
+		s.mu.Lock()
+		th := s.transferHandler
+		s.mu.Unlock()
+		if th != nil {
+			go th(env)
+		}
+		return
+	}
+
 	if !isDeliverableType(env.Type, s.deliverablePrefixes) {
 		return
 	}

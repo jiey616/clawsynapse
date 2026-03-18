@@ -17,6 +17,7 @@ import (
 	"clawsynapse/internal/messaging"
 	"clawsynapse/internal/natsbus"
 	"clawsynapse/internal/store"
+	"clawsynapse/internal/transfer"
 	"clawsynapse/internal/trust"
 	"clawsynapse/pkg/types"
 )
@@ -29,6 +30,7 @@ type App struct {
 	auth      *auth.Service
 	trust     *trust.Service
 	messaging *messaging.Service
+	transfer  *transfer.Service
 	bus       *natsbus.Client
 	peers     *discovery.Registry
 	identity  *identity.Identity
@@ -89,7 +91,19 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("init agent adapter: %w", err)
 	}
 	messagingSvc.SetMessageHandler(messaging.NewAdapterMessageHandler(agentAdapter, 30*time.Second))
-	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, bus)
+
+	transferSvc := transfer.NewService(
+		log.With(slog.String("component", "transfer")),
+		peers, bus, messagingSvc, cfg.NodeID, id, cfg.TrustMode,
+		transfer.TransferConfig{
+			TransferDir: cfg.TransferDir,
+			MaxFileSize: cfg.TransferMaxFileSize,
+			TTL:         cfg.TransferTTL,
+		},
+	)
+	messagingSvc.SetTransferHandler(transferSvc.HandleTransferNotification)
+
+	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus)
 
 	return &App{
 		log:       log,
@@ -99,6 +113,7 @@ func New(cfg config.Config) (*App, error) {
 		auth:      authSvc,
 		trust:     trustSvc,
 		messaging: messagingSvc,
+		transfer:  transferSvc,
 		bus:       bus,
 		peers:     peers,
 		identity:  id,
@@ -145,6 +160,12 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("start messaging service: %w", err)
 	}
 	a.log.Info("messaging subscriptions ready")
+	if err := a.transfer.Start(ctx); err != nil {
+		return fmt.Errorf("start transfer service: %w", err)
+	}
+	if a.transfer.Enabled() {
+		a.log.Info("transfer service ready")
+	}
 	if err := a.bus.FlushTimeout(3 * time.Second); err != nil {
 		a.log.Warn("nats flush timeout after control subscriptions", slog.String("error", err.Error()))
 	}
