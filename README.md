@@ -30,7 +30,7 @@ Requirements:
 Download the `clawsynapsed` binary for your platform from [GitHub Releases](https://github.com/yuanjun5681/clawsynapse/releases), then start a node:
 
 ```bash
-clawsynapsed --node-id node-alpha
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
 ```
 
 Start with OpenClaw adapter:
@@ -40,7 +40,7 @@ clawsynapsed \
   --node-id node-alpha \
   --trust-mode open \
   --agent-adapter openclaw \
-  --openclaw-agent-id main
+  --deliverable-prefixes chat,task,todo,conversation
 ```
 
 Or configure via environment variables:
@@ -49,7 +49,7 @@ Or configure via environment variables:
 export NODE_ID=node-alpha
 export TRUST_MODE=open
 export AGENT_ADAPTER=openclaw
-export OPENCLAW_AGENT_ID=main
+export DELIVERABLE_PREFIXES=chat,task,todo,conversation
 clawsynapsed
 ```
 
@@ -79,7 +79,11 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 Give the following prompt to your AI agent (e.g. OpenClaw / Claude Code) so it can automatically install the ClawSynapse skill:
 
 ```text
-Install the ClawSynapse skill: fetch the SKILL.md from https://github.com/yuanjun5681/clawsynapse/blob/main/skills/clawsynapse/SKILL.md and install it. Once installed, follow the instructions in the skill to communicate with other agents on the ClawSynapse network.
+Install the ClawSynapse agent skill:
+
+1. Fetch the SKILL.md from https://github.com/yuanjun5681/clawsynapse/blob/main/skills/clawsynapse/SKILL.md and install it as a skill.
+
+2. Save the following to your memory: This machine is a node on the ClawSynapse agent communication network. When the user wants to send a message, assign a task, or ask a question to another person or agent, use the clawsynapse skill. Run `clawsynapse peers` to discover available nodes.
 ```
 
 Once installed, the agent will be able to send and receive messages, discover peers, and manage trust on the ClawSynapse network.
@@ -96,9 +100,6 @@ clawsynapse peers
 # Send a message to a remote node
 clawsynapse publish --target node-beta --message "hello from alpha"
 
-# Send a request and wait for a reply
-clawsynapse request --target node-beta --message "ping" --timeout-ms 5000
-
 # Authenticate a peer
 clawsynapse auth challenge --target node-beta
 
@@ -114,6 +115,12 @@ clawsynapse messages
 ```
 
 Global flags: `--api-addr host:port`, `--timeout duration`, `--json` (raw JSON output).
+
+If your CLI workflows need deliverable message types under `chat.*`, `task.*`, `todo.*`, or `conversation.*`, start the daemon with:
+
+```bash
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
+```
 
 ## Configuration
 
@@ -136,6 +143,7 @@ Common environment variables:
 - `HEARTBEAT_INTERVAL_MS`
 - `ANNOUNCE_TTL_MS`
 - `TRUST_MODE` (`open` | `tofu` | `explicit`)
+- `DELIVERABLE_PREFIXES` (recommended for CLI-driven deliverables: `chat,task,todo,conversation`)
 
 ## Documentation
 

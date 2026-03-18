@@ -11,88 +11,108 @@ import (
 )
 
 const (
-	defaultNATSServers       = "nats://220.168.146.21:9414"
-	defaultLocalAPIAddr      = "127.0.0.1:18080"
-	defaultHeartbeatInterval = 15 * time.Second
-	defaultAnnounceTTL       = 30 * time.Second
-	defaultTrustMode         = "tofu"
-	defaultAgentAdapter      = "default"
-	defaultLogLevel          = "info"
-	defaultLogFormat         = "json"
+	defaultNATSServers         = "nats://220.168.146.21:9414"
+	defaultLocalAPIAddr        = "127.0.0.1:18080"
+	defaultHeartbeatInterval   = 15 * time.Second
+	defaultAnnounceTTL         = 30 * time.Second
+	defaultTrustMode           = "tofu"
+	defaultAgentAdapter        = "default"
+	defaultLogLevel            = "info"
+	defaultLogFormat           = "json"
+	defaultDeliverablePrefixes = "chat,task"
+	defaultTransferMaxFileSize = 104857600 // 100MB
+	defaultTransferTTL         = "24h"
 )
 
 type Config struct {
-	NodeID            string   `json:"nodeId"`
-	NATSServers       []string `json:"natsServers"`
-	LocalAPIAddr      string   `json:"localApiAddr"`
-	DataDir           string   `json:"dataDir"`
-	IdentityKeyPath   string   `json:"identityKeyPath"`
-	IdentityPubPath   string   `json:"identityPubPath"`
-	HeartbeatInterval string   `json:"heartbeatInterval"`
-	AnnounceTTL       string   `json:"announceTtl"`
-	TrustMode         string   `json:"trustMode"`
-	AgentAdapter      string   `json:"agentAdapter"`
-	OpenClawAgentID   string   `json:"openclawAgentId,omitempty"`
-	LogLevel          string   `json:"logLevel"`
-	LogFormat         string   `json:"logFormat"`
-	LogAddSource      bool     `json:"logAddSource"`
-	CheckConfig       bool     `json:"checkConfig"`
+	NodeID              string   `json:"nodeId"`
+	NATSServers         []string `json:"natsServers"`
+	LocalAPIAddr        string   `json:"localApiAddr"`
+	DataDir             string   `json:"dataDir"`
+	IdentityKeyPath     string   `json:"identityKeyPath"`
+	IdentityPubPath     string   `json:"identityPubPath"`
+	HeartbeatInterval   string   `json:"heartbeatInterval"`
+	AnnounceTTL         string   `json:"announceTtl"`
+	TrustMode           string   `json:"trustMode"`
+	AgentAdapter        string   `json:"agentAdapter"`
+	WebhookURL          string   `json:"webhookUrl"`
+	LogLevel            string   `json:"logLevel"`
+	LogFormat           string   `json:"logFormat"`
+	DeliverablePrefixes []string `json:"deliverablePrefixes"`
+	TransferDir         string   `json:"transferDir"`
+	TransferMaxFileSize int64    `json:"transferMaxFileSize"`
+	TransferTTL         string   `json:"transferTtl"`
+	LogAddSource        bool     `json:"logAddSource"`
+	CheckConfig         bool     `json:"checkConfig"`
 }
 
 type runtimeConfig struct {
-	NodeID          string
-	NATSServers     []string
-	LocalAPIAddr    string
-	DataDir         string
-	IdentityKeyPath string
-	IdentityPubPath string
-	Heartbeat       time.Duration
-	AnnounceTTL     time.Duration
-	TrustMode       string
-	AgentAdapter    string
-	OpenClawAgentID string
-	LogLevel        string
-	LogFormat       string
-	LogAddSource    bool
-	CheckConfig     bool
+	NodeID              string
+	NATSServers         []string
+	LocalAPIAddr        string
+	DataDir             string
+	IdentityKeyPath     string
+	IdentityPubPath     string
+	Heartbeat           time.Duration
+	AnnounceTTL         time.Duration
+	TrustMode           string
+	AgentAdapter        string
+	WebhookURL          string
+	DeliverablePrefixes []string
+	TransferDir         string
+	TransferMaxFileSize int64
+	TransferTTL         time.Duration
+	LogLevel            string
+	LogFormat           string
+	LogAddSource        bool
+	CheckConfig         bool
 }
 
 type configValues struct {
-	NodeID          string
-	NATSServers     []string
-	LocalAPIAddr    string
-	DataDir         string
-	IdentityKeyPath string
-	IdentityPubPath string
-	Heartbeat       time.Duration
-	AnnounceTTL     time.Duration
-	TrustMode       string
-	AgentAdapter    string
-	OpenClawAgentID string
-	LogLevel        string
-	LogFormat       string
-	LogAddSource    bool
+	NodeID              string
+	NATSServers         []string
+	LocalAPIAddr        string
+	DataDir             string
+	IdentityKeyPath     string
+	IdentityPubPath     string
+	Heartbeat           time.Duration
+	AnnounceTTL         time.Duration
+	TrustMode           string
+	AgentAdapter        string
+	WebhookURL          string
+	DeliverablePrefixes []string
+	TransferDir         string
+	TransferMaxFileSize int64
+	TransferTTL         time.Duration
+	LogLevel            string
+	LogFormat           string
+	LogAddSource        bool
 }
 
 func (c Config) Runtime() runtimeConfig {
 	h, _ := time.ParseDuration(c.HeartbeatInterval)
 	t, _ := time.ParseDuration(c.AnnounceTTL)
+	tt, _ := time.ParseDuration(c.TransferTTL)
 	return runtimeConfig{
-		NodeID:          c.NodeID,
-		NATSServers:     c.NATSServers,
-		LocalAPIAddr:    c.LocalAPIAddr,
-		DataDir:         c.DataDir,
-		IdentityKeyPath: c.IdentityKeyPath,
-		IdentityPubPath: c.IdentityPubPath,
-		Heartbeat:       h,
-		AnnounceTTL:     t,
-		TrustMode:       c.TrustMode,
-		AgentAdapter:    c.AgentAdapter,
-		OpenClawAgentID: c.OpenClawAgentID,
-		LogLevel:        c.LogLevel,
-		LogFormat:       c.LogFormat,
-		LogAddSource:    c.LogAddSource,
-		CheckConfig:     c.CheckConfig,
+		NodeID:              c.NodeID,
+		NATSServers:         c.NATSServers,
+		LocalAPIAddr:        c.LocalAPIAddr,
+		DataDir:             c.DataDir,
+		IdentityKeyPath:     c.IdentityKeyPath,
+		IdentityPubPath:     c.IdentityPubPath,
+		Heartbeat:           h,
+		AnnounceTTL:         t,
+		TrustMode:           c.TrustMode,
+		AgentAdapter:        c.AgentAdapter,
+		WebhookURL:          c.WebhookURL,
+		DeliverablePrefixes: c.DeliverablePrefixes,
+		TransferDir:         c.TransferDir,
+		TransferMaxFileSize: c.TransferMaxFileSize,
+		TransferTTL:         tt,
+		LogLevel:            c.LogLevel,
+		LogFormat:           c.LogFormat,
+		LogAddSource:        c.LogAddSource,
+		CheckConfig:         c.CheckConfig,
 	}
 }
 
@@ -120,22 +140,26 @@ func LoadFromOS(args []string) (Config, error) {
 	fs := flag.NewFlagSet("clawsynapsed", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		nodeID          = fs.String("node-id", merged.NodeID, "node id")
-		natsServers     = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
-		apiAddr         = fs.String("local-api-addr", merged.LocalAPIAddr, "http api address")
-		dataDir         = fs.String("data-dir", merged.DataDir, "state directory")
-		identityKeyPath = fs.String("identity-key-path", merged.IdentityKeyPath, "private key file path")
-		identityPubPath = fs.String("identity-pub-path", merged.IdentityPubPath, "public key file path")
-		heartbeat       = fs.Duration("heartbeat", merged.Heartbeat, "announce heartbeat interval")
-		announceTTL     = fs.Duration("announce-ttl", merged.AnnounceTTL, "announce ttl")
-		trustMode       = fs.String("trust-mode", merged.TrustMode, "trust mode: open|tofu|explicit")
-		agentAdapter    = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw")
-		openclawAgentID = fs.String("openclaw-agent-id", merged.OpenClawAgentID, "openclaw agent id")
-		logLevel        = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
-		logFormat       = fs.String("log-format", merged.LogFormat, "log format: json|text")
-		logAddSource    = fs.Bool("log-add-source", merged.LogAddSource, "include source location in logs")
-		_               = fs.String("config", configPath, "config file path")
-		checkConfig     = fs.Bool("check-config", false, "print config and exit")
+		nodeID              = fs.String("node-id", merged.NodeID, "node id")
+		natsServers         = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
+		apiAddr             = fs.String("local-api-addr", merged.LocalAPIAddr, "http api address")
+		dataDir             = fs.String("data-dir", merged.DataDir, "state directory")
+		identityKeyPath     = fs.String("identity-key-path", merged.IdentityKeyPath, "private key file path")
+		identityPubPath     = fs.String("identity-pub-path", merged.IdentityPubPath, "public key file path")
+		heartbeat           = fs.Duration("heartbeat", merged.Heartbeat, "announce heartbeat interval")
+		announceTTL         = fs.Duration("announce-ttl", merged.AnnounceTTL, "announce ttl")
+		trustMode           = fs.String("trust-mode", merged.TrustMode, "trust mode: open|tofu|explicit")
+		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|webhook")
+		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
+		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
+		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
+		deliverablePrefixes = fs.String("deliverable-prefixes", strings.Join(merged.DeliverablePrefixes, ","), "comma separated message type prefixes that are deliverable to agent handlers")
+		transferDir         = fs.String("transfer-dir", merged.TransferDir, "directory for received transfer files")
+		transferMaxFileSize = fs.Int64("transfer-max-file-size", merged.TransferMaxFileSize, "max file size for transfer in bytes")
+		transferTTL         = fs.Duration("transfer-ttl", merged.TransferTTL, "object store bucket TTL for transfers")
+		logAddSource        = fs.Bool("log-add-source", merged.LogAddSource, "include source location in logs")
+		_                   = fs.String("config", configPath, "config file path")
+		checkConfig         = fs.Bool("check-config", false, "print config and exit")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -159,14 +183,13 @@ func LoadFromOS(args []string) (Config, error) {
 	if adapterName == "" {
 		adapterName = defaultAgentAdapter
 	}
-	if adapterName != "default" && adapterName != "openclaw" {
-		return Config{}, errors.New("agent adapter must be one of: default|openclaw")
+	if adapterName != "default" && adapterName != "openclaw" && adapterName != "webhook" {
+		return Config{}, errors.New("agent adapter must be one of: default|openclaw|webhook")
 	}
-	openclawAgentIDValue := strings.TrimSpace(*openclawAgentID)
-	if adapterName == "openclaw" {
-		if openclawAgentIDValue == "" {
-			return Config{}, errors.New("openclaw agent id is required when agent adapter is openclaw")
-		}
+
+	webhookURL := strings.TrimSpace(*webhookURLFlag)
+	if adapterName == "webhook" && webhookURL == "" {
+		return Config{}, errors.New("webhook url is required when agent adapter is webhook (set --webhook-url or WEBHOOK_URL)")
 	}
 	level := strings.ToLower(strings.TrimSpace(*logLevel))
 	if level != "debug" && level != "info" && level != "warn" && level != "error" {
@@ -189,39 +212,52 @@ func LoadFromOS(args []string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	resolvedTransferDir, err := expandPath(*transferDir)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		NodeID:            strings.TrimSpace(*nodeID),
-		NATSServers:       rawServers,
-		LocalAPIAddr:      strings.TrimSpace(*apiAddr),
-		DataDir:           resolvedDataDir,
-		IdentityKeyPath:   resolvedKey,
-		IdentityPubPath:   resolvedPub,
-		HeartbeatInterval: heartbeat.String(),
-		AnnounceTTL:       announceTTL.String(),
-		TrustMode:         mode,
-		AgentAdapter:      adapterName,
-		OpenClawAgentID:   openclawAgentIDValue,
-		LogLevel:          level,
-		LogFormat:         format,
-		LogAddSource:      *logAddSource,
-		CheckConfig:       *checkConfig,
+		NodeID:              strings.TrimSpace(*nodeID),
+		NATSServers:         rawServers,
+		LocalAPIAddr:        strings.TrimSpace(*apiAddr),
+		DataDir:             resolvedDataDir,
+		IdentityKeyPath:     resolvedKey,
+		IdentityPubPath:     resolvedPub,
+		HeartbeatInterval:   heartbeat.String(),
+		AnnounceTTL:         announceTTL.String(),
+		TrustMode:           mode,
+		AgentAdapter:        adapterName,
+		WebhookURL:          webhookURL,
+		DeliverablePrefixes: splitCSV(*deliverablePrefixes),
+		TransferDir:         resolvedTransferDir,
+		TransferMaxFileSize: *transferMaxFileSize,
+		TransferTTL:         transferTTL.String(),
+		LogLevel:            level,
+		LogFormat:           format,
+		LogAddSource:        *logAddSource,
+		CheckConfig:         *checkConfig,
 	}, nil
 }
 
 func defaultConfigValues(defaultDataDir string) configValues {
+	ttl, _ := time.ParseDuration(defaultTransferTTL)
 	return configValues{
-		NATSServers:     []string{defaultNATSServers},
-		LocalAPIAddr:    defaultLocalAPIAddr,
-		DataDir:         defaultDataDir,
-		IdentityKeyPath: filepath.Join(defaultDataDir, "identity.key"),
-		IdentityPubPath: filepath.Join(defaultDataDir, "identity.pub"),
-		Heartbeat:       defaultHeartbeatInterval,
-		AnnounceTTL:     defaultAnnounceTTL,
-		TrustMode:       defaultTrustMode,
-		AgentAdapter:    defaultAgentAdapter,
-		LogLevel:        defaultLogLevel,
-		LogFormat:       defaultLogFormat,
+		NATSServers:         []string{defaultNATSServers},
+		LocalAPIAddr:        defaultLocalAPIAddr,
+		DataDir:             defaultDataDir,
+		IdentityKeyPath:     filepath.Join(defaultDataDir, "identity.key"),
+		IdentityPubPath:     filepath.Join(defaultDataDir, "identity.pub"),
+		Heartbeat:           defaultHeartbeatInterval,
+		AnnounceTTL:         defaultAnnounceTTL,
+		TrustMode:           defaultTrustMode,
+		AgentAdapter:        defaultAgentAdapter,
+		DeliverablePrefixes: splitCSV(defaultDeliverablePrefixes),
+		TransferDir:         filepath.Join(defaultDataDir, "transfers"),
+		TransferMaxFileSize: defaultTransferMaxFileSize,
+		TransferTTL:         ttl,
+		LogLevel:            defaultLogLevel,
+		LogFormat:           defaultLogFormat,
 	}
 }
 
@@ -256,8 +292,20 @@ func mergeConfigValues(base, override configValues) configValues {
 	if strings.TrimSpace(override.AgentAdapter) != "" {
 		base.AgentAdapter = strings.TrimSpace(override.AgentAdapter)
 	}
-	if strings.TrimSpace(override.OpenClawAgentID) != "" {
-		base.OpenClawAgentID = strings.TrimSpace(override.OpenClawAgentID)
+	if strings.TrimSpace(override.WebhookURL) != "" {
+		base.WebhookURL = strings.TrimSpace(override.WebhookURL)
+	}
+	if len(override.DeliverablePrefixes) > 0 {
+		base.DeliverablePrefixes = append([]string(nil), override.DeliverablePrefixes...)
+	}
+	if strings.TrimSpace(override.TransferDir) != "" {
+		base.TransferDir = strings.TrimSpace(override.TransferDir)
+	}
+	if override.TransferMaxFileSize > 0 {
+		base.TransferMaxFileSize = override.TransferMaxFileSize
+	}
+	if override.TransferTTL > 0 {
+		base.TransferTTL = override.TransferTTL
 	}
 	if strings.TrimSpace(override.LogLevel) != "" {
 		base.LogLevel = strings.TrimSpace(override.LogLevel)

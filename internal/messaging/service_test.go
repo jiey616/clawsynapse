@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"testing"
 	"time"
 
@@ -35,102 +36,14 @@ func TestPublishRejectsUntrustedPeer(t *testing.T) {
 		t.Fatalf("identity init failed: %v", err)
 	}
 
-	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "tofu")
+	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "tofu", nil)
 	if _, err := svc.Publish(PublishRequest{TargetNode: "node-beta", Message: "hello"}); err == nil {
 		t.Fatal("expected publish to fail for untrusted peer")
 	}
 }
 
-func TestBuildReplyCopiesRequestContext(t *testing.T) {
-	peers := discovery.NewRegistry()
-	base := t.TempDir()
-	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
-	if err != nil {
-		t.Fatalf("identity init failed: %v", err)
-	}
-
-	svc := NewService(slog.Default(), peers, nil, "node-beta", id, "open")
-	req := protocol.MessageEnvelope{
-		ID:         "msg-1",
-		From:       "node-alpha",
-		To:         "node-beta",
-		Content:    "hello",
-		SessionKey: "session-1",
-		RequestID:  "req-1",
-		ReplyTo:    "clawsynapse.msg.node-alpha.reply",
-	}
-
-	reply, err := svc.buildReply(req)
-	if err != nil {
-		t.Fatalf("buildReply failed: %v", err)
-	}
-	if reply.Type != "chat.reply" {
-		t.Fatalf("reply type = %q, want chat.reply", reply.Type)
-	}
-	if reply.To != "node-alpha" {
-		t.Fatalf("reply to = %q, want node-alpha", reply.To)
-	}
-	if reply.RequestID != "req-1" {
-		t.Fatalf("reply requestId = %q, want req-1", reply.RequestID)
-	}
-	if reply.CorrelationID != "msg-1" {
-		t.Fatalf("reply correlationId = %q, want msg-1", reply.CorrelationID)
-	}
-	if reply.Content != "ack: hello" {
-		t.Fatalf("reply content = %q, want ack", reply.Content)
-	}
-	if reply.Sig == "" {
-		t.Fatal("expected reply signature")
-	}
-}
-
-func TestBuildReplyUsesRequestHandler(t *testing.T) {
-	peers := discovery.NewRegistry()
-	base := t.TempDir()
-	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
-	if err != nil {
-		t.Fatalf("identity init failed: %v", err)
-	}
-
-	svc := NewService(slog.Default(), peers, nil, "node-beta", id, "open")
-	svc.SetRequestHandler(RequestHandlerFunc(func(req IncomingRequest) (HandlerResult, error) {
-		if req.From != "node-alpha" {
-			t.Fatalf("handler from = %q, want node-alpha", req.From)
-		}
-		if req.Message != "hello" {
-			t.Fatalf("handler message = %q, want hello", req.Message)
-		}
-		if req.Metadata["source"] != "test" {
-			t.Fatalf("handler metadata source = %v, want test", req.Metadata["source"])
-		}
-		return HandlerResult{Reply: "handled", RunID: "run-xyz"}, nil
-	}))
-
-	reply, err := svc.buildReply(protocol.MessageEnvelope{
-		ID:         "msg-1",
-		From:       "node-alpha",
-		To:         "node-beta",
-		Content:    "hello",
-		SessionKey: "session-1",
-		RequestID:  "req-1",
-		ReplyTo:    "clawsynapse.msg.node-alpha.reply",
-		Metadata: map[string]any{
-			"source": "test",
-		},
-	})
-	if err != nil {
-		t.Fatalf("buildReply failed: %v", err)
-	}
-	if reply.Content != "handled" {
-		t.Fatalf("reply content = %q, want handled", reply.Content)
-	}
-	if reply.Metadata["runId"] != "run-xyz" {
-		t.Fatalf("reply runId = %v, want run-xyz", reply.Metadata["runId"])
-	}
-}
-
-func TestAdapterRequestHandlerUsesAgentAdapter(t *testing.T) {
-	handler := NewAdapterRequestHandler(stubAgentAdapter{
+func TestAdapterMessageHandlerUsesAgentAdapter(t *testing.T) {
+	handler := NewAdapterMessageHandler(stubAgentAdapter{
 		deliver: func(_ context.Context, req adapter.DeliverMessageRequest) (*adapter.DeliverMessageResult, error) {
 			if req.From != "node-alpha" {
 				t.Fatalf("adapter from = %q, want node-alpha", req.From)
@@ -145,7 +58,7 @@ func TestAdapterRequestHandlerUsesAgentAdapter(t *testing.T) {
 		},
 	}, time.Second)
 
-	result, err := handler.HandleRequest(IncomingRequest{
+	result, err := handler.HandleMessage(IncomingMessage{
 		From:    "node-alpha",
 		Message: "hello",
 		Metadata: map[string]any{
@@ -153,7 +66,7 @@ func TestAdapterRequestHandlerUsesAgentAdapter(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("HandleRequest failed: %v", err)
+		t.Fatalf("HandleMessage failed: %v", err)
 	}
 	if result.Reply != "handled-by-adapter (runId=run-123)" {
 		t.Fatalf("reply = %q, want handled-by-adapter with runId", result.Reply)
@@ -163,16 +76,16 @@ func TestAdapterRequestHandlerUsesAgentAdapter(t *testing.T) {
 	}
 }
 
-func TestAdapterRequestHandlerReturnsAcceptedWithRunID(t *testing.T) {
-	handler := NewAdapterRequestHandler(stubAgentAdapter{
+func TestAdapterMessageHandlerReturnsAcceptedWithRunID(t *testing.T) {
+	handler := NewAdapterMessageHandler(stubAgentAdapter{
 		deliver: func(_ context.Context, _ adapter.DeliverMessageRequest) (*adapter.DeliverMessageResult, error) {
 			return &adapter.DeliverMessageResult{Success: true, Accepted: true, RunID: "run-456"}, nil
 		},
 	}, time.Second)
 
-	result, err := handler.HandleRequest(IncomingRequest{From: "node-alpha", Message: "hello"})
+	result, err := handler.HandleMessage(IncomingMessage{From: "node-alpha", Message: "hello"})
 	if err != nil {
-		t.Fatalf("HandleRequest failed: %v", err)
+		t.Fatalf("HandleMessage failed: %v", err)
 	}
 	if result.Reply != "accepted (runId=run-456)" {
 		t.Fatalf("reply = %q, want accepted with runId", result.Reply)
@@ -182,7 +95,7 @@ func TestAdapterRequestHandlerReturnsAcceptedWithRunID(t *testing.T) {
 	}
 }
 
-func TestDispatchReplyCompletesPendingRequest(t *testing.T) {
+func TestMaybeDeliverForwardsDeliverableTypes(t *testing.T) {
 	peers := discovery.NewRegistry()
 	base := t.TempDir()
 	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
@@ -190,56 +103,88 @@ func TestDispatchReplyCompletesPendingRequest(t *testing.T) {
 		t.Fatalf("identity init failed: %v", err)
 	}
 
-	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open")
-	resultCh := make(chan RequestResult, 1)
-	svc.pending["req-1"] = &pendingRequest{requestID: "req-1", resultCh: resultCh, createdAt: time.Now()}
+	delivered := make(chan string, 10)
+	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open", nil)
+	svc.SetMessageHandler(MessageHandlerFunc(func(msg IncomingMessage) (HandlerResult, error) {
+		delivered <- msg.Type + "|" + msg.Message
+		return HandlerResult{Reply: "ok"}, nil
+	}))
 
-	svc.dispatchReply(protocol.MessageEnvelope{
-		From:          "node-beta",
-		RequestID:     "req-1",
-		CorrelationID: "msg-1",
-		Content:       "done",
-		Metadata: map[string]any{
-			"runId": "run-789",
-		},
-	})
+	svc.maybeDeliver(protocol.MessageEnvelope{Type: "chat.message", Content: "[reply] Task completed."})
+	svc.maybeDeliver(protocol.MessageEnvelope{Type: "chat.message", Content: "[end] Closing conversation."})
+	svc.maybeDeliver(protocol.MessageEnvelope{Type: "event.forward", Content: "ignored"})
+	svc.maybeDeliver(protocol.MessageEnvelope{Type: "task.assign", Content: "do this"})
+	svc.maybeDeliver(protocol.MessageEnvelope{Type: "chat.message", Content: "[request] Do something."})
 
-	select {
-	case result := <-resultCh:
-		if result.RequestID != "req-1" {
-			t.Fatalf("result requestId = %q, want req-1", result.RequestID)
-		}
-		if result.MessageID != "msg-1" {
-			t.Fatalf("result messageId = %q, want msg-1", result.MessageID)
-		}
-		if result.From != "node-beta" {
-			t.Fatalf("result from = %q, want node-beta", result.From)
-		}
-		if result.Reply != "done" {
-			t.Fatalf("result reply = %q, want done", result.Reply)
-		}
-		if result.RunID != "run-789" {
-			t.Fatalf("result runId = %q, want run-789", result.RunID)
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for reply result")
+	want := map[string]bool{
+		"chat.message|[reply] Task completed.":     false,
+		"chat.message|[end] Closing conversation.": false,
+		"chat.message|[request] Do something.":     false,
+		"task.assign|do this":                      false,
 	}
 
-	if _, ok := svc.pending["req-1"]; ok {
-		t.Fatal("expected pending request to be cleared")
+	deadline := time.After(1 * time.Second)
+	for i := 0; i < len(want); i++ {
+		select {
+		case msg := <-delivered:
+			if _, ok := want[msg]; !ok {
+				t.Fatalf("unexpected delivered message: %q", msg)
+			}
+			want[msg] = true
+		case <-deadline:
+			t.Fatal("expected message delivery")
+		}
+	}
+
+	for msg, got := range want {
+		if !got {
+			t.Fatalf("message %q was not delivered", msg)
+		}
 	}
 }
 
-func TestRequestRejectsMissingMessage(t *testing.T) {
-	peers := discovery.NewRegistry()
-	base := t.TempDir()
-	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
-	if err != nil {
-		t.Fatalf("identity init failed: %v", err)
+func TestIsDeliverableType(t *testing.T) {
+	defaultPrefixes := []string{"chat", "task"}
+	cases := []struct {
+		typ  string
+		want bool
+	}{
+		{"chat.message", true},
+		{"chat.stream", true},
+		{"task.assign", true},
+		{"task.result", true},
+		{"event.forward", false},
+		{"discovery.announce", false},
+		{"", false},
 	}
+	for _, tc := range cases {
+		if got := isDeliverableType(tc.typ, defaultPrefixes); got != tc.want {
+			t.Fatalf("isDeliverableType(%q) = %v, want %v", tc.typ, got, tc.want)
+		}
+	}
+}
 
-	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open")
-	if _, err := svc.Request(RequestRequest{TargetNode: "node-beta"}); err == nil {
-		t.Fatal("expected request to fail for missing message")
+func TestIsDeliverableTypeCustomPrefixes(t *testing.T) {
+	custom := []string{"control", "task"}
+	cases := []struct {
+		typ  string
+		want bool
+	}{
+		{"control.shutdown", true},
+		{"task.assign", true},
+		{"chat.message", false},
+	}
+	for _, tc := range cases {
+		if got := isDeliverableType(tc.typ, custom); got != tc.want {
+			t.Fatalf("isDeliverableType(%q, custom) = %v, want %v", tc.typ, got, tc.want)
+		}
+	}
+}
+
+func TestNewSessionKeyUsesUUIDv4Format(t *testing.T) {
+	sessionKey := newSessionKey()
+	pattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	if !pattern.MatchString(sessionKey) {
+		t.Fatalf("sessionKey = %q, want UUID v4", sessionKey)
 	}
 }

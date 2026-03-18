@@ -92,6 +92,20 @@ type TrustRevoke struct {
 	Signature   string `json:"signature,omitempty"`
 }
 
+type TransferAvailable struct {
+	MessageID   string `json:"messageId"`
+	MessageType string `json:"messageType"`
+	TransferID  string `json:"transferId"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	MimeType    string `json:"mimeType,omitempty"`
+	Bucket      string `json:"bucket"`
+	Ts          int64  `json:"ts"`
+	Signature   string `json:"signature,omitempty"`
+}
+
 type MessageEnvelope struct {
 	ID              string         `json:"id"`
 	Type            string         `json:"type"`
@@ -99,9 +113,6 @@ type MessageEnvelope struct {
 	To              string         `json:"to,omitempty"`
 	Content         string         `json:"content,omitempty"`
 	SessionKey      string         `json:"sessionKey,omitempty"`
-	ReplyTo         string         `json:"replyTo,omitempty"`
-	RequestID       string         `json:"requestId,omitempty"`
-	CorrelationID   string         `json:"correlationId,omitempty"`
 	Ts              int64          `json:"ts"`
 	Sig             string         `json:"sig,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`

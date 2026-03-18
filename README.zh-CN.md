@@ -30,7 +30,7 @@ Agent <-> Local ClawSynapse Daemon <-> NATS <-> Remote ClawSynapse Daemon <-> Re
 从 [GitHub Releases](https://github.com/yuanjun5681/clawsynapse/releases) 下载对应平台的 `clawsynapsed` 二进制，然后启动节点：
 
 ```bash
-clawsynapsed --node-id node-alpha
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
 ```
 
 使用 OpenClaw 适配器启动：
@@ -40,7 +40,7 @@ clawsynapsed \
   --node-id node-alpha \
   --trust-mode open \
   --agent-adapter openclaw \
-  --openclaw-agent-id main
+  --deliverable-prefixes chat,task,todo,conversation
 ```
 
 也可通过环境变量配置：
@@ -49,7 +49,7 @@ clawsynapsed \
 export NODE_ID=node-alpha
 export TRUST_MODE=open
 export AGENT_ADAPTER=openclaw
-export OPENCLAW_AGENT_ID=main
+export DELIVERABLE_PREFIXES=chat,task,todo,conversation
 clawsynapsed
 ```
 
@@ -79,7 +79,11 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 将以下提示词发送给你的 AI Agent（如 OpenClaw / Claude Code），即可自动安装 ClawSynapse skill：
 
 ```text
-安装 ClawSynapse skill：从 https://github.com/yuanjun5681/clawsynapse/blob/main/skills/clawsynapse/SKILL.md 获取 SKILL.md 并安装。安装完成后，按照 skill 中的说明与 ClawSynapse 网络上的其他 Agent 进行通信。
+安装 ClawSynapse agent skill：
+
+1. 从 https://github.com/yuanjun5681/clawsynapse/blob/main/skills/clawsynapse/SKILL.md 获取 SKILL.md 并安装为 skill。
+
+2. 将以下内容保存到你的记忆中：这台机器是 ClawSynapse Agent 通信网络上的一个节点。当用户想要给其他人或 Agent 发消息、布置任务、提问时，使用 clawsynapse skill。运行 `clawsynapse peers` 可查看可用节点。
 ```
 
 安装完成后，Agent 即可通过 ClawSynapse 网络收发消息、发现节点、管理信任关系。
@@ -96,9 +100,6 @@ clawsynapse peers
 # 向远程节点发送消息
 clawsynapse publish --target node-beta --message "hello from alpha"
 
-# 发送请求并等待回复
-clawsynapse request --target node-beta --message "ping" --timeout-ms 5000
-
 # 对节点发起认证
 clawsynapse auth challenge --target node-beta
 
@@ -114,6 +115,12 @@ clawsynapse messages
 ```
 
 全局参数：`--api-addr host:port`、`--timeout duration`、`--json`（输出原始 JSON，便于脚本集成）。
+
+如果 CLI 工作流需要投递 `chat.*`、`task.*`、`todo.*`、`conversation.*` 这几类消息，请在启动 daemon 时补充参数：
+
+```bash
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
+```
 
 ## 配置
 
@@ -136,6 +143,7 @@ clawsynapse messages
 - `HEARTBEAT_INTERVAL_MS`
 - `ANNOUNCE_TTL_MS`
 - `TRUST_MODE`（`open` | `tofu` | `explicit`）
+- `DELIVERABLE_PREFIXES`（CLI 投递场景建议配置为 `chat,task,todo,conversation`）
 
 ## 文档
 

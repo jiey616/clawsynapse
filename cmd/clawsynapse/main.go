@@ -15,6 +15,12 @@ import (
 
 type stringList []string
 
+type localAPIClient interface {
+	Get(ctx context.Context, endpoint string) (types.APIResult, error)
+	Post(ctx context.Context, endpoint string, payload any) (types.APIResult, error)
+	Delete(ctx context.Context, endpoint string) (types.APIResult, error)
+}
+
 func (s *stringList) String() string {
 	return strings.Join(*s, ",")
 }
@@ -39,7 +45,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 
 	apiAddr := fs.String("api-addr", defaultAPIAddr, "local API address")
-	timeout := fs.Duration("timeout", 5*time.Second, "request timeout")
+	timeout := fs.Duration("timeout", 5*time.Second, "local API timeout")
 	asJSON := fs.Bool("json", false, "print raw JSON response")
 
 	if err := fs.Parse(args); err != nil {
@@ -69,7 +75,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	return 0
 }
 
-func dispatch(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {
+func dispatch(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	switch args[0] {
 	case "health":
 		return client.Get(ctx, "/v1/health")
@@ -79,20 +85,23 @@ func dispatch(ctx context.Context, client *api.Client, args []string) (types.API
 		return client.Get(ctx, "/v1/messages")
 	case "publish":
 		return runPublish(ctx, client, args[1:])
-	case "request":
-		return runRequest(ctx, client, args[1:])
 	case "auth":
 		return runAuth(ctx, client, args[1:])
 	case "trust":
 		return runTrust(ctx, client, args[1:])
+	case "transfer":
+		return runTransfer(ctx, client, args[1:])
+	case "transfers":
+		return client.Get(ctx, "/v1/transfers")
 	default:
 		return types.APIResult{}, fmt.Errorf("unknown command: %s", args[0])
 	}
 }
 
-func runPublish(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {
+func runPublish(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	target := fs.String("target", "", "target node id")
+	msgType := fs.String("type", "", "message type (e.g. chat.message, task.assign)")
 	message := fs.String("message", "", "message content")
 	sessionKey := fs.String("session-key", "", "session key")
 	var metadataFlags stringList
@@ -110,48 +119,19 @@ func runPublish(ctx context.Context, client *api.Client, args []string) (types.A
 	if err != nil {
 		return types.APIResult{}, err
 	}
-	return client.Post(ctx, "/v1/publish", map[string]any{
+	body := map[string]any{
 		"targetNode": *target,
 		"message":    *message,
 		"sessionKey": *sessionKey,
 		"metadata":   metadata,
-	})
+	}
+	if *msgType != "" {
+		body["type"] = *msgType
+	}
+	return client.Post(ctx, "/v1/publish", body)
 }
 
-func runRequest(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {
-	fs := flag.NewFlagSet("request", flag.ContinueOnError)
-	target := fs.String("target", "", "target node id")
-	message := fs.String("message", "", "request content")
-	sessionKey := fs.String("session-key", "", "session key")
-	timeoutMs := fs.Int64("timeout-ms", 30000, "reply timeout in milliseconds")
-	var metadataFlags stringList
-	fs.Var(&metadataFlags, "metadata", "metadata key=value; repeatable")
-	if err := fs.Parse(args); err != nil {
-		return types.APIResult{}, err
-	}
-	if strings.TrimSpace(*target) == "" {
-		return types.APIResult{}, fmt.Errorf("missing --target")
-	}
-	if strings.TrimSpace(*message) == "" {
-		return types.APIResult{}, fmt.Errorf("missing --message")
-	}
-	if *timeoutMs <= 0 {
-		return types.APIResult{}, fmt.Errorf("--timeout-ms must be greater than 0")
-	}
-	metadata, err := parseMetadata(metadataFlags)
-	if err != nil {
-		return types.APIResult{}, err
-	}
-	return client.Post(ctx, "/v1/request", map[string]any{
-		"targetNode": *target,
-		"message":    *message,
-		"sessionKey": *sessionKey,
-		"metadata":   metadata,
-		"timeoutMs":  *timeoutMs,
-	})
-}
-
-func runAuth(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {
+func runAuth(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	if len(args) == 0 {
 		return types.APIResult{}, fmt.Errorf("missing auth subcommand")
 	}
@@ -173,7 +153,7 @@ func runAuth(ctx context.Context, client *api.Client, args []string) (types.APIR
 	})
 }
 
-func runTrust(ctx context.Context, client *api.Client, args []string) (types.APIResult, error) {
+func runTrust(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	if len(args) == 0 {
 		return types.APIResult{}, fmt.Errorf("missing trust subcommand")
 	}
@@ -235,6 +215,58 @@ func runTrust(ctx context.Context, client *api.Client, args []string) (types.API
 	}
 }
 
+func runTransfer(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
+	if len(args) == 0 {
+		return types.APIResult{}, fmt.Errorf("missing transfer subcommand")
+	}
+
+	switch args[0] {
+	case "send":
+		fs := flag.NewFlagSet("transfer send", flag.ContinueOnError)
+		target := fs.String("target", "", "target node id")
+		filePath := fs.String("file", "", "local file path")
+		mimeType := fs.String("mime-type", "", "mime type")
+		if err := fs.Parse(args[1:]); err != nil {
+			return types.APIResult{}, err
+		}
+		if strings.TrimSpace(*target) == "" {
+			return types.APIResult{}, fmt.Errorf("missing --target")
+		}
+		if strings.TrimSpace(*filePath) == "" {
+			return types.APIResult{}, fmt.Errorf("missing --file")
+		}
+		return client.Post(ctx, "/v1/transfer/send", map[string]any{
+			"targetNode": *target,
+			"filePath":   *filePath,
+			"mimeType":   *mimeType,
+		})
+	case "get":
+		fs := flag.NewFlagSet("transfer get", flag.ContinueOnError)
+		transferID := fs.String("id", "", "transfer id")
+		if err := fs.Parse(args[1:]); err != nil {
+			return types.APIResult{}, err
+		}
+		if strings.TrimSpace(*transferID) == "" {
+			return types.APIResult{}, fmt.Errorf("missing --id")
+		}
+		return client.Get(ctx, "/v1/transfer/"+strings.TrimSpace(*transferID))
+	case "delete":
+		fs := flag.NewFlagSet("transfer delete", flag.ContinueOnError)
+		transferID := fs.String("id", "", "transfer id")
+		if err := fs.Parse(args[1:]); err != nil {
+			return types.APIResult{}, err
+		}
+		if strings.TrimSpace(*transferID) == "" {
+			return types.APIResult{}, fmt.Errorf("missing --id")
+		}
+		return client.Delete(ctx, "/v1/transfer/"+strings.TrimSpace(*transferID))
+	case "list":
+		return client.Get(ctx, "/v1/transfers")
+	default:
+		return types.APIResult{}, fmt.Errorf("unknown transfer subcommand: %s", args[0])
+	}
+}
+
 func parseMetadata(values []string) (map[string]any, error) {
 	if len(values) == 0 {
 		return nil, nil
@@ -273,9 +305,6 @@ func printResult(stdout, stderr *os.File, result types.APIResult, asJSON bool) {
 		fmt.Fprintln(stream, result.Message)
 	}
 	switch result.Code {
-	case "msg.replied":
-		printRequestResult(stream, result.Data)
-		return
 	case "msg.published":
 		printPublishResult(stream, result.Data)
 		return
@@ -291,6 +320,18 @@ func printResult(stdout, stderr *os.File, result types.APIResult, asJSON bool) {
 	case "auth.challenge_accepted":
 		printAuthChallengeResult(stream, result.Data)
 		return
+	case "transfer.sent":
+		printTransferSentResult(stream, result.Data)
+		return
+	case "transfer.detail":
+		printTransferDetailResult(stream, result.Data)
+		return
+	case "transfer.list":
+		printTransferListResult(stream, result.Data)
+		return
+	case "transfer.deleted":
+		printTransferDeletedResult(stream, result.Data)
+		return
 	}
 	if len(result.Data) > 0 {
 		raw, err := json.MarshalIndent(result.Data, "", "  ")
@@ -300,34 +341,18 @@ func printResult(stdout, stderr *os.File, result types.APIResult, asJSON bool) {
 	}
 }
 
-func printRequestResult(stream *os.File, data map[string]any) {
-	reply, _ := data["reply"].(string)
-	runID, _ := data["runId"].(string)
-	from, _ := data["from"].(string)
-	requestID, _ := data["requestId"].(string)
-
-	if reply != "" {
-		fmt.Fprintf(stream, "reply: %s\n", reply)
-	}
-	if runID != "" {
-		fmt.Fprintf(stream, "runId: %s\n", runID)
-	}
-	if from != "" {
-		fmt.Fprintf(stream, "from: %s\n", from)
-	}
-	if requestID != "" {
-		fmt.Fprintf(stream, "requestId: %s\n", requestID)
-	}
-}
-
 func printPublishResult(stream *os.File, data map[string]any) {
 	targetNode, _ := data["targetNode"].(string)
 	messageID, _ := data["messageId"].(string)
+	sessionKey, _ := data["sessionKey"].(string)
 	if targetNode != "" {
 		fmt.Fprintf(stream, "targetNode: %s\n", targetNode)
 	}
 	if messageID != "" {
 		fmt.Fprintf(stream, "messageId: %s\n", messageID)
+	}
+	if sessionKey != "" {
+		fmt.Fprintf(stream, "sessionKey: %s\n", sessionKey)
 	}
 }
 
@@ -371,7 +396,75 @@ func printAuthChallengeResult(stream *os.File, data map[string]any) {
 	}
 }
 
+func printTransferSentResult(stream *os.File, data map[string]any) {
+	transferID, _ := data["transferId"].(string)
+	bucket, _ := data["bucket"].(string)
+	checksum, _ := data["checksum"].(string)
+	if transferID != "" {
+		fmt.Fprintf(stream, "transferId: %s\n", transferID)
+	}
+	if bucket != "" {
+		fmt.Fprintf(stream, "bucket: %s\n", bucket)
+	}
+	if size, ok := asInt64(data["size"]); ok {
+		fmt.Fprintf(stream, "size: %d\n", size)
+	}
+	if checksum != "" {
+		fmt.Fprintf(stream, "checksum: %s\n", checksum)
+	}
+}
+
+func printTransferDetailResult(stream *os.File, data map[string]any) {
+	transfer, _ := data["transfer"].(map[string]any)
+	if len(transfer) == 0 {
+		return
+	}
+	raw, err := json.MarshalIndent(transfer, "", "  ")
+	if err == nil {
+		fmt.Fprintln(stream, string(raw))
+	}
+}
+
+func printTransferListResult(stream *os.File, data map[string]any) {
+	items, _ := data["items"].([]any)
+	if len(items) == 0 {
+		fmt.Fprintln(stream, "items: 0")
+		return
+	}
+	fmt.Fprintf(stream, "items: %d\n", len(items))
+	raw, err := json.MarshalIndent(items, "", "  ")
+	if err == nil {
+		fmt.Fprintln(stream, string(raw))
+	}
+}
+
+func printTransferDeletedResult(stream *os.File, data map[string]any) {
+	transferID, _ := data["transferId"].(string)
+	if transferID != "" {
+		fmt.Fprintf(stream, "transferId: %s\n", transferID)
+	}
+}
+
+func asInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		return int64(n), true
+	case json.Number:
+		value, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return value, true
+	default:
+		return 0, false
+	}
+}
+
 func printUsage(stderr *os.File) {
 	fmt.Fprintln(stderr, "usage: clawsynapse [--api-addr host:port] [--timeout 5s] [--json] <command>")
-	fmt.Fprintln(stderr, "commands: health, peers, messages, publish, request, auth challenge, trust request|pending|approve|reject|revoke")
+	fmt.Fprintln(stderr, "commands: health, peers, messages, publish, auth challenge, trust request|pending|approve|reject|revoke, transfer send|get|delete|list, transfers")
 }

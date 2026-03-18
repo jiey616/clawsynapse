@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 type Client struct {
 	mu   sync.RWMutex
 	nc   *nats.Conn
+	js   nats.JetStreamContext
 	url  string
 	name string
 
@@ -88,6 +90,15 @@ func Connect(ctx context.Context, servers []string, name string) (*Client, error
 	c.connectedAt = time.Now().UnixMilli()
 	c.lastConnectedURL = nc.ConnectedUrl()
 	c.mu.Unlock()
+
+	js, err := nc.JetStream()
+	if err != nil {
+		slog.Warn("jetstream not available, transfer disabled", slog.String("error", err.Error()))
+	} else {
+		c.mu.Lock()
+		c.js = js
+		c.mu.Unlock()
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -164,6 +175,24 @@ func (c *Client) FlushTimeout(timeout time.Duration) error {
 		return fmt.Errorf("nats client is closed")
 	}
 	return c.nc.FlushTimeout(timeout)
+}
+
+func (c *Client) JetStream() nats.JetStreamContext {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.js
+}
+
+func (c *Client) HasJetStream() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.js != nil
+}
+
+func (c *Client) Conn() *nats.Conn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.nc
 }
 
 func (c *Client) Close() {

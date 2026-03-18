@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"clawsynapse/internal/messaging"
-	"clawsynapse/internal/protocol"
+	"clawsynapse/internal/transfer"
 	"clawsynapse/pkg/types"
 )
 
@@ -32,17 +32,10 @@ type trustRevokeReq struct {
 
 type publishReq struct {
 	TargetNode string         `json:"targetNode"`
+	Type       string         `json:"type,omitempty"`
 	Message    string         `json:"message"`
 	SessionKey string         `json:"sessionKey,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
-}
-
-type requestReq struct {
-	TargetNode string         `json:"targetNode"`
-	Message    string         `json:"message"`
-	SessionKey string         `json:"sessionKey,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	TimeoutMs  int64          `json:"timeoutMs,omitempty"`
 }
 
 func (s *Server) handlePeers(w http.ResponseWriter, _ *http.Request) {
@@ -244,8 +237,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgID, err := s.messaging.Publish(messaging.PublishRequest{
+	result, err := s.messaging.Publish(messaging.PublishRequest{
 		TargetNode: req.TargetNode,
+		Type:       req.Type,
 		Message:    req.Message,
 		SessionKey: req.SessionKey,
 		Metadata:   req.Metadata,
@@ -269,7 +263,8 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		Message: "message published",
 		Data: map[string]any{
 			"targetNode": req.TargetNode,
-			"messageId":  msgID,
+			"messageId":  result.MessageID,
+			"sessionKey": result.SessionKey,
 		},
 		TS: time.Now().UnixMilli(),
 	})
@@ -287,32 +282,41 @@ func (s *Server) handleMessages(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	var req requestReq
+type transferSendReq struct {
+	TargetNode string `json:"targetNode"`
+	FilePath   string `json:"filePath"`
+	MimeType   string `json:"mimeType,omitempty"`
+}
+
+func (s *Server) handleTransferSend(w http.ResponseWriter, r *http.Request) {
+	if s.transfer == nil || !s.transfer.Enabled() {
+		respondJSON(w, http.StatusServiceUnavailable, types.APIResult{
+			OK:      false,
+			Code:    "transfer.disabled",
+			Message: "transfer service not available (jetstream required)",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	var req transferSendReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, http.StatusBadRequest, types.APIResult{OK: false, Code: "invalid_argument", Message: "invalid json payload", TS: time.Now().UnixMilli()})
 		return
 	}
 
-	result, err := s.messaging.Request(messaging.RequestRequest{
+	result, err := s.transfer.SendFile(transfer.SendFileRequest{
 		TargetNode: req.TargetNode,
-		Message:    req.Message,
-		SessionKey: req.SessionKey,
-		Metadata:   req.Metadata,
-		Timeout:    time.Duration(req.TimeoutMs) * time.Millisecond,
+		FilePath:   req.FilePath,
+		MimeType:   req.MimeType,
 	})
 	if err != nil {
-		code := "msg.request_failed"
-		if protocolErr, ok := err.(*protocol.Error); ok {
-			code = protocolErr.Code
-		}
 		respondJSON(w, http.StatusBadRequest, types.APIResult{
 			OK:      false,
-			Code:    code,
+			Code:    "transfer.send_failed",
 			Message: err.Error(),
 			Data: map[string]any{
 				"targetNode": req.TargetNode,
-				"timeoutMs":  req.TimeoutMs,
 			},
 			TS: time.Now().UnixMilli(),
 		})
@@ -321,15 +325,102 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, types.APIResult{
 		OK:      true,
-		Code:    "msg.replied",
-		Message: "reply received",
+		Code:    "transfer.sent",
+		Message: "file transfer initiated",
 		Data: map[string]any{
-			"targetNode": req.TargetNode,
-			"requestId":  result.RequestID,
-			"messageId":  result.MessageID,
-			"reply":      result.Reply,
-			"from":       result.From,
-			"runId":      result.RunID,
+			"transferId": result.TransferID,
+			"bucket":     result.Bucket,
+			"size":       result.Size,
+			"checksum":   result.Checksum,
+		},
+		TS: time.Now().UnixMilli(),
+	})
+}
+
+func (s *Server) handleTransfers(w http.ResponseWriter, _ *http.Request) {
+	if s.transfer == nil {
+		respondJSON(w, http.StatusServiceUnavailable, types.APIResult{
+			OK:      false,
+			Code:    "transfer.disabled",
+			Message: "transfer service not available",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "transfer.list",
+		Message: "transfers fetched",
+		Data: map[string]any{
+			"items": s.transfer.ListTransfers(),
+		},
+		TS: time.Now().UnixMilli(),
+	})
+}
+
+func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request) {
+	if s.transfer == nil {
+		respondJSON(w, http.StatusServiceUnavailable, types.APIResult{
+			OK:      false,
+			Code:    "transfer.disabled",
+			Message: "transfer service not available",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	transferID := r.PathValue("transferId")
+	info, ok := s.transfer.GetTransfer(transferID)
+	if !ok {
+		respondJSON(w, http.StatusNotFound, types.APIResult{
+			OK:      false,
+			Code:    "transfer.not_found",
+			Message: "transfer not found",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "transfer.detail",
+		Message: "transfer fetched",
+		Data: map[string]any{
+			"transfer": info,
+		},
+		TS: time.Now().UnixMilli(),
+	})
+}
+
+func (s *Server) handleTransferDelete(w http.ResponseWriter, r *http.Request) {
+	if s.transfer == nil || !s.transfer.Enabled() {
+		respondJSON(w, http.StatusServiceUnavailable, types.APIResult{
+			OK:      false,
+			Code:    "transfer.disabled",
+			Message: "transfer service not available",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	transferID := r.PathValue("transferId")
+	if err := s.transfer.DeleteTransfer(transferID); err != nil {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{
+			OK:      false,
+			Code:    "transfer.delete_failed",
+			Message: err.Error(),
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "transfer.deleted",
+		Message: "transfer deleted",
+		Data: map[string]any{
+			"transferId": transferID,
 		},
 		TS: time.Now().UnixMilli(),
 	})

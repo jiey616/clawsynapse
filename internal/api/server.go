@@ -10,6 +10,7 @@ import (
 	"clawsynapse/internal/discovery"
 	"clawsynapse/internal/messaging"
 	"clawsynapse/internal/natsbus"
+	"clawsynapse/internal/transfer"
 	"clawsynapse/internal/trust"
 )
 
@@ -19,11 +20,12 @@ type Server struct {
 	auth       *auth.Service
 	trust      *trust.Service
 	messaging  *messaging.Service
+	transfer   *transfer.Service
 	nats       *natsbus.Client
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, natsClient *natsbus.Client) *Server {
-	s := &Server{peers: peers, auth: authSvc, trust: trustSvc, messaging: messagingSvc, nats: natsClient}
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client) *Server {
+	s := &Server{peers: peers, auth: authSvc, trust: trustSvc, messaging: messagingSvc, transfer: transferSvc, nats: natsClient}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/peers", s.handlePeers)
@@ -34,8 +36,11 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 	mux.HandleFunc("POST /v1/trust/revoke", s.handleTrustRevoke)
 	mux.HandleFunc("GET /v1/trust/pending", s.handleTrustPending)
 	mux.HandleFunc("POST /v1/publish", s.handlePublish)
-	mux.HandleFunc("POST /v1/request", s.handleRequest)
 	mux.HandleFunc("GET /v1/messages", s.handleMessages)
+	mux.HandleFunc("POST /v1/transfer/send", s.handleTransferSend)
+	mux.HandleFunc("GET /v1/transfers", s.handleTransfers)
+	mux.HandleFunc("GET /v1/transfer/{transferId}", s.handleTransfer)
+	mux.HandleFunc("DELETE /v1/transfer/{transferId}", s.handleTransferDelete)
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
 
 	s.httpServer = &http.Server{

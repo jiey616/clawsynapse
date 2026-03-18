@@ -1,0 +1,108 @@
+package main
+
+import (
+	"context"
+	"testing"
+
+	"clawsynapse/pkg/types"
+)
+
+func TestRunTransferSendPostsExpectedPayload(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.sent"}}
+	_, err := runTransfer(context.Background(), client, []string{
+		"send",
+		"--target", "node-beta",
+		"--file", "/tmp/demo.txt",
+		"--mime-type", "text/plain",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.method != "POST" {
+		t.Fatalf("expected POST, got %s", client.method)
+	}
+	if client.endpoint != "/v1/transfer/send" {
+		t.Fatalf("unexpected endpoint %s", client.endpoint)
+	}
+	body, _ := client.payload.(map[string]any)
+	if body["targetNode"] != "node-beta" {
+		t.Fatalf("unexpected targetNode %#v", body["targetNode"])
+	}
+	if body["filePath"] != "/tmp/demo.txt" {
+		t.Fatalf("unexpected filePath %#v", body["filePath"])
+	}
+	if body["mimeType"] != "text/plain" {
+		t.Fatalf("unexpected mimeType %#v", body["mimeType"])
+	}
+}
+
+func TestRunTransferGetFetchesTransferByID(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.detail"}}
+	_, err := runTransfer(context.Background(), client, []string{"get", "--id", "tr-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.method != "GET" {
+		t.Fatalf("expected GET, got %s", client.method)
+	}
+	if client.endpoint != "/v1/transfer/tr-123" {
+		t.Fatalf("unexpected endpoint %s", client.endpoint)
+	}
+}
+
+func TestRunTransferDeleteCallsDeleteEndpoint(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.deleted"}}
+	_, err := runTransfer(context.Background(), client, []string{"delete", "--id", "tr-456"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.method != "DELETE" {
+		t.Fatalf("expected DELETE, got %s", client.method)
+	}
+	if client.endpoint != "/v1/transfer/tr-456" {
+		t.Fatalf("unexpected endpoint %s", client.endpoint)
+	}
+}
+
+func TestRunTransferListUsesTransfersEndpoint(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.list"}}
+	_, err := runTransfer(context.Background(), client, []string{"list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.method != "GET" {
+		t.Fatalf("expected GET, got %s", client.method)
+	}
+	if client.endpoint != "/v1/transfers" {
+		t.Fatalf("unexpected endpoint %s", client.endpoint)
+	}
+}
+
+type stubAPIClient struct {
+	method   string
+	endpoint string
+	payload  any
+	result   types.APIResult
+	err      error
+}
+
+func (s *stubAPIClient) Get(_ context.Context, endpoint string) (types.APIResult, error) {
+	s.method = "GET"
+	s.endpoint = endpoint
+	s.payload = nil
+	return s.result, s.err
+}
+
+func (s *stubAPIClient) Post(_ context.Context, endpoint string, payload any) (types.APIResult, error) {
+	s.method = "POST"
+	s.endpoint = endpoint
+	s.payload = payload
+	return s.result, s.err
+}
+
+func (s *stubAPIClient) Delete(_ context.Context, endpoint string) (types.APIResult, error) {
+	s.method = "DELETE"
+	s.endpoint = endpoint
+	s.payload = nil
+	return s.result, s.err
+}

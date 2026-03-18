@@ -8,6 +8,7 @@ type AgentAdapter interface {
 }
 
 type DeliverMessageRequest struct {
+	Type       string
 	SessionKey string
 	Message    string
 	From       string

@@ -29,10 +29,6 @@ func RequestID(v string) slog.Attr {
 	return slog.String("requestId", v)
 }
 
-func CorrelationID(v string) slog.Attr {
-	return slog.String("correlationId", v)
-}
-
 func From(v string) slog.Attr {
 	return slog.String("from", v)
 }
@@ -54,6 +50,10 @@ func Error(err error) slog.Attr {
 		return slog.String("error", "")
 	}
 	return slog.String("error", err.Error())
+}
+
+func SessionKey(v string) slog.Attr {
+	return slog.String("sessionKey", v)
 }
 
 func ContentPreview(v string, maxRunes int) slog.Attr {

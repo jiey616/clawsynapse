@@ -75,6 +75,9 @@ announceTtl: 30s
 dataDir: ~/.clawsynapse
 identityKeyPath: ~/.clawsynapse/identity.key
 identityPubPath: ~/.clawsynapse/identity.pub
+deliverablePrefixes:
+  - chat
+  - task
 ```
 
 项目根目录下的 `.env` 适合本地开发覆盖，例如：
@@ -92,6 +95,7 @@ TRUST_MODE=tofu
 DATA_DIR=~/.clawsynapse
 IDENTITY_KEY_PATH=~/.clawsynapse/identity.key
 IDENTITY_PUB_PATH=~/.clawsynapse/identity.pub
+DELIVERABLE_PREFIXES=chat,task
 LOCAL_API_ADDR=127.0.0.1:18080
 ```
 
@@ -214,7 +218,6 @@ clawsynapsed \
 
 - challenge-response 完整握手
 - 消息签名与重放保护
-- `request-reply`
 - 去重与失败重试
 
 ### v3

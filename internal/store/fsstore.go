@@ -55,6 +55,9 @@ func (s *FSStore) EnsureLayout() error {
 	if err := os.MkdirAll(filepath.Join(s.BaseDir, "peers"), 0o700); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Join(s.BaseDir, "transfers"), 0o700); err != nil {
+		return err
+	}
 
 	if err := s.ensureTrustState(); err != nil {
 		return err
