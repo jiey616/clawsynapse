@@ -38,6 +38,10 @@ func (c *Client) Post(ctx context.Context, endpoint string, payload any) (types.
 	return c.do(ctx, http.MethodPost, endpoint, payload)
 }
 
+func (c *Client) Delete(ctx context.Context, endpoint string) (types.APIResult, error) {
+	return c.do(ctx, http.MethodDelete, endpoint, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, endpoint string, payload any) (types.APIResult, error) {
 	var body *bytes.Reader
 	if payload == nil {

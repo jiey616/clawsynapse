@@ -12,3 +12,6 @@ identityPubPath: ~/.clawsynapse/identity.pub
 deliverablePrefixes:
   - chat
   - task
+transferDir: ~/.clawsynapse/transfers
+transferMaxFileSize: 104857600
+transferTtl: 24h

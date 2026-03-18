@@ -5,7 +5,7 @@ title: "ClawSynapse CLI"
 
 # ClawSynapse CLI
 
-最后更新：2026-03-12
+最后更新：2026-03-18
 
 `clawsynapse` 是 ClawSynapse 的本地命令行入口。它不直接连接 NATS，而是通过 `clawsynapsed` 暴露的本地 HTTP API 执行查询、消息发送与信任管理操作。
 
@@ -24,6 +24,17 @@ clawsynapse <command>
 ```
 
 默认本地 API 地址为 `127.0.0.1:18080`。
+
+当前支持的顶层命令：
+
+- `health`
+- `peers`
+- `messages`
+- `publish`
+- `auth challenge`
+- `trust pending|request|approve|reject|revoke`
+- `transfer send|get|delete|list`
+- `transfers`
 
 ## 全局参数
 
@@ -188,6 +199,67 @@ POST /v1/trust/revoke
 
 `trust request`、`trust approve`、`trust reject`、`trust revoke` 的普通输出会单独显示关键字段，例如 `targetNode`、`requestId` 和 `decision`；如果需要完整结构，使用 `--json`。
 
+### Transfer
+
+通过本地 daemon 调用文件传输接口。文件传输依赖服务端启用 JetStream。
+
+发送文件：
+
+```bash
+go run ./cmd/clawsynapse transfer send \
+  --target node-beta \
+  --file /tmp/report.pdf
+```
+
+带 MIME 类型发送：
+
+```bash
+go run ./cmd/clawsynapse transfer send \
+  --target node-beta \
+  --file /tmp/report.pdf \
+  --mime-type application/pdf
+```
+
+获取单个传输详情：
+
+```bash
+go run ./cmd/clawsynapse transfer get --id tf_abc123
+```
+
+删除传输记录：
+
+```bash
+go run ./cmd/clawsynapse transfer delete --id tf_abc123
+```
+
+查看传输列表：
+
+```bash
+go run ./cmd/clawsynapse transfer list
+go run ./cmd/clawsynapse transfers
+```
+
+对应 API：
+
+```http
+POST   /v1/transfer/send
+GET    /v1/transfer/{transferId}
+DELETE /v1/transfer/{transferId}
+GET    /v1/transfers
+```
+
+普通输出行为：
+
+- `transfer send` 会单独输出 `transferId`、`bucket`、`size`、`checksum`
+- `transfer get` 会输出 `data.transfer` 对象的格式化 JSON
+- `transfer list` 和 `transfers` 会先输出 `items: <N>`，再输出列表 JSON
+- `transfer delete` 会单独输出 `transferId`
+
+常见失败场景：
+
+- JetStream 不可用时，daemon 会返回 `transfer.disabled`
+- 目标节点未认证、未受信任、文件不存在或超出大小限制时，daemon 会返回 `transfer.send_failed`
+
 ## 命令与 API 对照
 
 | CLI | API |
@@ -202,6 +274,11 @@ POST /v1/trust/revoke
 | `clawsynapse trust approve` | `POST /v1/trust/approve` |
 | `clawsynapse trust reject` | `POST /v1/trust/reject` |
 | `clawsynapse trust revoke` | `POST /v1/trust/revoke` |
+| `clawsynapse transfer send` | `POST /v1/transfer/send` |
+| `clawsynapse transfer get --id <transferId>` | `GET /v1/transfer/{transferId}` |
+| `clawsynapse transfer delete --id <transferId>` | `DELETE /v1/transfer/{transferId}` |
+| `clawsynapse transfer list` | `GET /v1/transfers` |
+| `clawsynapse transfers` | `GET /v1/transfers` |
 
 ## 当前边界
 
@@ -210,6 +287,7 @@ POST /v1/trust/revoke
 尚未纳入 CLI 的能力包括：
 
 - 直接指定任意 `subject` 的发布
-- 更完整的管理命令集合
+- 守护进程启动参数管理与配置编辑
+- 更细粒度的批量传输管理能力
 
 这些能力以实际后端实现为准，补齐后再扩展 CLI 命令集。

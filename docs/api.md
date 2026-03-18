@@ -5,7 +5,7 @@ title: "ClawSynapse API Reference"
 
 # ClawSynapse API Reference
 
-最后更新：2026-03-17
+最后更新：2026-03-18
 
 `clawsynapsed` 在本地暴露 HTTP API，供 Agent、CLI 或外部系统调用。默认监听 `127.0.0.1:18080`，可通过 `LOCAL_API_ADDR` 或 `--local-api-addr` 配置。
 
@@ -62,6 +62,10 @@ title: "ClawSynapse API Reference"
 | `POST` | `/v1/trust/approve` | 批准信任请求 |
 | `POST` | `/v1/trust/reject` | 拒绝信任请求 |
 | `POST` | `/v1/trust/revoke` | 撤销对目标节点的信任 |
+| `POST` | `/v1/transfer/send` | 向目标节点发送文件 |
+| `GET` | `/v1/transfers` | 获取当前传输记录列表 |
+| `GET` | `/v1/transfer/{transferId}` | 获取单个传输详情 |
+| `DELETE` | `/v1/transfer/{transferId}` | 删除传输记录并尝试清理 JetStream 对象 |
 
 ---
 
@@ -512,6 +516,229 @@ title: "ClawSynapse API Reference"
 
 ---
 
+## POST /v1/transfer/send
+
+向目标节点发送文件。该接口要求本地 NATS 连接可用且服务端启用了 JetStream。
+
+**请求**
+
+```json
+{
+  "targetNode": "node-beta",
+  "filePath": "/tmp/report.pdf",
+  "mimeType": "application/pdf"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `targetNode` | string | 是 | 目标节点 ID |
+| `filePath` | string | 是 | 本地待发送文件路径 |
+| `mimeType` | string | 否 | 文件 MIME 类型 |
+
+**成功响应**
+
+```json
+{
+  "ok": true,
+  "code": "transfer.sent",
+  "message": "file transfer initiated",
+  "data": {
+    "transferId": "tf_abc123",
+    "bucket": "clawsynapse-transfer-node-beta",
+    "size": 24576,
+    "checksum": "SHA-256=abcdef..."
+  },
+  "ts": 1710000000000
+}
+```
+
+**常见失败响应**
+
+JetStream 不可用：
+
+```json
+{
+  "ok": false,
+  "code": "transfer.disabled",
+  "message": "transfer service not available (jetstream required)",
+  "ts": 1710000000000
+}
+```
+
+发送失败：
+
+```json
+{
+  "ok": false,
+  "code": "transfer.send_failed",
+  "message": "peer is not authenticated",
+  "data": {
+    "targetNode": "node-beta"
+  },
+  "ts": 1710000000000
+}
+```
+
+---
+
+## GET /v1/transfers
+
+获取当前进程内维护的传输记录列表，包括发送和接收的文件传输。
+
+**响应**
+
+```json
+{
+  "ok": true,
+  "code": "transfer.list",
+  "message": "transfers fetched",
+  "data": {
+    "items": [
+      {
+        "transferId": "tf_abc123",
+        "direction": "outbound",
+        "peerNode": "node-beta",
+        "fileName": "report.pdf",
+        "fileSize": 24576,
+        "mimeType": "application/pdf",
+        "checksum": "SHA-256=abcdef...",
+        "status": "completed",
+        "createdAt": 1710000000000,
+        "completedAt": 1710000001000
+      }
+    ]
+  },
+  "ts": 1710000000000
+}
+```
+
+`data.items[]` 字段说明（TransferInfo 结构）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `transferId` | string | 传输 ID |
+| `direction` | string | 方向：`outbound` 或 `inbound` |
+| `peerNode` | string | 对端节点 ID |
+| `fileName` | string | 文件名 |
+| `fileSize` | int64 | 文件大小，单位字节 |
+| `mimeType` | string | 文件 MIME 类型 |
+| `checksum` | string | 对象校验摘要 |
+| `status` | string | 当前状态，当前实现通常为 `completed` |
+| `localPath` | string | 本地接收文件路径，仅入站文件通常会有该字段 |
+| `createdAt` | int64 | 记录创建时间，Unix 毫秒 |
+| `completedAt` | int64 | 完成时间，Unix 毫秒 |
+
+JetStream 不可用时，列表接口仍然可用；只有当传输服务未初始化时才会返回：
+
+```json
+{
+  "ok": false,
+  "code": "transfer.disabled",
+  "message": "transfer service not available",
+  "ts": 1710000000000
+}
+```
+
+---
+
+## GET /v1/transfer/{transferId}
+
+获取单个传输详情。
+
+路径参数：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `transferId` | string | 传输 ID |
+
+**成功响应**
+
+```json
+{
+  "ok": true,
+  "code": "transfer.detail",
+  "message": "transfer fetched",
+  "data": {
+    "transfer": {
+      "transferId": "tf_abc123",
+      "direction": "inbound",
+      "peerNode": "node-beta",
+      "fileName": "report.pdf",
+      "fileSize": 24576,
+      "mimeType": "application/pdf",
+      "checksum": "SHA-256=abcdef...",
+      "status": "completed",
+      "localPath": "/Users/demo/.clawsynapse/transfers/tf_abc123-report.pdf",
+      "createdAt": 1710000000000,
+      "completedAt": 1710000001000
+    }
+  },
+  "ts": 1710000000000
+}
+```
+
+未找到时：
+
+```json
+{
+  "ok": false,
+  "code": "transfer.not_found",
+  "message": "transfer not found",
+  "ts": 1710000000000
+}
+```
+
+---
+
+## DELETE /v1/transfer/{transferId}
+
+删除传输记录；如果记录关联 JetStream Object Store，也会尝试删除远端对象。当前实现即使对象删除失败，也会继续清理本地记录。
+
+路径参数：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `transferId` | string | 传输 ID |
+
+**成功响应**
+
+```json
+{
+  "ok": true,
+  "code": "transfer.deleted",
+  "message": "transfer deleted",
+  "data": {
+    "transferId": "tf_abc123"
+  },
+  "ts": 1710000000000
+}
+```
+
+JetStream 不可用时：
+
+```json
+{
+  "ok": false,
+  "code": "transfer.disabled",
+  "message": "transfer service not available",
+  "ts": 1710000000000
+}
+```
+
+删除失败时：
+
+```json
+{
+  "ok": false,
+  "code": "transfer.delete_failed",
+  "message": "transfer not found",
+  "ts": 1710000000000
+}
+```
+
+---
+
 ## Go 客户端
 
 `internal/api` 包提供了 `Client` 结构，可在 Go 代码中直接调用本地 API：
@@ -527,6 +754,9 @@ result, err := c.Post(ctx, "/v1/publish", map[string]any{
     "targetNode": "node-beta",
     "message":    "hello",
 })
+
+// DELETE 请求
+result, err := c.Delete(ctx, "/v1/transfer/tf_abc123")
 ```
 
 `Client` 自动处理 JSON 序列化/反序列化，返回值统一为 `types.APIResult`。当 HTTP 状态码 >= 400 时，返回 error 且 `result.OK` 为 `false`。
