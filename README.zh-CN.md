@@ -30,7 +30,7 @@ Agent <-> Local ClawSynapse Daemon <-> NATS <-> Remote ClawSynapse Daemon <-> Re
 从 [GitHub Releases](https://github.com/yuanjun5681/clawsynapse/releases) 下载对应平台的 `clawsynapsed` 二进制，然后启动节点：
 
 ```bash
-clawsynapsed --node-id node-alpha
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
 ```
 
 使用 OpenClaw 适配器启动：
@@ -39,7 +39,8 @@ clawsynapsed --node-id node-alpha
 clawsynapsed \
   --node-id node-alpha \
   --trust-mode open \
-  --agent-adapter openclaw
+  --agent-adapter openclaw \
+  --deliverable-prefixes chat,task,todo,conversation
 ```
 
 也可通过环境变量配置：
@@ -48,6 +49,7 @@ clawsynapsed \
 export NODE_ID=node-alpha
 export TRUST_MODE=open
 export AGENT_ADAPTER=openclaw
+export DELIVERABLE_PREFIXES=chat,task,todo,conversation
 clawsynapsed
 ```
 
@@ -114,6 +116,12 @@ clawsynapse messages
 
 全局参数：`--api-addr host:port`、`--timeout duration`、`--json`（输出原始 JSON，便于脚本集成）。
 
+如果 CLI 工作流需要投递 `chat.*`、`task.*`、`todo.*`、`conversation.*` 这几类消息，请在启动 daemon 时补充参数：
+
+```bash
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
+```
+
 ## 配置
 
 配置优先级：`CLI 参数 > OS 环境变量 > 项目根目录 .env > ~/.clawsynapse/config.yaml > 默认值`
@@ -135,6 +143,7 @@ clawsynapse messages
 - `HEARTBEAT_INTERVAL_MS`
 - `ANNOUNCE_TTL_MS`
 - `TRUST_MODE`（`open` | `tofu` | `explicit`）
+- `DELIVERABLE_PREFIXES`（CLI 投递场景建议配置为 `chat,task,todo,conversation`）
 
 ## 文档
 

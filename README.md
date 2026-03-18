@@ -30,7 +30,7 @@ Requirements:
 Download the `clawsynapsed` binary for your platform from [GitHub Releases](https://github.com/yuanjun5681/clawsynapse/releases), then start a node:
 
 ```bash
-clawsynapsed --node-id node-alpha
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
 ```
 
 Start with OpenClaw adapter:
@@ -39,7 +39,8 @@ Start with OpenClaw adapter:
 clawsynapsed \
   --node-id node-alpha \
   --trust-mode open \
-  --agent-adapter openclaw
+  --agent-adapter openclaw \
+  --deliverable-prefixes chat,task,todo,conversation
 ```
 
 Or configure via environment variables:
@@ -48,6 +49,7 @@ Or configure via environment variables:
 export NODE_ID=node-alpha
 export TRUST_MODE=open
 export AGENT_ADAPTER=openclaw
+export DELIVERABLE_PREFIXES=chat,task,todo,conversation
 clawsynapsed
 ```
 
@@ -114,6 +116,12 @@ clawsynapse messages
 
 Global flags: `--api-addr host:port`, `--timeout duration`, `--json` (raw JSON output).
 
+If your CLI workflows need deliverable message types under `chat.*`, `task.*`, `todo.*`, or `conversation.*`, start the daemon with:
+
+```bash
+clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
+```
+
 ## Configuration
 
 Configuration precedence: `CLI flags > OS environment variables > project-root .env > ~/.clawsynapse/config.yaml > defaults`
@@ -135,6 +143,7 @@ Common environment variables:
 - `HEARTBEAT_INTERVAL_MS`
 - `ANNOUNCE_TTL_MS`
 - `TRUST_MODE` (`open` | `tofu` | `explicit`)
+- `DELIVERABLE_PREFIXES` (recommended for CLI-driven deliverables: `chat,task,todo,conversation`)
 
 ## Documentation
 
