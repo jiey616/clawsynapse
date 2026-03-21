@@ -32,10 +32,14 @@ dist:
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapsed-darwin-amd64 ./cmd/clawsynapsed
 	GOOS=linux  GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapsed-linux-amd64  ./cmd/clawsynapsed
 	GOOS=linux  GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapsed-linux-arm64  ./cmd/clawsynapsed
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapsed-windows-amd64.exe ./cmd/clawsynapsed
+	GOOS=windows GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapsed-windows-arm64.exe ./cmd/clawsynapsed
 	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-darwin-arm64 ./cmd/clawsynapse
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-darwin-amd64 ./cmd/clawsynapse
 	GOOS=linux  GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-linux-amd64  ./cmd/clawsynapse
 	GOOS=linux  GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-linux-arm64  ./cmd/clawsynapse
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-windows-amd64.exe ./cmd/clawsynapse
+	GOOS=windows GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-windows-arm64.exe ./cmd/clawsynapse
 	@echo "binaries in $(DIST_DIR)/"
 
 clean:
