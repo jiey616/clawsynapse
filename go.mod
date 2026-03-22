@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	charm.land/bubbletea/v2 v2.0.2
+	github.com/mattn/go-runewidth v0.0.19
 	github.com/nats-io/nats.go v1.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -20,7 +21,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
-	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/nats-io/nkeys v0.4.12 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
