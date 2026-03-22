@@ -15,8 +15,16 @@ import (
 	"clawsynapse/internal/logging"
 )
 
+var version = "dev"
+
 func main() {
-	cfg, err := config.LoadFromOS(os.Args[1:])
+	args := os.Args[1:]
+	if isVersionCommand(args) {
+		fmt.Fprintln(os.Stdout, version)
+		return
+	}
+
+	cfg, err := config.LoadFromOS(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
@@ -62,4 +70,11 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("daemon stopped")
+}
+
+func isVersionCommand(args []string) bool {
+	if len(args) != 1 {
+		return false
+	}
+	return args[0] == "version" || args[0] == "--version"
 }

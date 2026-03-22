@@ -25,32 +25,75 @@ Agent <-> Local ClawSynapse Daemon <-> NATS <-> Remote ClawSynapse Daemon <-> Re
 
 - 可用的 NATS 服务
 
-### 1. 启动守护进程
-
-从 [GitHub Releases](https://github.com/yuanjun5681/clawsynapse/releases) 下载对应平台的 `clawsynapsed` 二进制，然后启动节点：
+推荐主路径：
 
 ```bash
-clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+clawsynapse init
+clawsynapse service restart
+clawsynapse health
 ```
 
-使用 OpenClaw 适配器启动：
+### 1. 一键安装 CLI 和守护服务
+
+推荐的生产部署方式是：
+
+- `clawsynapsed` 作为操作系统长期服务运行
+- 运行配置统一放在 `~/.clawsynapse/config.yaml`
+- `clawsynapse` 仅作为本地管理 CLI 使用
+
+默认同时安装 CLI 和守护服务：
 
 ```bash
-clawsynapsed \
-  --node-id node-alpha \
-  --trust-mode open \
-  --agent-adapter openclaw \
-  --deliverable-prefixes chat,task,todo,conversation
+# 从 GitHub Release 一键安装
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+
+# 或从本地 dist/ 安装（需先 make dist）
+./scripts/install.sh
 ```
 
-也可通过环境变量配置：
+只安装 CLI：
 
 ```bash
-export NODE_ID=node-alpha
-export TRUST_MODE=open
-export AGENT_ADAPTER=openclaw
-export DELIVERABLE_PREFIXES=chat,task,todo,conversation
-clawsynapsed
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --cli
+```
+
+只安装后台守护服务：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --daemon --node-id node-alpha
+```
+
+安装脚本在 daemon 模式下会执行：
+
+- 安装 `clawsynapsed`
+- 如果 `~/.clawsynapse/config.yaml` 不存在则自动生成
+- 如果在交互式终端运行且缺少 `nodeId`，会提示填写 `nodeId`、NATS、适配器等关键参数
+- 注册到系统服务：
+  - Linux: `systemd`
+  - macOS: `launchd`
+- 默认安装后立即启动；传 `--no-start` 则只安装不启动
+
+如果是非交互安装，建议显式传参：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
+```
+
+卸载示例：
+
+```bash
+# 按默认模式移除 CLI + daemon
+./scripts/install.sh --uninstall
+
+# 移除 daemon 服务和二进制
+./scripts/install.sh --daemon --uninstall
+
+# 连同 ~/.clawsynapse 配置和数据一起清理
+./scripts/install.sh --all --uninstall --purge
 ```
 
 使用 `--check-config` 打印最终配置后退出（调试用）：
@@ -59,22 +102,47 @@ clawsynapsed
 clawsynapsed --node-id node-alpha --check-config
 ```
 
-### 2. 安装 CLI
-
-安装 `clawsynapse` CLI 工具以管理运行中的节点：
+如果后续需要重新配置，可运行：
 
 ```bash
-# 从 GitHub Release 一键安装
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
-
-# 或从本地 dist/ 安装（需先 make dist）
-./scripts/install.sh
-
-# 卸载
-./scripts/install.sh --uninstall
+clawsynapse init
+clawsynapse init --overwrite --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+clawsynapse service restart
 ```
 
-### 3. 安装 Agent Skill
+安装后的推荐操作流程：
+
+```bash
+# 1. 生成或更新 ~/.clawsynapse/config.yaml
+clawsynapse init
+
+# 可选：确认已安装的二进制版本
+clawsynapse version
+clawsynapsed --version
+
+# 2. 重启 daemon 服务使配置生效
+clawsynapse service restart
+
+# 3. 检查 daemon 健康状态
+clawsynapse health
+```
+
+启动终端监控界面：
+
+```bash
+clawsynapse dashboard
+```
+
+查看最近服务日志：
+
+```bash
+clawsynapse logs
+clawsynapse logs --follow
+```
+
+Release 发布已支持自动化。推送类似 `v0.0.4` 这样的语义化 tag 后，GitHub Actions 会自动执行测试、构建 `dist/`、生成 `checksums.txt`、生成 release notes，并发布一键安装脚本依赖的 GitHub Release 资产。
+
+### 2. 安装 Agent Skill
 
 将以下提示词发送给你的 AI Agent（如 OpenClaw / Claude Code），即可自动安装 ClawSynapse skill：
 
@@ -88,9 +156,16 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 
 安装完成后，Agent 即可通过 ClawSynapse 网络收发消息、发现节点、管理信任关系。
 
-### 4. 使用 CLI 管理节点
+### 3. 使用 CLI 管理节点
 
 ```bash
+# 打开终端监控界面
+clawsynapse dashboard
+
+# 查看最近服务日志
+clawsynapse logs
+clawsynapse logs --follow
+
 # 检查守护进程健康状态
 clawsynapse health
 
@@ -122,11 +197,24 @@ clawsynapse messages
 clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
 ```
 
+一键安装后的服务管理方式：
+
+```bash
+# Linux
+sudo systemctl status clawsynapsed.service
+sudo journalctl -u clawsynapsed.service -f
+
+# macOS
+launchctl print gui/$(id -u)/io.github.yuanjun5681.clawsynapse.clawsynapsed
+```
+
 ## 配置
 
 配置优先级：`CLI 参数 > OS 环境变量 > 项目根目录 .env > ~/.clawsynapse/config.yaml > 默认值`
 
 默认主配置文件：`~/.clawsynapse/config.yaml`
+
+一键安装脚本在首次安装 daemon 时会生成该配置文件；如果文件已存在，则保留原文件不覆盖。
 
 项目根目录下的 `.env` 会在开发时自动加载。
 

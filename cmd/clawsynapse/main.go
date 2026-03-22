@@ -13,6 +13,8 @@ import (
 	"clawsynapse/pkg/types"
 )
 
+var version = "dev"
+
 type stringList []string
 
 type localAPIClient interface {
@@ -56,6 +58,38 @@ func run(args []string, stdout, stderr *os.File) int {
 	if len(rest) == 0 {
 		printUsage(stderr)
 		return 2
+	}
+	if rest[0] == "init" {
+		if err := runInit(rest[1:], os.Stdin, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if rest[0] == "service" {
+		if err := runService(rest[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if rest[0] == "dashboard" {
+		if err := runDashboard(rest[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if rest[0] == "logs" {
+		if err := runLogs(rest[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if rest[0] == "version" {
+		fmt.Fprintln(stdout, version)
+		return 0
 	}
 
 	client := api.NewClient(*apiAddr, *timeout)
@@ -466,5 +500,5 @@ func asInt64(v any) (int64, bool) {
 
 func printUsage(stderr *os.File) {
 	fmt.Fprintln(stderr, "usage: clawsynapse [--api-addr host:port] [--timeout 5s] [--json] <command>")
-	fmt.Fprintln(stderr, "commands: health, peers, messages, publish, auth challenge, trust request|pending|approve|reject|revoke, transfer send|get|delete|list, transfers")
+	fmt.Fprintln(stderr, "commands: version, init, service status|start|stop|restart, dashboard, logs, health, peers, messages, publish, auth challenge, trust request|pending|approve|reject|revoke, transfer send|get|delete|list, transfers")
 }

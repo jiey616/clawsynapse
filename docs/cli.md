@@ -27,6 +27,11 @@ clawsynapse <command>
 
 当前支持的顶层命令：
 
+- `version`
+- `init`
+- `service status|start|stop|restart`
+- `dashboard`
+- `logs`
 - `health`
 - `peers`
 - `messages`
@@ -49,6 +54,97 @@ go run ./cmd/clawsynapse --api-addr 127.0.0.1:18080 --timeout 10s --json health
 ```
 
 ## 当前命令
+
+### Version
+
+打印当前 CLI 二进制版本：
+
+```bash
+go run ./cmd/clawsynapse version
+```
+
+### Init
+
+交互式生成或更新 `~/.clawsynapse/config.yaml`：
+
+```bash
+go run ./cmd/clawsynapse init
+```
+
+非交互覆盖写入：
+
+```bash
+go run ./cmd/clawsynapse init \
+  --overwrite \
+  --node-id node-alpha \
+  --nats-servers nats://127.0.0.1:4222 \
+  --agent-adapter openclaw
+```
+
+常见用途：
+
+- 首次安装后补全 daemon 配置
+- 修改 `nodeId`、NATS 地址或 adapter
+- 生成标准化的 `~/.clawsynapse/config.yaml`
+
+配置写入后，使用 service 子命令应用变更：
+
+```bash
+go run ./cmd/clawsynapse service restart
+```
+
+### Service
+
+管理本机上的 `clawsynapsed` 服务：
+
+```bash
+go run ./cmd/clawsynapse service status
+go run ./cmd/clawsynapse service restart
+go run ./cmd/clawsynapse service stop
+go run ./cmd/clawsynapse service start
+```
+
+平台行为：
+
+- Linux: 调用 `sudo systemctl`
+- macOS: 调用 `launchctl`
+
+### Dashboard
+
+启动一个只读终端监控界面：
+
+```bash
+go run ./cmd/clawsynapse dashboard
+```
+
+当前第一版提供四个视图：
+
+- `Overview`：NATS 连接、消息计数、peer 数
+- `Peers`：已发现节点及 auth/trust 状态
+- `Messages`：最近消息快照
+- `Logs`：最近服务日志
+
+快捷键：
+
+- `q`：退出
+- `tab` / `left` / `right`：切换视图
+- `1` / `2` / `3` / `4`：直接跳到对应视图
+- `r`：立即刷新
+
+### Logs
+
+查看最近服务日志：
+
+```bash
+go run ./cmd/clawsynapse logs
+go run ./cmd/clawsynapse logs --lines 200
+go run ./cmd/clawsynapse logs --follow
+```
+
+平台行为：
+
+- Linux: 读取 `journalctl -u clawsynapsed.service`
+- macOS: 读取 `~/.clawsynapse/log/clawsynapsed.stdout.log` 和 `clawsynapsed.stderr.log`
 
 ### Health
 
