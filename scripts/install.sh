@@ -47,7 +47,7 @@ warn()  { printf "${YELLOW}[warn]${NC}  %s\n" "$*"; }
 error() { printf "${RED}[error]${NC} %s\n" "$*" >&2; exit 1; }
 
 is_interactive_shell() {
-    [ -t 0 ] && [ -t 1 ]
+    [ -t 1 ] && [ -r /dev/tty ]
 }
 
 usage() {
@@ -94,6 +94,7 @@ Daemon bootstrap options:
 Examples:
   Install CLI and daemon as a service:
     ./scripts/install.sh --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+    curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
 
   Install CLI only:
     ./scripts/install.sh --cli
@@ -149,7 +150,11 @@ prompt_value() {
         printf "%s: " "$label" >&2
     fi
 
-    IFS= read -r answer || true
+    if [ -t 0 ]; then
+        IFS= read -r answer || true
+    else
+        IFS= read -r answer </dev/tty || true
+    fi
     answer="$(trim "$answer")"
     if [ -n "$answer" ]; then
         printf '%s' "$answer"
@@ -203,6 +208,7 @@ maybe_prompt_daemon_config() {
     fi
 
     info "interactive daemon configuration"
+    info "reading answers from your terminal"
     NODE_ID="$(prompt_required "Node ID" "$NODE_ID")"
     NATS_SERVERS="$(prompt_value "NATS servers (comma-separated)" "$NATS_SERVERS")"
     AGENT_ADAPTER="$(prompt_choice "Agent adapter" "$AGENT_ADAPTER" default openclaw webhook)"
