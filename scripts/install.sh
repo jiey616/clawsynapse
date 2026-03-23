@@ -115,6 +115,52 @@ trim() {
     printf '%s' "$value"
 }
 
+append_unique_path() {
+    local current="$1"
+    local candidate="$2"
+
+    candidate="$(trim "$candidate")"
+    if [ -z "$candidate" ]; then
+        printf '%s' "$current"
+        return 0
+    fi
+
+    case ":$current:" in
+        *":$candidate:"*)
+            printf '%s' "$current"
+            ;;
+        *)
+            if [ -n "$current" ]; then
+                printf '%s:%s' "$current" "$candidate"
+            else
+                printf '%s' "$candidate"
+            fi
+            ;;
+    esac
+}
+
+build_service_path() {
+    local path_value=""
+    local candidate
+
+    for candidate in \
+        "$INSTALL_DIR" \
+        "$HOME/.local/bin" \
+        "/opt/homebrew/bin" \
+        "/opt/homebrew/sbin" \
+        "/usr/local/bin" \
+        "/usr/local/sbin" \
+        "/usr/bin" \
+        "/bin" \
+        "/usr/sbin" \
+        "/sbin"
+    do
+        path_value="$(append_unique_path "$path_value" "$candidate")"
+    done
+
+    printf '%s\n' "$path_value"
+}
+
 expand_path() {
     local path="$1"
 
@@ -441,12 +487,14 @@ service_manager() {
 install_systemd_service() {
     local daemon_path="${INSTALL_DIR}/${DAEMON_BINARY}"
     local unit_path="/etc/systemd/system/${SYSTEMD_UNIT_NAME}"
+    local service_path
     local tmpfile
     local service_user
     local service_group
 
     service_user="$(id -un)"
     service_group="$(id -gn)"
+    service_path="$(build_service_path)"
     require_sudo
 
     tmpfile="$(mktemp)"
@@ -462,6 +510,7 @@ Type=simple
 User=${service_user}
 Group=${service_group}
 Environment=HOME=${HOME}
+Environment=PATH=${service_path}
 WorkingDirectory=${HOME}
 ExecStart=${daemon_path} --config ${CONFIG_PATH}
 Restart=on-failure
@@ -499,10 +548,12 @@ install_launchd_service() {
     local daemon_path="${INSTALL_DIR}/${DAEMON_BINARY}"
     local plist_dir="${HOME}/Library/LaunchAgents"
     local plist_path="${plist_dir}/${LAUNCHD_LABEL}.plist"
+    local service_path
     local tmpfile
     local domain
 
     install -d -m 755 "$plist_dir"
+    service_path="$(build_service_path)"
     tmpfile="$(mktemp)"
 
     cat >"$tmpfile" <<EOF
@@ -520,6 +571,11 @@ install_launchd_service() {
   </array>
   <key>WorkingDirectory</key>
   <string>${HOME}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${service_path}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
