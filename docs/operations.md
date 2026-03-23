@@ -148,6 +148,107 @@ clawsynapsed \
   --gateway-token "$GATEWAY_TOKEN"
 ```
 
+### 一键安装为系统服务
+
+推荐把 `clawsynapsed` 安装为宿主机上的长期服务，而不是用交互式 shell 挂起进程。
+
+统一安装入口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash
+```
+
+最佳实践约定：
+
+- 二进制由同一个安装脚本分发，避免 CLI 和 daemon 安装来源不一致
+- daemon 服务固定读取 `~/.clawsynapse/config.yaml`
+- 首次安装由脚本生成配置文件，后续升级不覆盖用户配置
+- 交互终端下一键安装脚本可补问 `nodeId`、NATS、adapter 等关键参数
+- daemon 以普通用户身份运行，不以 root 直接执行业务进程
+
+如果是自动化环境，显式传参而不是依赖交互输入：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
+```
+
+安装完成后，推荐通过 CLI 向导做后续配置调整：
+
+```bash
+clawsynapse init
+clawsynapse version
+clawsynapsed --version
+clawsynapse init --overwrite --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+clawsynapse service restart
+```
+
+当前支持的服务管理器：
+
+- Linux: `systemd`
+- macOS: `launchd`
+
+仅安装 daemon：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --daemon --node-id node-alpha
+```
+
+仅安装 CLI：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --cli
+```
+
+卸载：
+
+```bash
+./scripts/install.sh --uninstall
+./scripts/install.sh --daemon --uninstall
+./scripts/install.sh --all --uninstall --purge
+```
+
+服务管理：
+
+```bash
+# Linux
+sudo systemctl status clawsynapsed.service
+sudo journalctl -u clawsynapsed.service -f
+
+# macOS
+launchctl print gui/$(id -u)/io.github.yuanjun5681.clawsynapse.clawsynapsed
+```
+
+### Release 自动化
+
+推荐把版本发布也收敛成标准流程：
+
+- 用 Git tag 作为唯一版本源，例如 `v0.0.4`
+- 由 `make release-prep` 统一生成 `dist/`、`checksums.txt` 和 release notes
+- 由 GitHub Actions 在 `v*` tag push 时自动创建 GitHub Release
+
+本地预演：
+
+```bash
+make release-prep VERSION=v0.0.4
+./scripts/release.sh --version v0.0.4 --skip-publish
+```
+
+本地直接发布：
+
+```bash
+./scripts/release.sh --version v0.0.4
+```
+
+CI 自动发布入口：
+
+- 工作流文件：`.github/workflows/release.yml`
+- 触发条件：push `v*` tag
+- 发布资产：`clawsynapse` / `clawsynapsed` 多平台二进制 + `checksums.txt`
+
 ### 多节点异构部署
 
 ```text

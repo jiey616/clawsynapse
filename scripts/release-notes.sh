@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DEFAULT_REPO="yuanjun5681/clawsynapse"
+
+usage() {
+	cat <<'EOF'
+Generate GitHub Release notes for ClawSynapse.
+
+Usage:
+  ./scripts/release-notes.sh --version v0.0.4 [--output dist/release-notes-v0.0.4.md]
+
+Options:
+  --version VERSION    Release version or tag name
+  --repo OWNER/REPO    GitHub repository slug (default: yuanjun5681/clawsynapse)
+  --output PATH        Output markdown file path (default: stdout)
+  -h, --help           Show this help
+EOF
+}
+
+VERSION=""
+REPO="$DEFAULT_REPO"
+OUTPUT=""
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--version)
+			VERSION="${2:-}"
+			shift 2
+			;;
+		--repo)
+			REPO="${2:-}"
+			shift 2
+			;;
+		--output)
+			OUTPUT="${2:-}"
+			shift 2
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			echo "unknown option: $1" >&2
+			usage >&2
+			exit 1
+			;;
+	esac
+done
+
+if [ -z "$VERSION" ]; then
+	VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
+fi
+
+if [ -z "$VERSION" ]; then
+	echo "release version is required; pass --version <tag>" >&2
+	exit 1
+fi
+
+if ! git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null 2>&1; then
+	echo "tag not found: ${VERSION}" >&2
+	exit 1
+fi
+
+PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || true)"
+TMP_FILE="$(mktemp)"
+trap 'rm -f "$TMP_FILE"' EXIT
+
+{
+	echo "## Summary"
+	echo
+	echo "Automated release for \`${VERSION}\`."
+	echo
+	echo "Highlights:"
+	echo "- ships both \`clawsynapse\` CLI and \`clawsynapsed\` daemon binaries"
+	echo "- supports one-line install with default CLI + daemon deployment"
+	echo "- includes \`checksums.txt\` for release asset verification"
+	echo
+	echo "## Install"
+	echo
+	echo "Latest release:"
+	echo
+	echo '```bash'
+	echo "curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash"
+	echo '```'
+	echo
+	echo "Install this exact release:"
+	echo
+	echo '```bash'
+	echo "curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash -s -- --version ${VERSION}"
+	echo '```'
+	echo
+	echo "Post-install:"
+	echo
+	echo '```bash'
+	echo "clawsynapse version"
+	echo "clawsynapsed --version"
+	echo "clawsynapse init"
+	echo "clawsynapse service restart"
+	echo "clawsynapse health"
+	echo '```'
+	echo
+	echo "## Assets"
+	echo
+	echo "Release assets include platform binaries for \`clawsynapse\` and \`clawsynapsed\`, plus \`checksums.txt\`."
+	echo
+	echo "## Changes"
+	echo
+	if [ -n "$PREVIOUS_TAG" ]; then
+		echo "Changes since \`${PREVIOUS_TAG}\`:"
+		echo
+		git log --no-merges --format='- %s (%h)' "${PREVIOUS_TAG}..${VERSION}"
+	else
+		echo "Initial tagged release."
+	fi
+} >"$TMP_FILE"
+
+if [ -n "$OUTPUT" ]; then
+	mkdir -p "$(dirname "$OUTPUT")"
+	cp "$TMP_FILE" "$OUTPUT"
+else
+	cat "$TMP_FILE"
+fi

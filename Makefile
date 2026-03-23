@@ -1,8 +1,10 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 DIST_DIR := dist
+CHECKSUMS_FILE := $(DIST_DIR)/checksums.txt
+RELEASE_NOTES_FILE ?= $(DIST_DIR)/release-notes-$(VERSION).md
 
-.PHONY: test test-unit run build build-daemon build-cli install-cli dist clean
+.PHONY: test test-unit run build build-daemon build-cli install-cli dist checksums release-notes release-prep clean
 
 test: test-unit
 
@@ -41,6 +43,18 @@ dist:
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-windows-amd64.exe ./cmd/clawsynapse
 	GOOS=windows GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/clawsynapse-windows-arm64.exe ./cmd/clawsynapse
 	@echo "binaries in $(DIST_DIR)/"
+
+checksums: dist
+	@rm -f $(CHECKSUMS_FILE)
+	@(cd $(DIST_DIR) && shasum -a 256 $$(find . -maxdepth 1 -type f ! -name 'checksums.txt' ! -name 'release-notes-*' -print | sed 's|^\./||' | sort) > checksums.txt)
+	@echo "checksums: $(CHECKSUMS_FILE)"
+
+release-notes:
+	@mkdir -p $(DIST_DIR)
+	./scripts/release-notes.sh --version "$(VERSION)" --output "$(RELEASE_NOTES_FILE)"
+	@echo "release notes: $(RELEASE_NOTES_FILE)"
+
+release-prep: test-unit dist checksums release-notes
 
 clean:
 	rm -rf $(DIST_DIR) clawsynapse clawsynapsed

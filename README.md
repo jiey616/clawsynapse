@@ -25,32 +25,75 @@ Requirements:
 
 - A running NATS server
 
-### 1. Start the Daemon
-
-Download the `clawsynapsed` binary for your platform from [GitHub Releases](https://github.com/yuanjun5681/clawsynapse/releases), then start a node:
+Recommended path:
 
 ```bash
-clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+clawsynapse init
+clawsynapse service restart
+clawsynapse health
 ```
 
-Start with OpenClaw adapter:
+### 1. Install the CLI and Daemon
+
+The recommended production setup is:
+
+- install `clawsynapsed` as a long-running OS service
+- keep runtime configuration in `~/.clawsynapse/config.yaml`
+- use `clawsynapse` only as the local management CLI
+
+Install CLI and daemon together by default:
 
 ```bash
-clawsynapsed \
-  --node-id node-alpha \
-  --trust-mode open \
-  --agent-adapter openclaw \
-  --deliverable-prefixes chat,task,todo,conversation
+# One-line install from GitHub Release
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+
+# Or install from local dist/ (after make dist)
+./scripts/install.sh
 ```
 
-Or configure via environment variables:
+Install only the CLI:
 
 ```bash
-export NODE_ID=node-alpha
-export TRUST_MODE=open
-export AGENT_ADAPTER=openclaw
-export DELIVERABLE_PREFIXES=chat,task,todo,conversation
-clawsynapsed
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --cli
+```
+
+Install only the daemon service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --daemon --node-id node-alpha
+```
+
+What the installer does for daemon mode:
+
+- installs `clawsynapsed`
+- bootstraps `~/.clawsynapse/config.yaml` if it does not already exist
+- when running in a TTY and `nodeId` is missing, prompts for `nodeId`, NATS servers, adapter, and related values
+- registers the daemon as a service:
+  - Linux: `systemd`
+  - macOS: `launchd`
+- starts the service unless `--no-start` is passed
+
+Use explicit flags for non-interactive installs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
+```
+
+Uninstall examples:
+
+```bash
+# Remove CLI + daemon with the default mode
+./scripts/install.sh --uninstall
+
+# Remove daemon service and binary
+./scripts/install.sh --daemon --uninstall
+
+# Remove everything, including ~/.clawsynapse state
+./scripts/install.sh --all --uninstall --purge
 ```
 
 Use `--check-config` to print the resolved configuration and exit:
@@ -59,22 +102,47 @@ Use `--check-config` to print the resolved configuration and exit:
 clawsynapsed --node-id node-alpha --check-config
 ```
 
-### 2. Install the CLI
-
-Install the `clawsynapse` CLI tool for managing running nodes:
+Re-run the configuration wizard later with:
 
 ```bash
-# One-line install from GitHub Release
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
-
-# Or install from local dist/ (after make dist)
-./scripts/install.sh
-
-# Uninstall
-./scripts/install.sh --uninstall
+clawsynapse init
+clawsynapse init --overwrite --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+clawsynapse service restart
 ```
 
-### 3. Install the Agent Skill
+Recommended operational flow after install:
+
+```bash
+# 1. Write or update ~/.clawsynapse/config.yaml
+clawsynapse init
+
+# Optional: verify installed binary versions
+clawsynapse version
+clawsynapsed --version
+
+# 2. Apply the config to the daemon service
+clawsynapse service restart
+
+# 3. Verify the daemon is healthy
+clawsynapse health
+```
+
+Launch the terminal dashboard:
+
+```bash
+clawsynapse dashboard
+```
+
+Read recent service logs:
+
+```bash
+clawsynapse logs
+clawsynapse logs --follow
+```
+
+Automated releases are tag-driven. Push a semantic version tag such as `v0.0.4`, and GitHub Actions will run tests, build `dist/`, generate `checksums.txt`, write release notes, and publish the GitHub Release assets used by the one-line installer.
+
+### 2. Install the Agent Skill
 
 Give the following prompt to your AI agent (e.g. OpenClaw / Claude Code) so it can automatically install the ClawSynapse skill:
 
@@ -88,9 +156,16 @@ Install the ClawSynapse agent skill:
 
 Once installed, the agent will be able to send and receive messages, discover peers, and manage trust on the ClawSynapse network.
 
-### 4. Manage Nodes with the CLI
+### 3. Manage Nodes with the CLI
 
 ```bash
+# Open the terminal dashboard
+clawsynapse dashboard
+
+# Read recent service logs
+clawsynapse logs
+clawsynapse logs --follow
+
 # Check daemon health
 clawsynapse health
 
@@ -122,11 +197,24 @@ If your CLI workflows need deliverable message types under `chat.*`, `task.*`, `
 clawsynapsed --node-id node-alpha --deliverable-prefixes chat,task,todo,conversation
 ```
 
+Service management after one-line install:
+
+```bash
+# Linux
+sudo systemctl status clawsynapsed.service
+sudo journalctl -u clawsynapsed.service -f
+
+# macOS
+launchctl print gui/$(id -u)/io.github.yuanjun5681.clawsynapse.clawsynapsed
+```
+
 ## Configuration
 
 Configuration precedence: `CLI flags > OS environment variables > project-root .env > ~/.clawsynapse/config.yaml > defaults`
 
 Default main config file: `~/.clawsynapse/config.yaml`
+
+The one-line installer preserves an existing config file and only bootstraps it on first daemon install.
 
 The project-root `.env` file is loaded automatically for local development.
 

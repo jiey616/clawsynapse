@@ -2,10 +2,34 @@ package main
 
 import (
 	"context"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"clawsynapse/pkg/types"
 )
+
+func TestRunVersionPrintsVersion(t *testing.T) {
+	stdout := tempFile(t)
+	stderr := tempFile(t)
+
+	oldVersion := version
+	version = "v9.9.9"
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+
+	code := run([]string{"version"}, stdout, stderr)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+
+	got := readFile(t, stdout)
+	if got != "v9.9.9\n" {
+		t.Fatalf("unexpected stdout %q", got)
+	}
+}
 
 func TestRunTransferSendPostsExpectedPayload(t *testing.T) {
 	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.sent"}}
@@ -105,4 +129,30 @@ func (s *stubAPIClient) Delete(_ context.Context, endpoint string) (types.APIRes
 	s.endpoint = endpoint
 	s.payload = nil
 	return s.result, s.err
+}
+
+func tempFile(t *testing.T) *os.File {
+	t.Helper()
+
+	f, err := os.CreateTemp(t.TempDir(), "clawsynapse-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = f.Close()
+	})
+	return f
+}
+
+func readFile(t *testing.T, f *os.File) string {
+	t.Helper()
+
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
