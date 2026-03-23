@@ -17,6 +17,7 @@ Options:
   --remote NAME          Git remote name (default: origin)
   --base-branch NAME     Source branch to release from (default: develop)
   --release-branch NAME  Target branch for releases (default: main)
+  --ff-only              Require a fast-forward merge from base to release
   --no-push              Stop after local merge and tag creation
   -h, --help             Show this help
 
@@ -25,7 +26,7 @@ Behavior:
   2. Fetch remote branches and tags.
   3. Checkout the release branch.
   4. Fast-forward it to the remote release branch.
-  5. Fast-forward merge the base branch.
+  5. Merge the base branch into the release branch.
   6. Push the release branch.
   7. Create the release tag.
   8. Push the release tag.
@@ -38,6 +39,7 @@ REMOTE="$DEFAULT_REMOTE"
 BASE_BRANCH="$DEFAULT_BASE_BRANCH"
 RELEASE_BRANCH="$DEFAULT_RELEASE_BRANCH"
 NO_PUSH=0
+FF_ONLY=0
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -52,6 +54,10 @@ while [ "$#" -gt 0 ]; do
 		--release-branch)
 			RELEASE_BRANCH="${2:-}"
 			shift 2
+			;;
+		--ff-only)
+			FF_ONLY=1
+			shift
 			;;
 		--no-push)
 			NO_PUSH=1
@@ -135,7 +141,11 @@ fi
 
 git checkout "$RELEASE_BRANCH"
 git merge --ff-only "${REMOTE}/${RELEASE_BRANCH}"
-git merge --ff-only "${REMOTE}/${BASE_BRANCH}"
+if [ "$FF_ONLY" -eq 1 ]; then
+	git merge --ff-only "${REMOTE}/${BASE_BRANCH}"
+else
+	git merge --no-ff --no-edit "${REMOTE}/${BASE_BRANCH}"
+fi
 
 if [ "$NO_PUSH" -eq 0 ]; then
 	git push "$REMOTE" "$RELEASE_BRANCH"

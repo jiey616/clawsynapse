@@ -248,7 +248,8 @@ make release-prep VERSION=v0.0.4
 - 检查工作区是否干净
 - 拉取 `origin/develop`、`origin/main` 和 tags
 - 切到 `main`
-- 以 `--ff-only` 方式合入 `origin/develop`
+- 先 fast-forward 到 `origin/main`
+- 再把 `origin/develop` 合入 `main`
 - 推送 `main`
 - 创建并推送 `v0.0.4` tag
 - 最后切回你原来的分支
@@ -257,6 +258,12 @@ make release-prep VERSION=v0.0.4
 
 ```bash
 ./scripts/cut-release.sh v0.0.4 --no-push
+```
+
+如果你希望强制要求 release 必须是快进合并，也可以显式开启严格模式：
+
+```bash
+./scripts/cut-release.sh v0.0.4 --ff-only
 ```
 
 本地直接发布：
