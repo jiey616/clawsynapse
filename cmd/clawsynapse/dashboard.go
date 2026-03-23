@@ -28,8 +28,35 @@ const (
 	dashboardMinWidth        = 84
 	dashboardMinHeight       = 26
 	dashboardPageStep        = 6
+	dashboardSpinnerInterval = 100 * time.Millisecond
 )
 
+// Unicode box-drawing characters.
+const (
+	boxTL = "╭"
+	boxTR = "╮"
+	boxBL = "╰"
+	boxBR = "╯"
+	boxH  = "─"
+	boxV  = "│"
+	boxHH = "━" // heavy horizontal
+)
+
+// Visual indicators.
+const (
+	dotFull  = "●"
+	dotHalf  = "◐"
+	dotEmpty = "○"
+	arrowUp  = "▲"
+	arrowDn  = "▼"
+	arrowR   = "▸"
+	diamond  = "◈"
+)
+
+// Spinner braille frames.
+var spinnerFrames = []rune{'⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'}
+
+// Tag names for styled lines.
 const (
 	dashboardTagAccent   = "accent"
 	dashboardTagMuted    = "muted"
@@ -38,9 +65,18 @@ const (
 	dashboardTagWarn     = "warn"
 	dashboardTagBad      = "bad"
 	dashboardTagSelected = "selected"
+	dashboardTagDim      = "dim"
+	dashboardTagLogInfo  = "log_info"
+	dashboardTagLogWarn  = "log_warn"
+	dashboardTagLogError = "log_error"
+	dashboardTagLogDebug = "log_debug"
 )
 
 var dashboardANSIRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// ---------------------------------------------------------------------------
+// Interfaces & data types
+// ---------------------------------------------------------------------------
 
 type dashboardClient interface {
 	Get(ctx context.Context, endpoint string) (types.APIResult, error)
@@ -86,6 +122,8 @@ type dashboardRefreshMsg struct {
 	err      error
 }
 
+type spinnerTickMsg struct{}
+
 type dashboardPanelTheme struct {
 	border func(string) string
 	title  func(string) string
@@ -96,21 +134,51 @@ type dashboardStyledLine struct {
 	tag  string
 }
 
-type dashboardModel struct {
-	client      dashboardClient
-	logs        logProvider
-	apiAddr     string
-	timeout     time.Duration
-	width       int
-	height      int
-	activeTab   int
-	lastUpdated time.Time
-	snapshot    dashboardSnapshot
-	loading     bool
-	errText     string
-	cursors     [dashboardTabCount]int
-	offsets     [dashboardTabCount]int
+type parsedLogEntry struct {
+	Time    string
+	Level   string
+	Msg     string
+	NodeID  string
+	Service string
+	Comp    string // component
+	Event   string
+	Peer    string
+	From    string
+	To      string
+	MsgID   string   // messageId
+	ReqID   string   // requestId
+	SessKey string   // sessionKey
+	Err     string   // error
+	Extra   []string // remaining key=value pairs
+	Raw     string
+	IsJSON  bool
 }
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+
+type dashboardModel struct {
+	client         dashboardClient
+	logs           logProvider
+	apiAddr        string
+	timeout        time.Duration
+	width          int
+	height         int
+	activeTab      int
+	lastUpdated    time.Time
+	snapshot       dashboardSnapshot
+	loading        bool
+	errText        string
+	cursors        [dashboardTabCount]int
+	offsets        [dashboardTabCount]int
+	spinnerFrame   int
+	logsFollowTail bool
+}
+
+// ---------------------------------------------------------------------------
+// Entry points
+// ---------------------------------------------------------------------------
 
 func runDashboard(args []string, stdout, stderr *os.File) error {
 	cfg, err := parseDashboardArgs(args, stderr)
@@ -119,11 +187,12 @@ func runDashboard(args []string, stdout, stderr *os.File) error {
 	}
 
 	model := dashboardModel{
-		client:  api.NewClient(cfg.APIAddr, cfg.Timeout),
-		logs:    defaultLogProvider{runner: execServiceRunner{}},
-		apiAddr: cfg.APIAddr,
-		timeout: cfg.Timeout,
-		loading: true,
+		client:         api.NewClient(cfg.APIAddr, cfg.Timeout),
+		logs:           defaultLogProvider{runner: execServiceRunner{}},
+		apiAddr:        cfg.APIAddr,
+		timeout:        cfg.Timeout,
+		loading:        true,
+		logsFollowTail: true,
 	}
 
 	p := tea.NewProgram(model)
@@ -155,8 +224,12 @@ func parseDashboardArgs(args []string, stderr io.Writer) (dashboardConfig, error
 	return cfg, nil
 }
 
+// ---------------------------------------------------------------------------
+// Tea lifecycle
+// ---------------------------------------------------------------------------
+
 func (m dashboardModel) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), dashboardTickCmd())
+	return tea.Batch(m.refreshCmd(), dashboardTickCmd(), spinnerTickCmd())
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -191,6 +264,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveSelection(dashboardPageStep)
 		case "pgup", "u":
 			m.moveSelection(-dashboardPageStep)
+		case "G":
+			if m.activeTab == 3 {
+				m.logsFollowTail = true
+			}
+		case "g":
+			if m.activeTab == 3 {
+				m.offsets[3] = 0
+				m.logsFollowTail = false
+			}
 		case "r":
 			m.loading = true
 			return m, m.refreshCmd()
@@ -205,6 +287,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastUpdated = msg.snapshot.Updated
 		m.errText = ""
 		m.clampSelections()
+	case spinnerTickMsg:
+		m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+		return m, spinnerTickCmd()
 	case time.Time:
 		if m.loading {
 			return m, dashboardTickCmd()
@@ -237,45 +322,91 @@ func (m dashboardModel) View() tea.View {
 	return v
 }
 
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
+
 func (m dashboardModel) headerView(width int) string {
-	status := "READY"
-	statusTag := dashboardTagGood
+	// Status indicator
+	statusIcon := dotFull
+	statusLabel := "READY"
+	_ = dashboardTagGood // status tag used only for future badge rendering
 	if m.loading {
-		status = "REFRESHING"
-		statusTag = dashboardTagWarn
+		statusIcon = string(spinnerFrames[m.spinnerFrame])
+		statusLabel = "SYNCING"
 	}
 	if m.errText != "" {
-		status = "ERROR"
-		statusTag = dashboardTagBad
+		statusIcon = dotEmpty
+		statusLabel = "ERROR"
 	}
+
 	updated := "never"
 	if !m.lastUpdated.IsZero() {
 		updated = m.lastUpdated.Format("15:04:05")
 	}
 
+	// NATS indicator
+	natsIcon := dotFull
+	natsTag := dashboardTagGood
+	if !m.snapshot.Health.NATS.Connected {
+		natsIcon = dotEmpty
+		natsTag = dashboardTagBad
+	}
+
 	lines := []string{
-		taggedLine(dashboardTagAccent, fmt.Sprintf("CLI v%s | API %s | Last update %s | Status %s", version, m.apiAddr, updated, status)),
-		taggedLine(statusTag, fmt.Sprintf("NATS %s | Peers %d | Traffic in/out %d/%d msgs | Press r to refresh immediately", m.natsStatusLabel(), len(m.snapshot.Peers), m.snapshot.Health.NATS.InMsgs, m.snapshot.Health.NATS.OutMsgs)),
+		taggedLine(dashboardTagAccent, fmt.Sprintf(
+			"%s v%s %s API %s %s %s %s %s Updated %s",
+			diamond, version, boxV, m.apiAddr, boxV, statusIcon, statusLabel, boxV, updated,
+		)),
+		fmt.Sprintf(
+			"NATS %s %s %s Peers %d %s %s %d %s %d msgs %s Press r to refresh",
+			taggedLine(natsTag, natsIcon),
+			taggedLine(natsTag, m.natsStatusLabel()),
+			boxV,
+			len(m.snapshot.Peers),
+			boxV,
+			arrowUp, m.snapshot.Health.NATS.InMsgs,
+			arrowDn, m.snapshot.Health.NATS.OutMsgs,
+			boxV,
+		),
 	}
 	if m.errText != "" {
-		lines = append(lines, taggedLine(dashboardTagBad, "Last refresh failed: "+truncateRight(m.errText, maxInt(12, width-18))))
+		lines = append(lines, taggedLine(dashboardTagBad, "Last refresh failed: "+truncateRight(m.errText, maxInt(12, width-22))))
 	}
-	return renderPanelWithTheme("ClawSynapse Dashboard", width, 5, lines, dashboardHeaderTheme())
+	return renderPanelWithTheme("ClawSynapse Dashboard", width, maxInt(5, len(lines)+2), lines, dashboardHeaderTheme())
 }
 
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+
 func (m dashboardModel) tabsView(width int) string {
-	tabs := []string{"1 Overview", "2 Peers", "3 Messages", "4 Logs"}
-	out := make([]string, 0, len(tabs))
-	for i, label := range tabs {
+	labels := []string{"Overview", "Peers", "Messages", "Logs"}
+	nums := []string{"1", "2", "3", "4"}
+	parts := make([]string, 0, len(labels))
+	underParts := make([]string, 0, len(labels))
+
+	for i, label := range labels {
+		cell := " " + nums[i] + " " + label + " "
+		cellWidth := displayWidth(cell)
 		if i == m.activeTab {
-			out = append(out, dashboardStyleTabActive(" "+label+" "))
+			parts = append(parts, dashboardStyleTabActive(cell))
+			underParts = append(underParts, dashboardStyleAccent(strings.Repeat(boxHH, cellWidth)))
 		} else {
-			out = append(out, dashboardStyleTabInactive(" "+label+" "))
+			parts = append(parts, dashboardStyleTabInactive(cell))
+			underParts = append(underParts, strings.Repeat(" ", cellWidth))
 		}
 	}
-	line := strings.Join(out, "  ")
-	return truncateRightVisible(line, width)
+
+	sep := "  "
+	line1 := strings.Join(parts, sep)
+	line2 := strings.Join(underParts, sep)
+	return truncateRightVisible(line1, width) + "\n" + truncateRightVisible(line2, width)
 }
+
+// ---------------------------------------------------------------------------
+// Body dispatch
+// ---------------------------------------------------------------------------
 
 func (m dashboardModel) bodyView(width, height int) string {
 	switch m.activeTab {
@@ -292,13 +423,17 @@ func (m dashboardModel) bodyView(width, height int) string {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Overview tab
+// ---------------------------------------------------------------------------
+
 func (m dashboardModel) overviewView(width, height int) string {
 	cardWidth := maxInt(18, (width-3)/4)
 	cards := []string{
 		renderMetricPanel("Peers", fmt.Sprintf("%d", len(m.snapshot.Peers)), "discovered nodes", cardWidth),
 		renderMetricPanel("NATS", boolWord(m.snapshot.Health.NATS.Connected, "connected", "offline"), fallbackString(m.snapshot.Health.NATS.Status, "unknown"), cardWidth),
-		renderMetricPanel("Inbound", fmt.Sprintf("%d msgs", m.snapshot.Health.NATS.InMsgs), fmt.Sprintf("%d bytes", m.snapshot.Health.NATS.InBytes), cardWidth),
-		renderMetricPanel("Outbound", fmt.Sprintf("%d msgs", m.snapshot.Health.NATS.OutMsgs), fmt.Sprintf("%d bytes", m.snapshot.Health.NATS.OutBytes), cardWidth),
+		renderMetricPanel("Inbound", fmt.Sprintf("%d msgs", m.snapshot.Health.NATS.InMsgs), formatBytes(m.snapshot.Health.NATS.InBytes), cardWidth),
+		renderMetricPanel("Outbound", fmt.Sprintf("%d msgs", m.snapshot.Health.NATS.OutMsgs), formatBytes(m.snapshot.Health.NATS.OutBytes), cardWidth),
 	}
 	top := joinHorizontal(cards, 1)
 
@@ -318,50 +453,62 @@ func (m dashboardModel) overviewView(width, height int) string {
 
 func (m dashboardModel) overviewNATSLines() []string {
 	h := m.snapshot.Health.NATS
+	connDot := dotFull
+	connTag := dashboardTagGood
+	if !h.Connected {
+		connDot = dotEmpty
+		connTag = dashboardTagBad
+	}
 	lines := []string{
-		taggedLine(dashboardTagSection, "Connection details"),
-		fmt.Sprintf("server: %s", fallbackString(h.ServerURL, "-")),
-		fmt.Sprintf("name: %s", fallbackString(h.Name, "-")),
-		taggedLine(dashboardHealthTag(h.Connected), fmt.Sprintf("status: %s", fallbackString(h.Status, "unknown"))),
-		taggedLine(dashboardHealthTag(h.Connected), fmt.Sprintf("connected: %s", boolWord(h.Connected, "yes", "no"))),
-		fmt.Sprintf("reconnects: %d", h.Reconnects),
-		fmt.Sprintf("disconnects: %d", h.Disconnects),
-		fmt.Sprintf("connectedAt: %s", formatUnixMilli(h.ConnectedAt)),
-		fmt.Sprintf("lastReconnectAt: %s", formatUnixMilli(h.LastReconnectAt)),
-		fmt.Sprintf("lastDisconnectAt: %s", formatUnixMilli(h.LastDisconnectAt)),
+		taggedLine(dashboardTagSection, arrowR+" Connection"),
+		fmt.Sprintf("  server    %s", fallbackString(h.ServerURL, "-")),
+		fmt.Sprintf("  name      %s", fallbackString(h.Name, "-")),
+		taggedLine(connTag, fmt.Sprintf("  status    %s %s", connDot, fallbackString(h.Status, "unknown"))),
+		taggedLine(connTag, fmt.Sprintf("  connected %s", boolWord(h.Connected, "yes", "no"))),
+		"",
+		taggedLine(dashboardTagSection, arrowR+" Statistics"),
+		fmt.Sprintf("  reconnects       %d", h.Reconnects),
+		fmt.Sprintf("  disconnects      %d", h.Disconnects),
+		fmt.Sprintf("  connectedAt      %s", formatUnixMilli(h.ConnectedAt)),
+		fmt.Sprintf("  lastReconnectAt  %s", formatUnixMilli(h.LastReconnectAt)),
+		fmt.Sprintf("  lastDisconnectAt %s", formatUnixMilli(h.LastDisconnectAt)),
 	}
 	if strings.TrimSpace(h.LastError) != "" {
-		lines = append(lines, "", taggedLine(dashboardTagBad, "lastError:"), taggedLine(dashboardTagBad, h.LastError))
+		lines = append(lines, "", taggedLine(dashboardTagBad, arrowR+" Last Error"), taggedLine(dashboardTagBad, "  "+h.LastError))
 	}
 	return lines
 }
 
 func (m dashboardModel) overviewActivityLines() []string {
 	lines := []string{
-		taggedLine(dashboardTagSection, "Peer state"),
-		taggedLine(dashboardTagGood, fmt.Sprintf("authenticated: %d", countPeersByAuth(m.snapshot.Peers, types.AuthAuthenticated))),
-		taggedLine(dashboardTagWarn, fmt.Sprintf("pending auth: %d", countPeersByAuth(m.snapshot.Peers, types.AuthPending))),
-		taggedLine(dashboardTagGood, fmt.Sprintf("trusted: %d", countPeersByTrust(m.snapshot.Peers, types.TrustTrusted))),
-		taggedLine(dashboardTagWarn, fmt.Sprintf("pending trust: %d", countPeersByTrust(m.snapshot.Peers, types.TrustPending))),
+		taggedLine(dashboardTagSection, arrowR+" Peer State"),
+		taggedLine(dashboardTagGood, fmt.Sprintf("  %s authenticated  %d", dotFull, countPeersByAuth(m.snapshot.Peers, types.AuthAuthenticated))),
+		taggedLine(dashboardTagWarn, fmt.Sprintf("  %s auth pending   %d", dotHalf, countPeersByAuth(m.snapshot.Peers, types.AuthPending))),
+		taggedLine(dashboardTagGood, fmt.Sprintf("  %s trusted        %d", dotFull, countPeersByTrust(m.snapshot.Peers, types.TrustTrusted))),
+		taggedLine(dashboardTagWarn, fmt.Sprintf("  %s trust pending  %d", dotHalf, countPeersByTrust(m.snapshot.Peers, types.TrustPending))),
 		"",
-		taggedLine(dashboardTagSection, "Recent messages"),
+		taggedLine(dashboardTagSection, arrowR+" Recent Messages"),
 	}
 
 	if len(m.snapshot.Messages) == 0 {
-		lines = append(lines, taggedLine(dashboardTagMuted, "no recent messages"))
+		lines = append(lines, taggedLine(dashboardTagMuted, "  no recent messages"))
 		return lines
 	}
 
 	for i, item := range m.snapshot.Messages {
 		if i >= 6 {
-			lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("... %d more", len(m.snapshot.Messages)-i)))
+			lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("  ... %d more", len(m.snapshot.Messages)-i)))
 			break
 		}
-		lines = append(lines, taggedLine(dashboardTagAccent, fmt.Sprintf("%s %s -> %s", compactType(item.Type), fallbackString(item.From, "-"), fallbackString(item.To, "-"))))
-		lines = append(lines, taggedLine(dashboardTagMuted, "  "+truncateRight(strings.TrimSpace(item.Content), 48)))
+		lines = append(lines, taggedLine(dashboardTagAccent, fmt.Sprintf("  %s %s %s %s", arrowR, compactType(item.Type), fallbackString(item.From, "-"), fallbackString(item.To, "-"))))
+		lines = append(lines, taggedLine(dashboardTagMuted, "    "+truncateRight(strings.TrimSpace(item.Content), 48)))
 	}
 	return lines
 }
+
+// ---------------------------------------------------------------------------
+// Peers tab
+// ---------------------------------------------------------------------------
 
 func (m dashboardModel) peersView(width, height int) string {
 	leftWidth := width * 3 / 5
@@ -393,10 +540,10 @@ func (m dashboardModel) peerDetailPanel(width, height int) string {
 
 func (m dashboardModel) peerListLines(contentHeight int) []string {
 	lines := []string{
-		taggedLine(dashboardTagMuted, formatPeerListHeader()),
+		taggedLine(dashboardTagDim, formatPeerListHeader()),
 	}
 	if len(m.snapshot.Peers) == 0 {
-		return append(lines, taggedLine(dashboardTagMuted, "no peers discovered"))
+		return append(lines, taggedLine(dashboardTagMuted, "  no peers discovered"))
 	}
 
 	visibleRows := maxInt(1, contentHeight-1)
@@ -406,36 +553,42 @@ func (m dashboardModel) peerListLines(contentHeight int) []string {
 		prefix := " "
 		tag := ""
 		if row == m.cursors[1] {
-			prefix = ">"
+			prefix = arrowR
 			tag = dashboardTagSelected
 		}
 		lines = append(lines, taggedLine(tag, prefix+formatPeerRow(peer)))
 	}
 	if offset+visibleRows < len(m.snapshot.Peers) {
-		lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("... %d more peers", len(m.snapshot.Peers)-(offset+visibleRows))))
+		lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("  ... %d more peers", len(m.snapshot.Peers)-(offset+visibleRows))))
 	}
 	return lines
 }
 
 func (m dashboardModel) selectedPeerLines() []string {
 	if len(m.snapshot.Peers) == 0 {
-		return []string{"No peer selected.", "", "Use tab to move between views."}
+		return []string{taggedLine(dashboardTagMuted, "No peer selected."), "", "Use tab to move between views."}
 	}
 	peer := m.snapshot.Peers[m.cursors[1]]
+	authDot := peerAuthDot(peer.AuthStatus)
+	trustDot := peerTrustDot(peer.TrustStatus)
 	return []string{
-		taggedLine(dashboardTagAccent, fmt.Sprintf("nodeId: %s", peer.NodeID)),
-		taggedLine(dashboardPeerAuthTag(peer.AuthStatus), fmt.Sprintf("auth: %s", fallbackString(peer.AuthStatus, "unknown"))),
-		taggedLine(dashboardPeerTrustTag(peer.TrustStatus), fmt.Sprintf("trust: %s", fallbackString(peer.TrustStatus, "none"))),
-		fmt.Sprintf("agentProduct: %s", fallbackString(peer.AgentProduct, "-")),
-		fmt.Sprintf("version: %s", fallbackString(peer.Version, "-")),
-		fmt.Sprintf("inbox: %s", fallbackString(peer.Inbox, "-")),
+		taggedLine(dashboardTagAccent, fmt.Sprintf("  nodeId  %s", peer.NodeID)),
+		taggedLine(dashboardPeerAuthTag(peer.AuthStatus), fmt.Sprintf("  auth    %s %s", authDot, fallbackString(peer.AuthStatus, "unknown"))),
+		taggedLine(dashboardPeerTrustTag(peer.TrustStatus), fmt.Sprintf("  trust   %s %s", trustDot, fallbackString(peer.TrustStatus, "none"))),
+		fmt.Sprintf("  product %s", fallbackString(peer.AgentProduct, "-")),
+		fmt.Sprintf("  version %s", fallbackString(peer.Version, "-")),
+		fmt.Sprintf("  inbox   %s", fallbackString(peer.Inbox, "-")),
 		"",
-		taggedLine(dashboardTagSection, "Fleet summary"),
-		taggedLine(dashboardTagGood, fmt.Sprintf("trusted peers: %d", countPeersByTrust(m.snapshot.Peers, types.TrustTrusted))),
-		taggedLine(dashboardTagWarn, fmt.Sprintf("auth pending: %d", countPeersByAuth(m.snapshot.Peers, types.AuthPending))),
-		taggedLine(dashboardTagMuted, fmt.Sprintf("seen only: %d", countPeersByAuth(m.snapshot.Peers, types.AuthSeen))),
+		taggedLine(dashboardTagSection, arrowR+" Fleet Summary"),
+		taggedLine(dashboardTagGood, fmt.Sprintf("  %s trusted peers   %d", dotFull, countPeersByTrust(m.snapshot.Peers, types.TrustTrusted))),
+		taggedLine(dashboardTagWarn, fmt.Sprintf("  %s auth pending    %d", dotHalf, countPeersByAuth(m.snapshot.Peers, types.AuthPending))),
+		taggedLine(dashboardTagMuted, fmt.Sprintf("  %s seen only      %d", dotEmpty, countPeersByAuth(m.snapshot.Peers, types.AuthSeen))),
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Messages tab
+// ---------------------------------------------------------------------------
 
 func (m dashboardModel) messagesView(width, height int) string {
 	leftWidth := width * 3 / 5
@@ -460,10 +613,10 @@ func (m dashboardModel) messagesView(width, height int) string {
 func (m dashboardModel) messageListLines(contentHeight, contentWidth int) []string {
 	cols := messageColumnsForWidth(contentWidth)
 	lines := []string{
-		taggedLine(dashboardTagMuted, formatMessageListHeader(cols)),
+		taggedLine(dashboardTagDim, formatMessageListHeader(cols)),
 	}
 	if len(m.snapshot.Messages) == 0 {
-		return append(lines, taggedLine(dashboardTagMuted, "no recent messages"))
+		return append(lines, taggedLine(dashboardTagMuted, "  no recent messages"))
 	}
 
 	visibleRows := maxInt(1, contentHeight-1)
@@ -473,43 +626,47 @@ func (m dashboardModel) messageListLines(contentHeight, contentWidth int) []stri
 		prefix := " "
 		tag := ""
 		if row == m.cursors[2] {
-			prefix = ">"
+			prefix = arrowR
 			tag = dashboardTagSelected
 		}
 		lines = append(lines, taggedLine(tag, formatMessageRow(prefix, item, cols)))
 	}
 	if offset+visibleRows < len(m.snapshot.Messages) {
-		lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("... %d more messages", len(m.snapshot.Messages)-(offset+visibleRows))))
+		lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("  ... %d more messages", len(m.snapshot.Messages)-(offset+visibleRows))))
 	}
 	return lines
 }
 
 func (m dashboardModel) selectedMessageLines() []string {
 	if len(m.snapshot.Messages) == 0 {
-		return []string{"No message selected.", "", "Use j/k or arrow keys to inspect entries."}
+		return []string{taggedLine(dashboardTagMuted, "No message selected."), "", "Use j/k or arrow keys to inspect entries."}
 	}
 	item := m.snapshot.Messages[m.cursors[2]]
 	lines := []string{
-		taggedLine(dashboardTagMuted, fmt.Sprintf("id: %s", fallbackString(item.ID, "-"))),
-		taggedLine(dashboardTagAccent, fmt.Sprintf("type: %s", fallbackString(item.Type, "unknown"))),
-		fmt.Sprintf("from: %s", fallbackString(item.From, "-")),
-		fmt.Sprintf("to: %s", fallbackString(item.To, "-")),
-		fmt.Sprintf("sessionKey: %s", fallbackString(item.SessionKey, "-")),
-		fmt.Sprintf("ts: %s", formatUnixMilli(item.Ts)),
+		taggedLine(dashboardTagMuted, fmt.Sprintf("  id   %s", fallbackString(item.ID, "-"))),
+		taggedLine(dashboardTagAccent, fmt.Sprintf("  type %s", fallbackString(item.Type, "unknown"))),
+		fmt.Sprintf("  from %s", fallbackString(item.From, "-")),
+		fmt.Sprintf("  to   %s", fallbackString(item.To, "-")),
+		fmt.Sprintf("  key  %s", fallbackString(item.SessionKey, "-")),
+		fmt.Sprintf("  ts   %s", formatUnixMilli(item.Ts)),
 		"",
-		taggedLine(dashboardTagSection, "content:"),
+		taggedLine(dashboardTagSection, arrowR+" Content"),
 	}
 	if strings.TrimSpace(item.Content) == "" {
-		lines = append(lines, taggedLine(dashboardTagMuted, "-"))
+		lines = append(lines, taggedLine(dashboardTagMuted, "  -"))
 	} else {
-		lines = append(lines, item.Content)
+		lines = append(lines, "  "+item.Content)
 	}
 	if len(item.Metadata) > 0 {
-		lines = append(lines, "", taggedLine(dashboardTagSection, "metadata:"))
+		lines = append(lines, "", taggedLine(dashboardTagSection, arrowR+" Metadata"))
 		lines = append(lines, formatMetadata(item.Metadata)...)
 	}
 	return lines
 }
+
+// ---------------------------------------------------------------------------
+// Logs tab
+// ---------------------------------------------------------------------------
 
 func (m dashboardModel) logsView(width, height int) string {
 	leftWidth := width * 7 / 10
@@ -521,32 +678,123 @@ func (m dashboardModel) logsView(width, height int) string {
 
 	logLines := splitLogLines(m.snapshot.Logs)
 	listContentHeight := maxInt(1, height-3)
-	offset := clampInt(m.offsets[3], 0, maxInt(0, len(logLines)-1))
+
+	// If following tail, snap offset to show newest lines at bottom.
+	offset := m.offsets[3]
+	if m.logsFollowTail && len(logLines) > listContentHeight {
+		offset = len(logLines) - listContentHeight
+	}
+	offset = clampInt(offset, 0, maxInt(0, len(logLines)-1))
 	maxVisible := maxInt(1, listContentHeight)
 	if offset > maxInt(0, len(logLines)-maxVisible) {
 		offset = maxInt(0, len(logLines)-maxVisible)
 	}
 
+	// Column widths for structured log fields.
+	timeW := 8
+	levelW := 5
+	compW := 10
+	innerW := maxInt(20, leftWidth-2)
+
 	lines := make([]string, 0, listContentHeight)
 	if len(logLines) == 0 {
-		lines = append(lines, taggedLine(dashboardTagMuted, "no logs available"))
+		lines = append(lines, taggedLine(dashboardTagMuted, "  no logs available"))
 	} else {
+		// Header row.
+		hdr := fmt.Sprintf(" %-*s %s %-*s %s %-*s %s %s",
+			timeW, "TIME", boxV, levelW, "LEVEL", boxV, compW, "COMPONENT", boxV, "MESSAGE / FIELDS")
+		lines = append(lines, taggedLine(dashboardTagDim, truncateRight(hdr, innerW)))
+
 		for i := offset; i < len(logLines) && len(lines) < listContentHeight; i++ {
-			lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("%4d  %s", i+1, logLines[i])))
+			entry := parseLogEntry(logLines[i])
+			if !entry.IsJSON {
+				lines = append(lines, taggedLine(dashboardTagMuted,
+					fmt.Sprintf(" %s", truncateRight(logLines[i], maxInt(8, innerW-2)))))
+				continue
+			}
+
+			levelTag := logLevelTag(entry.Level)
+
+			// Fixed columns: time | level | component |
+			timeStr := padRight(truncateRight(entry.Time, timeW), timeW)
+			levelStr := padRight(strings.ToUpper(truncateRight(entry.Level, levelW)), levelW)
+			compStr := padRight(truncateRight(entry.Comp, compW), compW)
+			prefix := fmt.Sprintf(" %s %s %s %s %s %s ",
+				timeStr, boxV, levelStr, boxV, compStr, boxV)
+			prefixW := displayWidth(prefix)
+
+			// Remaining width for message + context fields.
+			msgAreaW := maxInt(10, innerW-prefixW)
+
+			// Build context tags (key=value pairs) from known fields.
+			var ctx []string
+			if entry.Event != "" {
+				ctx = append(ctx, "event="+entry.Event)
+			}
+			if entry.Peer != "" {
+				ctx = append(ctx, "peer="+entry.Peer)
+			}
+			if entry.NodeID != "" {
+				ctx = append(ctx, "nodeId="+entry.NodeID)
+			}
+			if entry.From != "" {
+				ctx = append(ctx, "from="+entry.From)
+			}
+			if entry.To != "" {
+				ctx = append(ctx, "to="+entry.To)
+			}
+			if entry.MsgID != "" {
+				ctx = append(ctx, "msgId="+entry.MsgID)
+			}
+			if entry.ReqID != "" {
+				ctx = append(ctx, "reqId="+entry.ReqID)
+			}
+			if entry.SessKey != "" {
+				ctx = append(ctx, "sess="+entry.SessKey)
+			}
+			if entry.Err != "" {
+				ctx = append(ctx, "err="+entry.Err)
+			}
+			// Append remaining extra fields.
+			ctx = append(ctx, entry.Extra...)
+
+			// Format: "msg  field1=v field2=v ..."
+			msgPart := truncateRight(entry.Msg, maxInt(6, msgAreaW/2))
+			ctxStr := strings.Join(ctx, " ")
+			if ctxStr != "" {
+				ctxAvail := maxInt(4, msgAreaW-displayWidth(msgPart)-2)
+				ctxStr = truncateRight(ctxStr, ctxAvail)
+				msgPart = msgPart + "  " + ctxStr
+			}
+			msgPart = truncateRight(msgPart, msgAreaW)
+
+			lines = append(lines, taggedLine(levelTag, prefix+msgPart))
 		}
 		if offset+maxVisible < len(logLines) {
-			lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("... %d more lines", len(logLines)-(offset+maxVisible))))
+			remaining := len(logLines) - (offset + maxVisible)
+			lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("  ... %d more lines", remaining)))
 		}
 	}
 
+	tailLabel := ""
+	if m.logsFollowTail {
+		tailLabel = " " + dotFull + " TAIL"
+	}
+
 	summary := []string{
-		taggedLine(dashboardTagSection, "Log source"),
-		fmt.Sprintf("source: %s", dashboardLogSource()),
-		taggedLine(dashboardTagAccent, fmt.Sprintf("total lines: %d", len(logLines))),
-		fmt.Sprintf("window start: %d", minInt(len(logLines), offset+1)),
-		fmt.Sprintf("window end: %d", minInt(len(logLines), offset+maxVisible)),
+		taggedLine(dashboardTagSection, arrowR+" Log Source"),
+		fmt.Sprintf("  source: %s", dashboardLogSource()),
+		taggedLine(dashboardTagAccent, fmt.Sprintf("  total lines: %d", len(logLines))),
+		fmt.Sprintf("  window: %d-%d", minInt(len(logLines), offset+1), minInt(len(logLines), offset+maxVisible)),
+		taggedLine(dashboardTagGood, fmt.Sprintf("  follow:%s", tailLabel)),
 		"",
-		taggedLine(dashboardTagSection, "Recent message types"),
+		taggedLine(dashboardTagSection, arrowR+" Keys"),
+		taggedLine(dashboardTagMuted, "  G  jump to end (follow)"),
+		taggedLine(dashboardTagMuted, "  g  jump to start"),
+		taggedLine(dashboardTagMuted, "  j/k  scroll line"),
+		taggedLine(dashboardTagMuted, "  d/u  scroll page"),
+		"",
+		taggedLine(dashboardTagSection, arrowR+" Recent Message Types"),
 	}
 	summary = append(summary, recentMessageTypeLines(m.snapshot.Messages)...)
 
@@ -562,14 +810,26 @@ func (m dashboardModel) logsView(width, height int) string {
 	return joinHorizontal([]string{left, right}, 1)
 }
 
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+
 func (m dashboardModel) footerView(width int) string {
 	updated := "never"
 	if !m.lastUpdated.IsZero() {
 		updated = m.lastUpdated.Format("15:04:05")
 	}
-	line := fmt.Sprintf("Keys: q quit | tab switch | 1-4 select | j/k scroll | d/u page | r refresh | Last updated %s", updated)
+	left := fmt.Sprintf(" Keys: q quit %s tab switch %s 1-4 select %s j/k scroll %s d/u page %s r refresh",
+		boxV, boxV, boxV, boxV, boxV)
+	right := fmt.Sprintf("Updated %s ", updated)
+	gap := maxInt(0, width-displayWidth(left)-displayWidth(right))
+	line := left + strings.Repeat(" ", gap) + right
 	return dashboardStyleFooter(truncateRight(line, width))
 }
+
+// ---------------------------------------------------------------------------
+// Commands & selection
+// ---------------------------------------------------------------------------
 
 func (m dashboardModel) refreshCmd() tea.Cmd {
 	client := m.client
@@ -593,13 +853,19 @@ func (m *dashboardModel) moveSelection(delta int) {
 	case 3:
 		lines := splitLogLines(m.snapshot.Logs)
 		m.offsets[3] = clampInt(m.offsets[3]+delta, 0, maxInt(0, len(lines)-1))
+		m.logsFollowTail = false
 	}
 }
 
 func (m *dashboardModel) clampSelections() {
 	m.cursors[1] = clampInt(m.cursors[1], 0, maxInt(0, len(m.snapshot.Peers)-1))
 	m.cursors[2] = clampInt(m.cursors[2], 0, maxInt(0, len(m.snapshot.Messages)-1))
-	m.offsets[3] = clampInt(m.offsets[3], 0, maxInt(0, len(splitLogLines(m.snapshot.Logs))-1))
+	logLines := splitLogLines(m.snapshot.Logs)
+	if m.logsFollowTail {
+		m.offsets[3] = maxInt(0, len(logLines)-1)
+	} else {
+		m.offsets[3] = clampInt(m.offsets[3], 0, maxInt(0, len(logLines)-1))
+	}
 }
 
 func (m dashboardModel) natsStatusLabel() string {
@@ -617,6 +883,16 @@ func dashboardTickCmd() tea.Cmd {
 		return t
 	})
 }
+
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(dashboardSpinnerInterval, func(_ time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------------------
 
 func loadDashboardSnapshot(ctx context.Context, client dashboardClient, logs logProvider) (dashboardSnapshot, error) {
 	var snapshot dashboardSnapshot
@@ -677,6 +953,96 @@ func decodeInto(src any, dst any) error {
 	return json.Unmarshal(raw, dst)
 }
 
+// ---------------------------------------------------------------------------
+// Log parsing
+// ---------------------------------------------------------------------------
+
+// logKnownFields lists the JSON keys that are extracted into dedicated
+// parsedLogEntry fields and should NOT appear in Extra.
+var logKnownFields = map[string]bool{
+	"time": true, "level": true, "msg": true, "source": true,
+	"nodeId": true, "service": true, "component": true,
+	"event": true, "peer": true, "from": true, "to": true,
+	"messageId": true, "requestId": true, "sessionKey": true,
+	"error": true,
+}
+
+func parseLogEntry(line string) parsedLogEntry {
+	line = strings.TrimSpace(line)
+	if line == "" || line[0] != '{' {
+		return parsedLogEntry{Raw: line}
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		return parsedLogEntry{Raw: line}
+	}
+	entry := parsedLogEntry{IsJSON: true}
+
+	// time
+	if t, ok := obj["time"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339Nano, t); err == nil {
+			entry.Time = parsed.Format("15:04:05")
+		} else if parsed, err := time.Parse(time.RFC3339, t); err == nil {
+			entry.Time = parsed.Format("15:04:05")
+		} else {
+			entry.Time = t
+		}
+	}
+
+	// Dedicated string fields.
+	strField := func(key string) string {
+		if v, ok := obj[key].(string); ok {
+			return v
+		}
+		return ""
+	}
+	entry.Level = strField("level")
+	entry.Msg = strField("msg")
+	entry.NodeID = strField("nodeId")
+	entry.Service = strField("service")
+	entry.Comp = strField("component")
+	entry.Event = strField("event")
+	entry.Peer = strField("peer")
+	entry.From = strField("from")
+	entry.To = strField("to")
+	entry.MsgID = strField("messageId")
+	entry.ReqID = strField("requestId")
+	entry.SessKey = strField("sessionKey")
+	entry.Err = strField("error")
+
+	// Collect remaining fields into Extra.
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		if !logKnownFields[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		entry.Extra = append(entry.Extra, fmt.Sprintf("%s=%v", k, obj[k]))
+	}
+	return entry
+}
+
+func logLevelTag(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "INFO":
+		return dashboardTagLogInfo
+	case "WARN", "WARNING":
+		return dashboardTagLogWarn
+	case "ERROR", "FATAL":
+		return dashboardTagLogError
+	case "DEBUG":
+		return dashboardTagLogDebug
+	default:
+		return dashboardTagMuted
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Panel rendering (Unicode box drawing)
+// ---------------------------------------------------------------------------
+
 func renderMetricPanel(title, value, detail string, width int) string {
 	detailTag := dashboardTagMuted
 	valueTag := dashboardTagAccent
@@ -689,8 +1055,8 @@ func renderMetricPanel(title, value, detail string, width int) string {
 		detailTag = dashboardTagMuted
 	}
 	lines := []string{
-		taggedLine(valueTag, value),
-		taggedLine(detailTag, detail),
+		taggedLine(valueTag, "  "+value),
+		taggedLine(detailTag, "  "+detail),
 	}
 	return renderPanelWithTheme(title, width, 5, lines, dashboardMetricTheme())
 }
@@ -705,9 +1071,16 @@ func renderPanelWithTheme(title string, width, height int, lines []string, theme
 
 	innerWidth := width - 2
 	contentHeight := height - 2
-	title = truncateRight(title, maxInt(1, innerWidth-2))
-	top := theme.border("+") + theme.title(" "+padRightVisible(title, maxInt(1, innerWidth-1))) + theme.border("+")
-	bottom := theme.border("+" + strings.Repeat("-", innerWidth) + "+")
+	title = truncateRight(title, maxInt(1, innerWidth-4))
+
+	// Top border: ╭─ Title ──────────╮
+	titleStr := " " + title + " "
+	titleVisLen := displayWidth(titleStr)
+	remainH := maxInt(0, innerWidth-titleVisLen-1) // -1 for the dash before title
+	top := theme.border(boxTL+boxH) + theme.title(titleStr) + theme.border(strings.Repeat(boxH, remainH)+boxTR)
+
+	// Bottom border: ╰──────────────────╯
+	bottom := theme.border(boxBL + strings.Repeat(boxH, innerWidth) + boxBR)
 
 	expanded := make([]dashboardStyledLine, 0, len(lines))
 	for _, rawLine := range lines {
@@ -737,11 +1110,15 @@ func renderPanelWithTheme(title string, width, height int, lines []string, theme
 		}
 		content := padRightVisible(truncateRight(line.text, innerWidth), innerWidth)
 		content = dashboardApplyLineStyle(line.tag, content)
-		body = append(body, theme.border("|")+content+theme.border("|"))
+		body = append(body, theme.border(boxV)+content+theme.border(boxV))
 	}
 	body = append(body, bottom)
 	return strings.Join(body, "\n")
 }
+
+// ---------------------------------------------------------------------------
+// Horizontal join & layout
+// ---------------------------------------------------------------------------
 
 func joinHorizontal(blocks []string, gap int) string {
 	if len(blocks) == 0 {
@@ -804,22 +1181,60 @@ func ensureVisible(offset, cursor, total, visible int) int {
 	return clampInt(offset, 0, maxOffset)
 }
 
+// ---------------------------------------------------------------------------
+// Peer formatting
+// ---------------------------------------------------------------------------
+
 func formatPeerListHeader() string {
 	return " nodeId             auth           trust      adapter/version"
 }
 
 func formatPeerRow(peer types.Peer) string {
+	authDot := peerAuthDot(peer.AuthStatus)
+	trustDot := peerTrustDot(peer.TrustStatus)
 	adapter := fallbackString(peer.AgentProduct, "-")
 	if peer.Version != "" {
 		adapter = adapter + " " + peer.Version
 	}
-	return fmt.Sprintf("%-18s %-14s %-10s %s",
+	return fmt.Sprintf("%-18s %s %-12s %s %-8s %s",
 		truncateRight(peer.NodeID, 18),
-		truncateRight(fallbackString(peer.AuthStatus, "unknown"), 14),
-		truncateRight(fallbackString(peer.TrustStatus, "none"), 10),
-		truncateRight(adapter, 24),
+		authDot,
+		truncateRight(fallbackString(peer.AuthStatus, "unknown"), 12),
+		trustDot,
+		truncateRight(fallbackString(peer.TrustStatus, "none"), 8),
+		truncateRight(adapter, 22),
 	)
 }
+
+func peerAuthDot(status string) string {
+	switch status {
+	case types.AuthAuthenticated:
+		return dotFull
+	case types.AuthPending:
+		return dotHalf
+	case types.AuthRejected, types.AuthExpired:
+		return dotEmpty
+	default:
+		return dotEmpty
+	}
+}
+
+func peerTrustDot(status string) string {
+	switch status {
+	case types.TrustTrusted:
+		return dotFull
+	case types.TrustPending:
+		return dotHalf
+	case types.TrustRejected, types.TrustRevoked:
+		return dotEmpty
+	default:
+		return dotEmpty
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Message formatting
+// ---------------------------------------------------------------------------
 
 type messageColumns struct {
 	typeWidth    int
@@ -926,6 +1341,23 @@ func formatUnixMilli(ts int64) string {
 	return time.UnixMilli(ts).Format("2006-01-02 15:04:05")
 }
 
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Log & activity helpers
+// ---------------------------------------------------------------------------
+
 func splitLogLines(text string) []string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.TrimSuffix(text, "\n")
@@ -944,7 +1376,7 @@ func dashboardLogSource() string {
 
 func recentMessageTypeLines(items []protocol.MessageEnvelope) []string {
 	if len(items) == 0 {
-		return []string{taggedLine(dashboardTagMuted, "no recent messages")}
+		return []string{taggedLine(dashboardTagMuted, "  no recent messages")}
 	}
 	counts := map[string]int{}
 	for _, item := range items {
@@ -969,7 +1401,7 @@ func recentMessageTypeLines(items []protocol.MessageEnvelope) []string {
 		if i >= 5 {
 			break
 		}
-		lines = append(lines, taggedLine(dashboardTagAccent, fmt.Sprintf("%s: %d", item.key, item.value)))
+		lines = append(lines, taggedLine(dashboardTagAccent, fmt.Sprintf("  %s: %d", item.key, item.value)))
 	}
 	return lines
 }
@@ -982,7 +1414,7 @@ func formatMetadata(meta map[string]any) []string {
 	sort.Strings(keys)
 	lines := make([]string, 0, len(keys))
 	for _, key := range keys {
-		lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("%s=%v", key, meta[key])))
+		lines = append(lines, taggedLine(dashboardTagMuted, fmt.Sprintf("  %s = %v", key, meta[key])))
 	}
 	return lines
 }
@@ -1007,6 +1439,10 @@ func countPeersByTrust(peers []types.Peer, want string) int {
 	return count
 }
 
+// ---------------------------------------------------------------------------
+// Text wrapping
+// ---------------------------------------------------------------------------
+
 func wrapLine(line string, width int) []string {
 	if width <= 0 {
 		return []string{""}
@@ -1026,6 +1462,10 @@ func wrapLine(line string, width int) []string {
 	lines = append(lines, line)
 	return lines
 }
+
+// ---------------------------------------------------------------------------
+// Panel themes
+// ---------------------------------------------------------------------------
 
 func dashboardDefaultTheme() dashboardPanelTheme {
 	return dashboardPanelTheme{
@@ -1047,6 +1487,10 @@ func dashboardHeaderTheme() dashboardPanelTheme {
 		title:  dashboardStyleHeaderTitle,
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tagged-line system
+// ---------------------------------------------------------------------------
 
 func taggedLine(tag, text string) string {
 	if tag == "" {
@@ -1082,10 +1526,24 @@ func dashboardApplyLineStyle(tag, text string) string {
 		return dashboardStyleBad(text)
 	case dashboardTagSelected:
 		return dashboardStyleSelected(text)
+	case dashboardTagDim:
+		return dashboardStyleDim(text)
+	case dashboardTagLogInfo:
+		return dashboardStyleLogInfo(text)
+	case dashboardTagLogWarn:
+		return dashboardStyleLogWarn(text)
+	case dashboardTagLogError:
+		return dashboardStyleLogError(text)
+	case dashboardTagLogDebug:
+		return dashboardStyleLogDebug(text)
 	default:
 		return text
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Status tag helpers
+// ---------------------------------------------------------------------------
 
 func dashboardHealthTag(connected bool) string {
 	if connected {
@@ -1120,28 +1578,84 @@ func dashboardPeerTrustTag(status string) string {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ANSI style functions — Cyberpunk / Neon palette
+// ---------------------------------------------------------------------------
+
 func dashboardStyle(code, text string) string {
 	return "\x1b[" + code + "m" + text + "\x1b[0m"
 }
 
-func dashboardStyleBorder(text string) string       { return dashboardStyle("38;5;67", text) }
-func dashboardStyleMetricBorder(text string) string { return dashboardStyle("38;5;44", text) }
-func dashboardStyleHeaderBorder(text string) string { return dashboardStyle("38;5;81", text) }
-func dashboardStylePanelTitle(text string) string   { return dashboardStyle("1;38;5;255;48;5;24", text) }
-func dashboardStyleMetricTitle(text string) string  { return dashboardStyle("1;38;5;232;48;5;79", text) }
-func dashboardStyleHeaderTitle(text string) string {
-	return dashboardStyle("1;38;5;232;48;5;117", text)
+// Panel borders — dim cyan.
+func dashboardStyleBorder(text string) string { return dashboardStyle("38;5;37", text) }
+
+// Metric panel borders — bright cyan.
+func dashboardStyleMetricBorder(text string) string { return dashboardStyle("38;5;45", text) }
+
+// Header borders — neon magenta.
+func dashboardStyleHeaderBorder(text string) string { return dashboardStyle("38;5;135", text) }
+
+// Panel titles — black on cyan.
+func dashboardStylePanelTitle(text string) string {
+	return dashboardStyle("1;38;5;16;48;5;37", text)
 }
-func dashboardStyleAccent(text string) string      { return dashboardStyle("1;38;5;117", text) }
-func dashboardStyleMuted(text string) string       { return dashboardStyle("38;5;246", text) }
-func dashboardStyleSection(text string) string     { return dashboardStyle("1;38;5;81", text) }
-func dashboardStyleGood(text string) string        { return dashboardStyle("1;38;5;255;48;5;29", text) }
-func dashboardStyleWarn(text string) string        { return dashboardStyle("1;38;5;16;48;5;214", text) }
-func dashboardStyleBad(text string) string         { return dashboardStyle("1;38;5;255;48;5;160", text) }
-func dashboardStyleSelected(text string) string    { return dashboardStyle("1;38;5;255;48;5;60", text) }
-func dashboardStyleFooter(text string) string      { return dashboardStyle("38;5;246", text) }
-func dashboardStyleTabActive(text string) string   { return dashboardStyle("1;38;5;255;48;5;24", text) }
-func dashboardStyleTabInactive(text string) string { return dashboardStyle("38;5;110", text) }
+
+// Metric titles — black on neon green.
+func dashboardStyleMetricTitle(text string) string {
+	return dashboardStyle("1;38;5;16;48;5;48", text)
+}
+
+// Header title — bold white on magenta.
+func dashboardStyleHeaderTitle(text string) string {
+	return dashboardStyle("1;38;5;255;48;5;55", text)
+}
+
+// Accent — bright cyan (for key values, highlights).
+func dashboardStyleAccent(text string) string { return dashboardStyle("1;38;5;45", text) }
+
+// Muted — gray (for secondary info).
+func dashboardStyleMuted(text string) string { return dashboardStyle("38;5;243", text) }
+
+// Dim — darker gray.
+func dashboardStyleDim(text string) string { return dashboardStyle("38;5;239", text) }
+
+// Section headers — bold magenta.
+func dashboardStyleSection(text string) string { return dashboardStyle("1;38;5;177", text) }
+
+// Good status — neon green text.
+func dashboardStyleGood(text string) string { return dashboardStyle("38;5;48", text) }
+
+// Warning — amber text.
+func dashboardStyleWarn(text string) string { return dashboardStyle("38;5;214", text) }
+
+// Bad/error — neon red-pink text.
+func dashboardStyleBad(text string) string { return dashboardStyle("1;38;5;197", text) }
+
+// Selected row — white on dark blue.
+func dashboardStyleSelected(text string) string {
+	return dashboardStyle("1;38;5;255;48;5;24", text)
+}
+
+// Footer — muted gray.
+func dashboardStyleFooter(text string) string { return dashboardStyle("38;5;243", text) }
+
+// Active tab — bold white on dark teal.
+func dashboardStyleTabActive(text string) string {
+	return dashboardStyle("1;38;5;255;48;5;30", text)
+}
+
+// Inactive tab — dim gray.
+func dashboardStyleTabInactive(text string) string { return dashboardStyle("38;5;243", text) }
+
+// Log level styles.
+func dashboardStyleLogInfo(text string) string  { return dashboardStyle("38;5;45", text) }
+func dashboardStyleLogWarn(text string) string  { return dashboardStyle("38;5;214", text) }
+func dashboardStyleLogError(text string) string { return dashboardStyle("1;38;5;197", text) }
+func dashboardStyleLogDebug(text string) string { return dashboardStyle("38;5;243", text) }
+
+// ---------------------------------------------------------------------------
+// String utilities
+// ---------------------------------------------------------------------------
 
 func truncateRight(s string, width int) string {
 	if width <= 0 {
