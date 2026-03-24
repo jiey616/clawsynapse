@@ -146,6 +146,7 @@ build_service_path() {
     for candidate in \
         "$INSTALL_DIR" \
         "$HOME/.local/bin" \
+        "$HOME/.npm-global/bin" \
         "/opt/homebrew/bin" \
         "/opt/homebrew/sbin" \
         "/usr/local/bin" \
