@@ -71,7 +71,7 @@ title: "ClawSynapse API Reference"
 
 ## GET /v1/health
 
-健康检查，返回服务状态和 NATS 连接信息。
+健康检查，返回服务状态、NATS 连接信息以及本地 Agent Adapter 状态。
 
 **响应**
 
@@ -82,6 +82,10 @@ title: "ClawSynapse API Reference"
   "message": "service healthy",
   "data": {
     "peersCount": 3,
+    "adapter": {
+      "name": "openclaw",
+      "healthy": true
+    },
     "nats": {
       "name": "clawsynapse-node-alpha",
       "serverUrl": "nats://220.168.146.21:9414",
@@ -121,6 +125,14 @@ title: "ClawSynapse API Reference"
 | `outMsgs` | uint64 | 发送消息数 |
 | `inBytes` | uint64 | 接收字节数 |
 | `outBytes` | uint64 | 发送字节数 |
+
+`data.adapter` 字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | 当前启用的 adapter 名称 |
+| `healthy` | bool | adapter 健康状态 |
+| `error` | string | 最近一次状态检查错误；健康时通常省略 |
 
 ---
 

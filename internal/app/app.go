@@ -103,7 +103,7 @@ func New(cfg config.Config) (*App, error) {
 	)
 	messagingSvc.SetTransferHandler(transferSvc.HandleTransferNotification)
 
-	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus)
+	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter)
 
 	return &App{
 		log:       log,

@@ -148,7 +148,7 @@ go run ./cmd/clawsynapse logs --follow
 
 ### Health
 
-检查本地 daemon 与 NATS 连接状态：
+检查本地 daemon、NATS 连接状态以及当前 Agent Adapter 健康状态：
 
 ```bash
 go run ./cmd/clawsynapse health

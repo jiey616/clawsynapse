@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"clawsynapse/internal/adapter"
 	"clawsynapse/internal/auth"
 	"clawsynapse/internal/discovery"
 	"clawsynapse/internal/messaging"
@@ -15,17 +16,28 @@ import (
 )
 
 type Server struct {
-	httpServer *http.Server
-	peers      *discovery.Registry
-	auth       *auth.Service
-	trust      *trust.Service
-	messaging  *messaging.Service
-	transfer   *transfer.Service
-	nats       *natsbus.Client
+	httpServer  *http.Server
+	peers       *discovery.Registry
+	auth        *auth.Service
+	trust       *trust.Service
+	messaging   *messaging.Service
+	transfer    *transfer.Service
+	nats        *natsbus.Client
+	adapter     adapter.AgentAdapter
+	adapterName string
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client) *Server {
-	s := &Server{peers: peers, auth: authSvc, trust: trustSvc, messaging: messagingSvc, transfer: transferSvc, nats: natsClient}
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string) *Server {
+	s := &Server{
+		peers:       peers,
+		auth:        authSvc,
+		trust:       trustSvc,
+		messaging:   messagingSvc,
+		transfer:    transferSvc,
+		nats:        natsClient,
+		adapter:     agentAdapter,
+		adapterName: agentAdapterName,
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/peers", s.handlePeers)
