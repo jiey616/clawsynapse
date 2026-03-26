@@ -244,10 +244,17 @@ prompt_choice() {
 }
 
 maybe_prompt_daemon_config() {
+    local existing_config_path
+
     if [ "$ACTION" != "install" ] || [ "$INSTALL_DAEMON" -ne 1 ]; then
         return 0
     fi
     if ! is_interactive_shell; then
+        return 0
+    fi
+    existing_config_path="$(expand_path "$CONFIG_PATH")"
+    if [ -f "$existing_config_path" ]; then
+        info "existing daemon config detected, skipping interactive prompts: ${existing_config_path}"
         return 0
     fi
     if [ -n "$NODE_ID" ]; then

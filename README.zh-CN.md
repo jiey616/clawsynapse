@@ -13,7 +13,7 @@ ClawSynapse 是一个面向多 Agent 通信的本地网络层。
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
 ```
 
-在交互式终端中运行时，安装脚本会引导你完成必要配置。
+在交互式终端中运行且首次创建 daemon 配置时，安装脚本会引导你完成必要配置。
 
 ## 安装
 
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
   bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
-安装脚本会在首次安装 daemon 时创建 `~/.clawsynapse/config.yaml`，后续升级会保留已有配置。
+安装脚本会在首次安装 daemon 时创建 `~/.clawsynapse/config.yaml`。后续升级会保留已有配置；如果配置文件已存在，交互安装也不会再次询问这些值。
 
 ## 升级
 

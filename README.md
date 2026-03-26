@@ -13,7 +13,7 @@ One command installs the CLI and daemon:
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
 ```
 
-The installer will guide you through the required setup in an interactive terminal.
+The installer will guide you through the required setup in an interactive terminal when it needs to create the daemon config for the first time.
 
 ## Install
 
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
   bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
-The installer creates `~/.clawsynapse/config.yaml` on first daemon install and keeps your existing config on later upgrades.
+The installer creates `~/.clawsynapse/config.yaml` on first daemon install and keeps your existing config on later upgrades. If the config file already exists, interactive installs skip those prompts.
 
 ## Upgrade
 
