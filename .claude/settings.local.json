@@ -7,7 +7,9 @@
       "Bash(go vet:*)",
       "Bash(curl -s http://127.0.0.1:18080/v1/transfer/AonoWI-ufMG4dsr7oCXc6g)",
       "Bash(python3 -m json.tool)",
-      "Bash(gofmt -w ./cmd/clawsynapse/dashboard.go)"
+      "Bash(gofmt -w ./cmd/clawsynapse/dashboard.go)",
+      "Bash(curl:*)",
+      "Bash(go build:*)"
     ]
   }
 }
