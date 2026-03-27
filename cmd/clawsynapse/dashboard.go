@@ -431,7 +431,7 @@ func (m dashboardModel) headerView(width int) string {
 	if m.layout.narrow {
 		// Narrow: split header info across multiple lines.
 		lines = []string{
-			taggedLine(dashboardTagAccent, fmt.Sprintf("%s v%s %s %s %s",
+			taggedLine(dashboardTagAccent, fmt.Sprintf("%s %s %s %s %s",
 				diamond, version, boxV, statusIcon, statusLabel)),
 			taggedLine(dashboardTagAccent, fmt.Sprintf("API %s %s Updated %s",
 				m.apiAddr, boxV, updated)),
@@ -446,7 +446,7 @@ func (m dashboardModel) headerView(width int) string {
 	} else {
 		lines = []string{
 			taggedLine(dashboardTagAccent, fmt.Sprintf(
-				"%s v%s %s API %s %s %s %s %s Updated %s",
+				"%s %s %s API %s %s %s %s %s Updated %s",
 				diamond, version, boxV, m.apiAddr, boxV, statusIcon, statusLabel, boxV, updated,
 			)),
 			fmt.Sprintf(
