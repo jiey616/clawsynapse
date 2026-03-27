@@ -1191,14 +1191,7 @@ func renderPanelWithTheme(title string, width, height int, lines []string, theme
 
 	expanded := make([]dashboardStyledLine, 0, len(lines))
 	for _, rawLine := range lines {
-		tag, line := parseTaggedLine(rawLine)
-		if strings.TrimSpace(line) == "" {
-			expanded = append(expanded, dashboardStyledLine{text: "", tag: tag})
-			continue
-		}
-		for _, part := range wrapLine(line, innerWidth) {
-			expanded = append(expanded, dashboardStyledLine{text: part, tag: tag})
-		}
+		expanded = append(expanded, expandTaggedLine(rawLine, innerWidth)...)
 	}
 
 	if len(expanded) > contentHeight {
@@ -1270,12 +1263,7 @@ func measureWrappedLineCount(width int, lines []string) int {
 	width = maxInt(width, 1)
 	total := 0
 	for _, rawLine := range lines {
-		_, line := parseTaggedLine(rawLine)
-		if strings.TrimSpace(line) == "" {
-			total++
-			continue
-		}
-		total += len(wrapLine(line, width))
+		total += len(expandTaggedLine(rawLine, width))
 	}
 	return total
 }
@@ -1413,7 +1401,7 @@ func formatMessageListHeader(cols messageColumns) string {
 }
 
 func formatMessageRow(prefix string, item protocol.MessageEnvelope, cols messageColumns) string {
-	preview := strings.TrimSpace(item.Content)
+	preview := normalizeSingleLine(item.Content)
 	if preview == "" {
 		preview = "-"
 	}
@@ -1582,6 +1570,31 @@ func wrapLine(line string, width int) []string {
 	}
 	lines = append(lines, line)
 	return lines
+}
+
+func expandTaggedLine(rawLine string, width int) []dashboardStyledLine {
+	tag, line := parseTaggedLine(rawLine)
+	parts := splitPreservingEmptyLines(line)
+	expanded := make([]dashboardStyledLine, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			expanded = append(expanded, dashboardStyledLine{text: "", tag: tag})
+			continue
+		}
+		for _, wrapped := range wrapLine(part, width) {
+			expanded = append(expanded, dashboardStyledLine{text: wrapped, tag: tag})
+		}
+	}
+	return expanded
+}
+
+func splitPreservingEmptyLines(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.Split(text, "\n")
+}
+
+func normalizeSingleLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // ---------------------------------------------------------------------------

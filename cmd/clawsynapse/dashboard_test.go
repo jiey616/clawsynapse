@@ -163,6 +163,27 @@ func TestMessageListLinesFitPanelWidth(t *testing.T) {
 	}
 }
 
+func TestFormatMessageRowCollapsesEmbeddedNewlinesInPreview(t *testing.T) {
+	cols := messageColumnsForWidth(54)
+	row := formatMessageRow(" ", protocol.MessageEnvelope{
+		Type:    "conversation.message",
+		From:    "node-jack",
+		To:      "trustmesh-dev",
+		Content: "line one\n\nline two\tline three",
+		Ts:      1711111111111,
+	}, cols)
+
+	if strings.Contains(row, "\n") {
+		t.Fatalf("expected single-line preview, got %q", row)
+	}
+	if !strings.Contains(row, "line one li") {
+		t.Fatalf("expected normalized preview prefix, got %q", row)
+	}
+	if strings.Contains(row, "line one\n") {
+		t.Fatalf("expected newlines to be removed from preview, got %q", row)
+	}
+}
+
 func TestRenderPanelWrapsWideCharactersWithoutCorruption(t *testing.T) {
 	panel := renderPanel("Message Detail", 36, 8, []string{
 		"这是一个包含中文和 ASCII JSON 的长消息内容，用来验证换行不会打断字符边界。",
@@ -170,6 +191,24 @@ func TestRenderPanelWrapsWideCharactersWithoutCorruption(t *testing.T) {
 
 	if strings.Contains(panel, "\ufffd") {
 		t.Fatalf("panel contains replacement rune, got:\n%s", panel)
+	}
+}
+
+func TestRenderPanelKeepsLayoutForMultilineContent(t *testing.T) {
+	panel := renderPanel("Message Detail", 32, 8, []string{
+		taggedLine(dashboardTagSection, arrowR+" Content"),
+		"  first line\n\n  second line\n  third line",
+	})
+
+	if got := countLines(panel); got != 8 {
+		t.Fatalf("expected panel height 8, got %d\n%s", got, panel)
+	}
+	lines := strings.Split(panel, "\n")
+	for i, line := range lines[1 : len(lines)-1] {
+		plain := stripANSI(line)
+		if !strings.HasPrefix(plain, boxV) || !strings.HasSuffix(plain, boxV) {
+			t.Fatalf("content line %d lost panel border: %q", i+1, plain)
+		}
 	}
 }
 
