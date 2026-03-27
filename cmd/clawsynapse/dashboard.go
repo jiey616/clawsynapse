@@ -462,7 +462,7 @@ func (m dashboardModel) headerView(width int) string {
 	if m.errText != "" {
 		lines = append(lines, taggedLine(dashboardTagBad, "Last refresh failed: "+truncateRight(m.errText, maxInt(12, width-22))))
 	}
-	return renderPanelWithTheme("ClawSynapse Dashboard", width, maxInt(5, len(lines)+2), lines, dashboardHeaderTheme())
+	return renderPanelWithTheme("ClawSynapse Dashboard", width, panelHeightForLines(width, lines), lines, dashboardHeaderTheme())
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,6 +1166,12 @@ func renderPanel(title string, width, height int, lines []string) string {
 	return renderPanelWithTheme(title, width, height, lines, dashboardDefaultTheme())
 }
 
+func panelHeightForLines(width int, lines []string) int {
+	width = maxInt(width, 8)
+	innerWidth := width - 2
+	return maxInt(3, measureWrappedLineCount(innerWidth, lines)+2)
+}
+
 func renderPanelWithTheme(title string, width, height int, lines []string, theme dashboardPanelTheme) string {
 	width = maxInt(width, 8)
 	height = maxInt(height, 3)
@@ -1258,6 +1264,20 @@ func joinHorizontal(blocks []string, gap int) string {
 		out = append(out, strings.Join(parts, sep))
 	}
 	return strings.Join(out, "\n")
+}
+
+func measureWrappedLineCount(width int, lines []string) int {
+	width = maxInt(width, 1)
+	total := 0
+	for _, rawLine := range lines {
+		_, line := parseTaggedLine(rawLine)
+		if strings.TrimSpace(line) == "" {
+			total++
+			continue
+		}
+		total += len(wrapLine(line, width))
+	}
+	return total
 }
 
 func countLines(s string) int {
