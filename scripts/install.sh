@@ -139,14 +139,34 @@ append_unique_path() {
     esac
 }
 
+detect_openclaw_bin() {
+    local openclaw_path
+    openclaw_path="$(command -v openclaw 2>/dev/null || true)"
+    if [ -n "$openclaw_path" ]; then
+        printf '%s\n' "$openclaw_path"
+    fi
+}
+
+detect_openclaw_dir() {
+    local openclaw_path
+    openclaw_path="$(detect_openclaw_bin)"
+    if [ -n "$openclaw_path" ]; then
+        dirname "$openclaw_path"
+    fi
+}
+
 build_service_path() {
     local path_value=""
     local candidate
+    local openclaw_dir
+
+    openclaw_dir="$(detect_openclaw_dir)"
 
     for candidate in \
         "$INSTALL_DIR" \
         "$HOME/.local/bin" \
         "$HOME/.npm-global/bin" \
+        ${openclaw_dir:+"$openclaw_dir"} \
         "/opt/homebrew/bin" \
         "/opt/homebrew/sbin" \
         "/usr/local/bin" \
@@ -244,10 +264,17 @@ prompt_choice() {
 }
 
 maybe_prompt_daemon_config() {
+    local existing_config_path
+
     if [ "$ACTION" != "install" ] || [ "$INSTALL_DAEMON" -ne 1 ]; then
         return 0
     fi
     if ! is_interactive_shell; then
+        return 0
+    fi
+    existing_config_path="$(expand_path "$CONFIG_PATH")"
+    if [ -f "$existing_config_path" ]; then
+        info "existing daemon config detected, skipping interactive prompts: ${existing_config_path}"
         return 0
     fi
     if [ -n "$NODE_ID" ]; then
@@ -489,6 +516,7 @@ install_systemd_service() {
     local daemon_path="${INSTALL_DIR}/${DAEMON_BINARY}"
     local unit_path="/etc/systemd/system/${SYSTEMD_UNIT_NAME}"
     local service_path
+    local openclaw_bin
     local tmpfile
     local service_user
     local service_group
@@ -496,6 +524,7 @@ install_systemd_service() {
     service_user="$(id -un)"
     service_group="$(id -gn)"
     service_path="$(build_service_path)"
+    openclaw_bin="$(detect_openclaw_bin)"
     require_sudo
 
     tmpfile="$(mktemp)"
@@ -512,6 +541,7 @@ User=${service_user}
 Group=${service_group}
 Environment=HOME=${HOME}
 Environment=PATH=${service_path}
+${openclaw_bin:+Environment=OPENCLAW_BIN=${openclaw_bin}}
 WorkingDirectory=${HOME}
 ExecStart=${daemon_path} --config ${CONFIG_PATH}
 Restart=on-failure
@@ -550,11 +580,18 @@ install_launchd_service() {
     local plist_dir="${HOME}/Library/LaunchAgents"
     local plist_path="${plist_dir}/${LAUNCHD_LABEL}.plist"
     local service_path
+    local openclaw_bin
+    local openclaw_env_block=""
     local tmpfile
     local domain
 
     install -d -m 755 "$plist_dir"
     service_path="$(build_service_path)"
+    openclaw_bin="$(detect_openclaw_bin)"
+    if [ -n "$openclaw_bin" ]; then
+        openclaw_env_block="    <key>OPENCLAW_BIN</key>
+    <string>${openclaw_bin}</string>"
+    fi
     tmpfile="$(mktemp)"
 
     cat >"$tmpfile" <<EOF
@@ -576,6 +613,7 @@ install_launchd_service() {
   <dict>
     <key>PATH</key>
     <string>${service_path}</string>
+${openclaw_env_block:+${openclaw_env_block}}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -921,6 +959,14 @@ main() {
     info "ClawSynapse installer"
     info "install dir: ${INSTALL_DIR}"
     info "platform: $(detect_platform)"
+
+    local _openclaw_bin
+    _openclaw_bin="$(detect_openclaw_bin)"
+    if [ -n "$_openclaw_bin" ]; then
+        info "detected openclaw: ${_openclaw_bin}"
+    else
+        warn "openclaw not found in PATH; service will not set OPENCLAW_BIN"
+    fi
 
     if [ "$ACTION" = "uninstall" ]; then
         uninstall_selected

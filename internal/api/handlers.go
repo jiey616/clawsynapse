@@ -90,7 +90,7 @@ func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	natsStatus := map[string]any{"connected": false, "status": "unavailable"}
 	if s.nats != nil {
 		st := s.nats.Status()
@@ -112,6 +112,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
+	adapterStatus := map[string]any{
+		"name":    s.adapterName,
+		"healthy": false,
+	}
+	if s.adapter == nil {
+		adapterStatus["error"] = "agent adapter unavailable"
+	} else {
+		ctx, cancel := contextWithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		st, err := s.adapter.GetStatus(ctx)
+		if err != nil {
+			adapterStatus["error"] = err.Error()
+		}
+		if st != nil {
+			adapterStatus["healthy"] = st.Healthy
+		}
+	}
+
 	respondJSON(w, http.StatusOK, types.APIResult{
 		OK:      true,
 		Code:    "health.ok",
@@ -119,6 +138,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Data: map[string]any{
 			"peersCount": len(s.peers.List()),
 			"nats":       natsStatus,
+			"adapter":    adapterStatus,
 		},
 		TS: time.Now().UnixMilli(),
 	})

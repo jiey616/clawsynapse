@@ -22,13 +22,14 @@ import (
 )
 
 const (
-	dashboardRefreshInterval = 3 * time.Second
-	dashboardMessagesLimit   = 12
-	dashboardTabCount        = 4
-	dashboardMinWidth        = 84
-	dashboardMinHeight       = 26
-	dashboardPageStep        = 6
-	dashboardSpinnerInterval = 100 * time.Millisecond
+	dashboardRefreshInterval  = 3 * time.Second
+	dashboardMessagesLimit    = 12
+	dashboardTabCount         = 4
+	dashboardMinWidth         = 60
+	dashboardMinHeight        = 20
+	dashboardNarrowBreakpoint = 100
+	dashboardPageStep         = 6
+	dashboardSpinnerInterval  = 100 * time.Millisecond
 )
 
 // Unicode box-drawing characters.
@@ -124,6 +125,27 @@ type dashboardRefreshMsg struct {
 
 type spinnerTickMsg struct{}
 
+// dashboardLayout holds pre-computed layout dimensions for the current
+// terminal size. Recalculated on every WindowSizeMsg.
+type dashboardLayout struct {
+	width  int
+	height int
+	narrow bool // true when width < dashboardNarrowBreakpoint
+
+	bodyHeight int
+
+	// Split-panel dimensions (3:2 ratio, for Peers / Messages / Overview).
+	splitLeftW  int
+	splitRightW int
+
+	// Logs split-panel dimensions (7:3 ratio).
+	logsLeftW  int
+	logsRightW int
+
+	// Overview card width.
+	cardWidth int
+}
+
 type dashboardPanelTheme struct {
 	border func(string) string
 	title  func(string) string
@@ -165,6 +187,7 @@ type dashboardModel struct {
 	timeout        time.Duration
 	width          int
 	height         int
+	layout         dashboardLayout
 	activeTab      int
 	lastUpdated    time.Time
 	snapshot       dashboardSnapshot
@@ -174,6 +197,35 @@ type dashboardModel struct {
 	offsets        [dashboardTabCount]int
 	spinnerFrame   int
 	logsFollowTail bool
+}
+
+func (m *dashboardModel) recalcLayout() {
+	w := m.width
+	h := m.height
+	narrow := w < dashboardNarrowBreakpoint
+
+	lo := dashboardLayout{
+		width:  w,
+		height: h,
+		narrow: narrow,
+	}
+
+	if narrow {
+		lo.splitLeftW = w
+		lo.splitRightW = w
+		lo.logsLeftW = w
+		lo.logsRightW = w
+	} else {
+		lo.splitLeftW = w * 3 / 5
+		lo.splitRightW = w - lo.splitLeftW - 1
+		lo.logsLeftW = w * 7 / 10
+		lo.logsRightW = w - lo.logsLeftW - 1
+	}
+
+	// Overview cards: 4 cards + 3 gaps of 1 char.
+	lo.cardWidth = maxInt(18, (w-3)/4)
+
+	m.layout = lo
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +289,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.recalcLayout()
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -302,13 +355,35 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboardModel) View() tea.View {
-	width := maxInt(m.width, dashboardMinWidth)
-	height := maxInt(m.height, dashboardMinHeight)
+	// Show a friendly message when the terminal is too small.
+	if m.width > 0 && m.width < dashboardMinWidth || m.height > 0 && m.height < dashboardMinHeight {
+		hint := fmt.Sprintf("Terminal too small (%dx%d). Need at least %dx%d.\nPress q to quit.",
+			m.width, m.height, dashboardMinWidth, dashboardMinHeight)
+		v := tea.NewView(hint)
+		v.AltScreen = true
+		return v
+	}
+
+	width := m.width
+	height := m.height
+	if width == 0 {
+		width = dashboardMinWidth
+	}
+	if height == 0 {
+		height = dashboardMinHeight
+	}
+
+	// Ensure layout is in sync (handles direct model construction in tests).
+	if m.layout.width != width || m.layout.height != height {
+		m.width = width
+		m.height = height
+		m.recalcLayout()
+	}
 
 	header := m.headerView(width)
 	tabs := m.tabsView(width)
 	footer := m.footerView(width)
-	bodyHeight := maxInt(12, height-countLines(header)-countLines(tabs)-countLines(footer))
+	bodyHeight := maxInt(8, height-countLines(header)-countLines(tabs)-countLines(footer))
 
 	full := strings.Join([]string{
 		header,
@@ -327,10 +402,9 @@ func (m dashboardModel) View() tea.View {
 // ---------------------------------------------------------------------------
 
 func (m dashboardModel) headerView(width int) string {
-	// Status indicator
+	// Status indicator.
 	statusIcon := dotFull
 	statusLabel := "READY"
-	_ = dashboardTagGood // status tag used only for future badge rendering
 	if m.loading {
 		statusIcon = string(spinnerFrames[m.spinnerFrame])
 		statusLabel = "SYNCING"
@@ -345,7 +419,7 @@ func (m dashboardModel) headerView(width int) string {
 		updated = m.lastUpdated.Format("15:04:05")
 	}
 
-	// NATS indicator
+	// NATS indicator.
 	natsIcon := dotFull
 	natsTag := dashboardTagGood
 	if !m.snapshot.Health.NATS.Connected {
@@ -353,27 +427,42 @@ func (m dashboardModel) headerView(width int) string {
 		natsTag = dashboardTagBad
 	}
 
-	lines := []string{
-		taggedLine(dashboardTagAccent, fmt.Sprintf(
-			"%s v%s %s API %s %s %s %s %s Updated %s",
-			diamond, version, boxV, m.apiAddr, boxV, statusIcon, statusLabel, boxV, updated,
-		)),
-		fmt.Sprintf(
-			"NATS %s %s %s Peers %d %s %s %d %s %d msgs %s Press r to refresh",
-			taggedLine(natsTag, natsIcon),
-			taggedLine(natsTag, m.natsStatusLabel()),
-			boxV,
-			len(m.snapshot.Peers),
-			boxV,
-			arrowUp, m.snapshot.Health.NATS.InMsgs,
-			arrowDn, m.snapshot.Health.NATS.OutMsgs,
-			boxV,
-		),
+	var lines []string
+	if m.layout.narrow {
+		// Narrow: split header info across multiple lines.
+		lines = []string{
+			taggedLine(dashboardTagAccent, fmt.Sprintf("%s %s %s %s %s",
+				diamond, version, boxV, statusIcon, statusLabel)),
+			taggedLine(dashboardTagAccent, fmt.Sprintf("API %s %s Updated %s",
+				m.apiAddr, boxV, updated)),
+			fmt.Sprintf("NATS %s %s %s Peers %d",
+				taggedLine(natsTag, natsIcon),
+				taggedLine(natsTag, m.natsStatusLabel()),
+				boxV, len(m.snapshot.Peers)),
+			fmt.Sprintf("%s %d %s %d msgs",
+				arrowUp, m.snapshot.Health.NATS.InMsgs,
+				arrowDn, m.snapshot.Health.NATS.OutMsgs),
+		}
+	} else {
+		lines = []string{
+			taggedLine(dashboardTagAccent, fmt.Sprintf(
+				"%s %s %s API %s %s %s %s %s Updated %s",
+				diamond, version, boxV, m.apiAddr, boxV, statusIcon, statusLabel, boxV, updated,
+			)),
+			fmt.Sprintf(
+				"NATS %s %s %s Peers %d %s %s %d %s %d msgs %s Press r to refresh",
+				taggedLine(natsTag, natsIcon),
+				taggedLine(natsTag, m.natsStatusLabel()),
+				boxV, len(m.snapshot.Peers), boxV,
+				arrowUp, m.snapshot.Health.NATS.InMsgs,
+				arrowDn, m.snapshot.Health.NATS.OutMsgs, boxV,
+			),
+		}
 	}
 	if m.errText != "" {
 		lines = append(lines, taggedLine(dashboardTagBad, "Last refresh failed: "+truncateRight(m.errText, maxInt(12, width-22))))
 	}
-	return renderPanelWithTheme("ClawSynapse Dashboard", width, maxInt(5, len(lines)+2), lines, dashboardHeaderTheme())
+	return renderPanelWithTheme("ClawSynapse Dashboard", width, panelHeightForLines(width, lines), lines, dashboardHeaderTheme())
 }
 
 // ---------------------------------------------------------------------------
@@ -381,8 +470,23 @@ func (m dashboardModel) headerView(width int) string {
 // ---------------------------------------------------------------------------
 
 func (m dashboardModel) tabsView(width int) string {
-	labels := []string{"Overview", "Peers", "Messages", "Logs"}
+	fullLabels := []string{"Overview", "Peers", "Messages", "Logs"}
+	shortLabels := []string{"Ovw", "Prs", "Msg", "Log"}
 	nums := []string{"1", "2", "3", "4"}
+
+	// Choose labels based on available width.
+	labels := fullLabels
+	sep := "  "
+	// Estimate full width: each cell " N Label " + separators.
+	estWidth := 0
+	for _, l := range fullLabels {
+		estWidth += displayWidth(" "+nums[0]+" "+l+" ") + 2
+	}
+	if estWidth > width {
+		labels = shortLabels
+		sep = " "
+	}
+
 	parts := make([]string, 0, len(labels))
 	underParts := make([]string, 0, len(labels))
 
@@ -398,7 +502,6 @@ func (m dashboardModel) tabsView(width int) string {
 		}
 	}
 
-	sep := "  "
 	line1 := strings.Join(parts, sep)
 	line2 := strings.Join(underParts, sep)
 	return truncateRightVisible(line1, width) + "\n" + truncateRightVisible(line2, width)
@@ -428,7 +531,16 @@ func (m dashboardModel) bodyView(width, height int) string {
 // ---------------------------------------------------------------------------
 
 func (m dashboardModel) overviewView(width, height int) string {
-	cardWidth := maxInt(18, (width-3)/4)
+	lo := m.layout
+	narrow := lo.narrow
+
+	// Cards: ensure total width = 4*cardWidth + 3 gaps <= width.
+	cardWidth := lo.cardWidth
+	totalCardsW := cardWidth*4 + 3
+	if totalCardsW > width {
+		cardWidth = maxInt(18, (width-3)/4)
+	}
+
 	cards := []string{
 		renderMetricPanel("Peers", fmt.Sprintf("%d", len(m.snapshot.Peers)), "discovered nodes", cardWidth),
 		renderMetricPanel("NATS", boolWord(m.snapshot.Health.NATS.Connected, "connected", "offline"), fallbackString(m.snapshot.Health.NATS.Status, "unknown"), cardWidth),
@@ -436,18 +548,19 @@ func (m dashboardModel) overviewView(width, height int) string {
 		renderMetricPanel("Outbound", fmt.Sprintf("%d msgs", m.snapshot.Health.NATS.OutMsgs), formatBytes(m.snapshot.Health.NATS.OutBytes), cardWidth),
 	}
 	top := joinHorizontal(cards, 1)
+	topLines := countLines(top)
+	remaining := maxInt(8, height-topLines)
 
-	remaining := maxInt(8, height-countLines(top)-1)
-	if width < 110 {
-		left := renderPanel("NATS", width, remaining/2, m.overviewNATSLines())
-		right := renderPanel("Activity", width, height-countLines(top)-countLines(left)-1, m.overviewActivityLines())
+	if narrow {
+		natsH := maxInt(8, remaining/2)
+		actH := maxInt(8, remaining-natsH)
+		left := renderPanel("NATS", width, natsH, m.overviewNATSLines())
+		right := renderPanel("Activity", width, actH, m.overviewActivityLines())
 		return strings.Join([]string{top, left, right}, "\n")
 	}
 
-	leftWidth := width * 3 / 5
-	rightWidth := width - leftWidth - 1
-	left := renderPanel("NATS", leftWidth, remaining, m.overviewNATSLines())
-	right := renderPanel("Activity", rightWidth, remaining, m.overviewActivityLines())
+	left := renderPanel("NATS", lo.splitLeftW, remaining, m.overviewNATSLines())
+	right := renderPanel("Activity", lo.splitRightW, remaining, m.overviewActivityLines())
 	return strings.Join([]string{top, joinHorizontal([]string{left, right}, 1)}, "\n")
 }
 
@@ -511,31 +624,19 @@ func (m dashboardModel) overviewActivityLines() []string {
 // ---------------------------------------------------------------------------
 
 func (m dashboardModel) peersView(width, height int) string {
-	leftWidth := width * 3 / 5
-	rightWidth := width - leftWidth - 1
-	if width < 100 {
-		leftWidth = width
-		rightWidth = width
+	lo := m.layout
+
+	if lo.narrow {
+		listH := maxInt(8, height*3/5)
+		detailH := maxInt(8, height-listH-1)
+		list := renderPanel("Peers", width, listH, m.peerListLines(maxInt(1, listH-3)))
+		detail := renderPanel("Peer Detail", width, detailH, m.selectedPeerLines())
+		return strings.Join([]string{list, detail}, "\n")
 	}
 
-	list := m.peerListPanel(leftWidth, height)
-	detail := m.peerDetailPanel(rightWidth, height)
-	if width < 100 {
-		detailHeight := maxInt(8, height-countLines(list)-1)
-		return strings.Join([]string{
-			renderPanel("Peers", leftWidth, maxInt(8, height-detailHeight-1), m.peerListLines(maxInt(1, height-detailHeight-3))),
-			renderPanel("Peer Detail", rightWidth, detailHeight, m.selectedPeerLines()),
-		}, "\n")
-	}
+	list := renderPanel("Peers", lo.splitLeftW, height, m.peerListLines(maxInt(1, height-3)))
+	detail := renderPanel("Peer Detail", lo.splitRightW, height, m.selectedPeerLines())
 	return joinHorizontal([]string{list, detail}, 1)
-}
-
-func (m dashboardModel) peerListPanel(width, height int) string {
-	return renderPanel("Peers", width, height, m.peerListLines(maxInt(1, height-3)))
-}
-
-func (m dashboardModel) peerDetailPanel(width, height int) string {
-	return renderPanel("Peer Detail", width, height, m.selectedPeerLines())
 }
 
 func (m dashboardModel) peerListLines(contentHeight int) []string {
@@ -591,22 +692,18 @@ func (m dashboardModel) selectedPeerLines() []string {
 // ---------------------------------------------------------------------------
 
 func (m dashboardModel) messagesView(width, height int) string {
-	leftWidth := width * 3 / 5
-	rightWidth := width - leftWidth - 1
-	if width < 100 {
-		leftWidth = width
-		rightWidth = width
+	lo := m.layout
+
+	if lo.narrow {
+		listH := maxInt(8, height/2)
+		detailH := maxInt(8, height-listH-1)
+		list := renderPanel("Messages", width, listH, m.messageListLines(maxInt(1, listH-3), maxInt(24, width-2)))
+		detail := renderPanel("Message Detail", width, detailH, m.selectedMessageLines())
+		return strings.Join([]string{list, detail}, "\n")
 	}
 
-	list := renderPanel("Messages", leftWidth, height, m.messageListLines(maxInt(1, height-3), maxInt(24, leftWidth-2)))
-	detail := renderPanel("Message Detail", rightWidth, height, m.selectedMessageLines())
-	if width < 100 {
-		detailHeight := maxInt(8, height/2)
-		return strings.Join([]string{
-			renderPanel("Messages", leftWidth, maxInt(8, height-detailHeight-1), m.messageListLines(maxInt(1, height-detailHeight-3), maxInt(24, leftWidth-2))),
-			renderPanel("Message Detail", rightWidth, detailHeight, m.selectedMessageLines()),
-		}, "\n")
-	}
+	list := renderPanel("Messages", lo.splitLeftW, height, m.messageListLines(maxInt(1, height-3), maxInt(24, lo.splitLeftW-2)))
+	detail := renderPanel("Message Detail", lo.splitRightW, height, m.selectedMessageLines())
 	return joinHorizontal([]string{list, detail}, 1)
 }
 
@@ -669,12 +766,9 @@ func (m dashboardModel) selectedMessageLines() []string {
 // ---------------------------------------------------------------------------
 
 func (m dashboardModel) logsView(width, height int) string {
-	leftWidth := width * 7 / 10
-	rightWidth := width - leftWidth - 1
-	if width < 100 {
-		leftWidth = width
-		rightWidth = width
-	}
+	lo := m.layout
+	leftWidth := lo.logsLeftW
+	rightWidth := lo.logsRightW
 
 	logLines := splitLogLines(m.snapshot.Logs)
 	listContentHeight := maxInt(1, height-3)
@@ -798,15 +892,16 @@ func (m dashboardModel) logsView(width, height int) string {
 	}
 	summary = append(summary, recentMessageTypeLines(m.snapshot.Messages)...)
 
+	if lo.narrow {
+		summaryH := maxInt(8, height/3)
+		logsH := maxInt(8, height-summaryH-1)
+		left := renderPanel("Logs", leftWidth, logsH, lines)
+		right := renderPanel("Runtime Summary", rightWidth, summaryH, summary)
+		return strings.Join([]string{left, right}, "\n")
+	}
+
 	left := renderPanel("Logs", leftWidth, height, lines)
 	right := renderPanel("Runtime Summary", rightWidth, height, summary)
-	if width < 100 {
-		summaryHeight := maxInt(8, height/3)
-		return strings.Join([]string{
-			renderPanel("Logs", leftWidth, maxInt(8, height-summaryHeight-1), lines),
-			renderPanel("Runtime Summary", rightWidth, summaryHeight, summary),
-		}, "\n")
-	}
 	return joinHorizontal([]string{left, right}, 1)
 }
 
@@ -819,8 +914,14 @@ func (m dashboardModel) footerView(width int) string {
 	if !m.lastUpdated.IsZero() {
 		updated = m.lastUpdated.Format("15:04:05")
 	}
-	left := fmt.Sprintf(" Keys: q quit %s tab switch %s 1-4 select %s j/k scroll %s d/u page %s r refresh",
-		boxV, boxV, boxV, boxV, boxV)
+
+	var left string
+	if m.layout.narrow {
+		left = fmt.Sprintf(" q quit %s tab %s j/k %s r refresh", boxV, boxV, boxV)
+	} else {
+		left = fmt.Sprintf(" Keys: q quit %s tab switch %s 1-4 select %s j/k scroll %s d/u page %s r refresh",
+			boxV, boxV, boxV, boxV, boxV)
+	}
 	right := fmt.Sprintf("Updated %s ", updated)
 	gap := maxInt(0, width-displayWidth(left)-displayWidth(right))
 	line := left + strings.Repeat(" ", gap) + right
@@ -1065,6 +1166,12 @@ func renderPanel(title string, width, height int, lines []string) string {
 	return renderPanelWithTheme(title, width, height, lines, dashboardDefaultTheme())
 }
 
+func panelHeightForLines(width int, lines []string) int {
+	width = maxInt(width, 8)
+	innerWidth := width - 2
+	return maxInt(3, measureWrappedLineCount(innerWidth, lines)+2)
+}
+
 func renderPanelWithTheme(title string, width, height int, lines []string, theme dashboardPanelTheme) string {
 	width = maxInt(width, 8)
 	height = maxInt(height, 3)
@@ -1084,14 +1191,7 @@ func renderPanelWithTheme(title string, width, height int, lines []string, theme
 
 	expanded := make([]dashboardStyledLine, 0, len(lines))
 	for _, rawLine := range lines {
-		tag, line := parseTaggedLine(rawLine)
-		if strings.TrimSpace(line) == "" {
-			expanded = append(expanded, dashboardStyledLine{text: "", tag: tag})
-			continue
-		}
-		for _, part := range wrapLine(line, innerWidth) {
-			expanded = append(expanded, dashboardStyledLine{text: part, tag: tag})
-		}
+		expanded = append(expanded, expandTaggedLine(rawLine, innerWidth)...)
 	}
 
 	if len(expanded) > contentHeight {
@@ -1157,6 +1257,15 @@ func joinHorizontal(blocks []string, gap int) string {
 		out = append(out, strings.Join(parts, sep))
 	}
 	return strings.Join(out, "\n")
+}
+
+func measureWrappedLineCount(width int, lines []string) int {
+	width = maxInt(width, 1)
+	total := 0
+	for _, rawLine := range lines {
+		total += len(expandTaggedLine(rawLine, width))
+	}
+	return total
 }
 
 func countLines(s string) int {
@@ -1292,7 +1401,7 @@ func formatMessageListHeader(cols messageColumns) string {
 }
 
 func formatMessageRow(prefix string, item protocol.MessageEnvelope, cols messageColumns) string {
-	preview := strings.TrimSpace(item.Content)
+	preview := normalizeSingleLine(item.Content)
 	if preview == "" {
 		preview = "-"
 	}
@@ -1463,6 +1572,31 @@ func wrapLine(line string, width int) []string {
 	return lines
 }
 
+func expandTaggedLine(rawLine string, width int) []dashboardStyledLine {
+	tag, line := parseTaggedLine(rawLine)
+	parts := splitPreservingEmptyLines(line)
+	expanded := make([]dashboardStyledLine, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			expanded = append(expanded, dashboardStyledLine{text: "", tag: tag})
+			continue
+		}
+		for _, wrapped := range wrapLine(part, width) {
+			expanded = append(expanded, dashboardStyledLine{text: wrapped, tag: tag})
+		}
+	}
+	return expanded
+}
+
+func splitPreservingEmptyLines(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.Split(text, "\n")
+}
+
+func normalizeSingleLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
 // ---------------------------------------------------------------------------
 // Panel themes
 // ---------------------------------------------------------------------------
@@ -1544,13 +1678,6 @@ func dashboardApplyLineStyle(tag, text string) string {
 // ---------------------------------------------------------------------------
 // Status tag helpers
 // ---------------------------------------------------------------------------
-
-func dashboardHealthTag(connected bool) string {
-	if connected {
-		return dashboardTagGood
-	}
-	return dashboardTagBad
-}
 
 func dashboardPeerAuthTag(status string) string {
 	switch status {
