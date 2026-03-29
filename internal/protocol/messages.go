@@ -4,6 +4,7 @@ type DiscoveryAnnounce struct {
 	MessageID    string         `json:"messageId"`
 	MessageType  string         `json:"messageType"`
 	NodeID       string         `json:"nodeId"`
+	DID          string         `json:"did,omitempty"`
 	Version      string         `json:"version"`
 	AgentProduct string         `json:"agentProduct"`
 	Capabilities []string       `json:"capabilities"`

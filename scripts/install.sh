@@ -8,9 +8,9 @@
 #     curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash -s -- --cli
 #
 #   CLI + daemon service (default):
-#     ./scripts/install.sh --all --node-id node-alpha
+#     ./scripts/install.sh --all
 #     curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-#       bash -s -- --node-id node-alpha
+#       bash -s -- --daemon
 #
 set -euo pipefail
 
@@ -74,7 +74,6 @@ Common options:
   -h, --help           Show this help
 
 Daemon bootstrap options:
-  --node-id ID
   --nats-servers URLS
   --local-api-addr ADDR
   --trust-mode MODE
@@ -93,7 +92,7 @@ Daemon bootstrap options:
 
 Examples:
   Install CLI and daemon as a service:
-    ./scripts/install.sh --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+    ./scripts/install.sh --daemon --nats-servers nats://127.0.0.1:4222
     curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
 
   Install CLI only:
@@ -101,7 +100,7 @@ Examples:
 
   Install daemon only from GitHub Release:
     curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-      bash -s -- --daemon --node-id node-alpha
+      bash -s -- --daemon
 
   Uninstall the daemon service:
     ./scripts/install.sh --daemon --uninstall
@@ -277,13 +276,8 @@ maybe_prompt_daemon_config() {
         info "existing daemon config detected, skipping interactive prompts: ${existing_config_path}"
         return 0
     fi
-    if [ -n "$NODE_ID" ]; then
-        return 0
-    fi
-
     info "interactive daemon configuration"
     info "reading answers from your terminal"
-    NODE_ID="$(prompt_required "Node ID" "$NODE_ID")"
     NATS_SERVERS="$(prompt_value "NATS servers (comma-separated)" "$NATS_SERVERS")"
     AGENT_ADAPTER="$(prompt_choice "Agent adapter" "$AGENT_ADAPTER" default openclaw webhook)"
     if [ "$AGENT_ADAPTER" = "webhook" ]; then
@@ -452,9 +446,6 @@ write_config_if_missing() {
         return 0
     fi
 
-    if [ -z "$NODE_ID" ]; then
-        error "daemon install requires --node-id the first time so ${CONFIG_PATH} can be created"
-    fi
     if [ "$AGENT_ADAPTER" = "webhook" ] && [ -z "$WEBHOOK_URL" ]; then
         error "--webhook-url is required when --agent-adapter webhook is used"
     fi
@@ -462,7 +453,6 @@ write_config_if_missing() {
     tmpfile="$(mktemp)"
 
     {
-        printf 'nodeId: %s\n' "$NODE_ID"
         printf 'natsServers:\n'
         yaml_write_list "$NATS_SERVERS"
         printf 'localApiAddr: %s\n' "$LOCAL_API_ADDR"
@@ -772,7 +762,7 @@ parse_args() {
                 ;;
             --node-id)
                 [ $# -ge 2 ] || error "missing value for --node-id"
-                NODE_ID="$2"
+                warn "--node-id is deprecated and ignored; nodeId is derived from the local identity key"
                 shift
                 ;;
             --nats-servers)
@@ -936,7 +926,6 @@ main() {
     CONFIG_PATH="${CONFIG_PATH:-$DEFAULT_CONFIG_PATH}"
     DATA_DIR="${DATA_DIR:-$DEFAULT_DATA_DIR}"
     TRANSFER_DIR="${TRANSFER_DIR:-$DEFAULT_TRANSFER_DIR}"
-    NODE_ID="${NODE_ID:-}"
     NATS_SERVERS="${NATS_SERVERS:-$DEFAULT_NATS_SERVERS}"
     LOCAL_API_ADDR="${LOCAL_API_ADDR:-$DEFAULT_LOCAL_API_ADDR}"
     TRUST_MODE="${TRUST_MODE:-$DEFAULT_TRUST_MODE}"

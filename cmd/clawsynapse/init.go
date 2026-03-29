@@ -27,7 +27,6 @@ const (
 
 type initConfig struct {
 	ConfigPath          string
-	NodeID              string
 	NATSServers         string
 	LocalAPIAddr        string
 	TrustMode           string
@@ -72,7 +71,6 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 
 	fmt.Fprintf(stdout, "config written: %s\n", cfg.ConfigPath)
-	fmt.Fprintf(stdout, "nodeId: %s\n", cfg.NodeID)
 	fmt.Fprintf(stdout, "natsServers: %s\n", cfg.NATSServers)
 	fmt.Fprintf(stdout, "agentAdapter: %s\n", cfg.AgentAdapter)
 	fmt.Fprintf(stdout, "next: run `clawsynapse service restart` to apply changes\n")
@@ -106,7 +104,6 @@ func parseInitArgs(args []string, stderr io.Writer) (initConfig, error) {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&cfg.ConfigPath, "config", cfg.ConfigPath, "config file path")
-	fs.StringVar(&cfg.NodeID, "node-id", cfg.NodeID, "node id")
 	fs.StringVar(&cfg.NATSServers, "nats-servers", cfg.NATSServers, "comma-separated NATS servers")
 	fs.StringVar(&cfg.LocalAPIAddr, "local-api-addr", cfg.LocalAPIAddr, "local API address")
 	fs.StringVar(&cfg.TrustMode, "trust-mode", cfg.TrustMode, "trust mode: open|tofu|explicit")
@@ -140,9 +137,6 @@ func promptInitConfig(stdin io.Reader, stdout io.Writer, cfg *initConfig) error 
 	fmt.Fprintln(stdout, "ClawSynapse daemon configuration")
 
 	var err error
-	if cfg.NodeID, err = promptRequired(reader, stdout, "Node ID", cfg.NodeID); err != nil {
-		return err
-	}
 	if cfg.NATSServers, err = promptValue(reader, stdout, "NATS servers (comma-separated)", cfg.NATSServers); err != nil {
 		return err
 	}
@@ -186,7 +180,6 @@ func promptInitConfig(stdin io.Reader, stdout io.Writer, cfg *initConfig) error 
 
 func finalizeInitConfig(cfg *initConfig) error {
 	cfg.ConfigPath = strings.TrimSpace(cfg.ConfigPath)
-	cfg.NodeID = strings.TrimSpace(cfg.NodeID)
 	cfg.NATSServers = strings.TrimSpace(cfg.NATSServers)
 	cfg.LocalAPIAddr = strings.TrimSpace(cfg.LocalAPIAddr)
 	cfg.TrustMode = strings.ToLower(strings.TrimSpace(cfg.TrustMode))
@@ -204,9 +197,6 @@ func finalizeInitConfig(cfg *initConfig) error {
 
 	if cfg.ConfigPath == "" {
 		return errors.New("config path is required")
-	}
-	if cfg.NodeID == "" {
-		return errors.New("node id is required")
 	}
 	if cfg.NATSServers == "" {
 		return errors.New("nats servers is required")
@@ -323,7 +313,6 @@ func writeInitConfig(cfg initConfig) error {
 
 func renderInitConfig(cfg initConfig) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "nodeId: %s\n", cfg.NodeID)
 	fmt.Fprintf(&b, "natsServers:\n")
 	for _, item := range splitCSVList(cfg.NATSServers) {
 		fmt.Fprintf(&b, "  - %s\n", item)

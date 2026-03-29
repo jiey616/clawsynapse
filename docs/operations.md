@@ -65,7 +65,6 @@ cp config.example.yaml ~/.clawsynapse/config.yaml
 ```
 
 ```yaml
-nodeId: node-alpha
 natsServers:
   - nats://127.0.0.1:4222
 localApiAddr: 127.0.0.1:18080
@@ -88,7 +87,6 @@ cp .env.example .env
 
 ```bash
 NATS_SERVERS=nats://127.0.0.1:4222
-NODE_ID=node-alpha
 HEARTBEAT_INTERVAL_MS=15000
 ANNOUNCE_TTL_MS=30000
 TRUST_MODE=tofu
@@ -114,14 +112,15 @@ BRIDGE_EVENTS=agent_end,message_sent
 
 ```text
 1. 加载或生成 Ed25519 密钥对
-2. 连接 NATS
-3. 连接本地 Agent 网关
-4. 订阅本节点 inbox subject
-5. 订阅 discovery 相关 subject
-6. 订阅 auth / trust 所需控制 subject
-7. 发布初始注册信息
-8. 启动心跳定时器
-9. 开始处理入站消息
+2. 从公钥派生 `did:key` 与 `nodeId`
+3. 连接 NATS
+4. 连接本地 Agent 网关
+5. 订阅本节点 inbox subject
+6. 订阅 discovery 相关 subject
+7. 订阅 auth / trust 所需控制 subject
+8. 发布初始注册信息
+9. 启动心跳定时器
+10. 开始处理入站消息
 ```
 
 ## 部署
@@ -142,7 +141,6 @@ docker run -d --name nats -p 4222:4222 nats:latest
 ```bash
 clawsynapsed \
   --nats-servers nats://localhost:4222 \
-  --node-id node-alpha \
   --agent-adapter openclaw \
   --gateway-url ws://127.0.0.1:18789 \
   --gateway-token "$GATEWAY_TOKEN"
@@ -164,14 +162,15 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 - 二进制由同一个安装脚本分发，避免 CLI 和 daemon 安装来源不一致
 - daemon 服务固定读取 `~/.clawsynapse/config.yaml`
 - 首次安装由脚本生成配置文件，后续升级不覆盖用户配置
-- 交互终端下一键安装脚本可补问 `nodeId`、NATS、adapter 等关键参数
+- 交互终端下一键安装脚本可补问 NATS、adapter 等关键参数
 - daemon 以普通用户身份运行，不以 root 直接执行业务进程
+- `nodeId` 由本地身份密钥自动派生，不通过 CLI 或 YAML 手工指定
 
 如果是自动化环境，显式传参而不是依赖交互输入：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-  bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
+  bash -s -- --daemon --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
 安装完成后，推荐通过 CLI 向导做后续配置调整：
@@ -180,7 +179,7 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 clawsynapse init
 clawsynapse version
 clawsynapsed --version
-clawsynapse init --overwrite --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+clawsynapse init --overwrite --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 clawsynapse service restart
 ```
 
@@ -193,7 +192,7 @@ clawsynapse service restart
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-  bash -s -- --daemon --node-id node-alpha
+  bash -s -- --daemon
 ```
 
 仅安装 CLI：
@@ -286,7 +285,7 @@ CI 自动发布入口：
 │                  │     │   NATS   │     │                  │
 │ OpenClaw Gateway │     │  Server  │     │ Custom Agent API │
 │ clawsynapsed A ──├─────┤          ├─────┤── clawsynapsed B │
-│ (node-alpha)     │     │          │     │ (node-beta)      │
+│ (n1-local-id)    │     │          │     │ (n1-peer-id)     │
 │ adapter=openclaw │     │          │     │ adapter=custom   │
 └──────────────────┘     └────┬─────┘     └──────────────────┘
                               │
@@ -295,7 +294,7 @@ CI 自动发布入口：
                     │                  │
                     │ 自研 Agent 服务   │
                     │ clawsynapsed C ─ │
-                    │ (node-gamma)     │
+                    │ (n1-third-node)  │
                     │ adapter=custom   │
                     └──────────────────┘
 ```

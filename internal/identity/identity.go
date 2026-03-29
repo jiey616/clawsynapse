@@ -69,3 +69,14 @@ func Verify(pub ed25519.PublicKey, data []byte, signature string) bool {
 	}
 	return ed25519.Verify(pub, data, b)
 }
+
+func DecodePublicKey(encoded string) (ed25519.PublicKey, error) {
+	pubBytes, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, err
+	}
+	if len(pubBytes) != ed25519.PublicKeySize {
+		return nil, errors.New("invalid key size")
+	}
+	return ed25519.PublicKey(pubBytes), nil
+}

@@ -2,6 +2,7 @@ package types
 
 type Peer struct {
 	NodeID       string         `json:"nodeId"`
+	DID          string         `json:"did,omitempty"`
 	AgentProduct string         `json:"agentProduct,omitempty"`
 	Version      string         `json:"version,omitempty"`
 	Capabilities []string       `json:"capabilities,omitempty"`

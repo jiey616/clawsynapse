@@ -17,7 +17,7 @@ Run all commands from the repository root.
 ### Run
 Run the daemon:
 ```bash
-go run ./cmd/clawsynapsed --node-id node-alpha
+go run ./cmd/clawsynapsed
 ```
 Equivalent helper target:
 ```bash

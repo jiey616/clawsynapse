@@ -37,15 +37,6 @@ type App struct {
 }
 
 func New(cfg config.Config) (*App, error) {
-	log := logging.New(logging.Options{
-		Level:     cfg.LogLevel,
-		Format:    cfg.LogFormat,
-		AddSource: cfg.LogAddSource,
-	}).With(
-		slog.String("service", "clawsynapsed"),
-		slog.String("nodeId", cfg.NodeID),
-	)
-
 	fs := store.NewFSStore(cfg.DataDir)
 	if err := fs.EnsureLayout(); err != nil {
 		return nil, fmt.Errorf("init fs store: %w", err)
@@ -56,8 +47,22 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("load identity: %w", err)
 	}
 
+	// derive DID and subject-safe node ID from public key
+	nodeDID := identity.DeriveNodeDID(id.PublicKey)
+	nodeID := identity.DeriveNodeID(nodeDID)
+
+	log := logging.New(logging.Options{
+		Level:     cfg.LogLevel,
+		Format:    cfg.LogFormat,
+		AddSource: cfg.LogAddSource,
+	}).With(
+		slog.String("service", "clawsynapsed"),
+		slog.String("nodeId", nodeID),
+		slog.String("did", nodeDID),
+	)
+
 	peers := discovery.NewRegistry()
-	peers.Upsert(types.Peer{NodeID: cfg.NodeID, AuthStatus: types.AuthAuthenticated, TrustStatus: types.TrustTrusted, Inbox: "clawsynapse.msg." + cfg.NodeID + ".inbox"})
+	peers.Upsert(types.Peer{NodeID: nodeID, DID: nodeDID, AuthStatus: types.AuthAuthenticated, TrustStatus: types.TrustTrusted, Inbox: "clawsynapse.msg." + nodeID + ".inbox"})
 
 	hb, err := time.ParseDuration(cfg.HeartbeatInterval)
 	if err != nil {
@@ -68,7 +73,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("parse announce ttl: %w", err)
 	}
 
-	bus, err := natsbus.Connect(context.Background(), cfg.NATSServers, "clawsynapsed-"+cfg.NodeID)
+	bus, err := natsbus.Connect(context.Background(), cfg.NATSServers, "clawsynapsed-"+nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}
@@ -78,15 +83,15 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("init replay guard: %w", err)
 	}
 
-	discoverySvc := discovery.NewService(log.With(slog.String("component", "discovery")), bus, peers, fs, cfg.NodeID, base64.RawURLEncoding.EncodeToString(id.PublicKey), hb, ttl, cfg.TrustMode)
-	authSvc := auth.NewService(log.With(slog.String("component", "auth")), peers, bus, cfg.NodeID, id, replay, cfg.TrustMode)
+	discoverySvc := discovery.NewService(log.With(slog.String("component", "discovery")), bus, peers, fs, nodeID, nodeDID, base64.RawURLEncoding.EncodeToString(id.PublicKey), hb, ttl, cfg.TrustMode)
+	authSvc := auth.NewService(log.With(slog.String("component", "auth")), peers, bus, nodeID, id, replay, cfg.TrustMode)
 	discoverySvc.SetAutoAuthenticator(authSvc.StartChallenge)
-	trustSvc, err := trust.NewService(log.With(slog.String("component", "trust")), peers, bus, fs, cfg.NodeID, id)
+	trustSvc, err := trust.NewService(log.With(slog.String("component", "trust")), peers, bus, fs, nodeID, id)
 	if err != nil {
 		return nil, fmt.Errorf("init trust service: %w", err)
 	}
-	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, cfg.NodeID, id, cfg.TrustMode, cfg.DeliverablePrefixes)
-	agentAdapter, err := newAgentAdapter(cfg, log)
+	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, nodeID, id, cfg.TrustMode, cfg.DeliverablePrefixes)
+	agentAdapter, err := newAgentAdapter(cfg, nodeID, log)
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)
 	}
@@ -94,7 +99,7 @@ func New(cfg config.Config) (*App, error) {
 
 	transferSvc := transfer.NewService(
 		log.With(slog.String("component", "transfer")),
-		peers, bus, messagingSvc, cfg.NodeID, id, cfg.TrustMode,
+		peers, bus, messagingSvc, nodeID, id, cfg.TrustMode,
 		transfer.TransferConfig{
 			TransferDir: cfg.TransferDir,
 			MaxFileSize: cfg.TransferMaxFileSize,
@@ -103,7 +108,12 @@ func New(cfg config.Config) (*App, error) {
 	)
 	messagingSvc.SetTransferHandler(transferSvc.HandleTransferNotification)
 
-	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter)
+	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter, api.SelfInfo{
+		NodeID:              nodeID,
+		DID:                 nodeDID,
+		IdentityFingerprint: identity.Fingerprint(id.PublicKey),
+		TrustMode:           cfg.TrustMode,
+	})
 
 	return &App{
 		log:       log,
@@ -120,18 +130,18 @@ func New(cfg config.Config) (*App, error) {
 	}, nil
 }
 
-func newAgentAdapter(cfg config.Config, log *slog.Logger) (adapter.AgentAdapter, error) {
+func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger) (adapter.AgentAdapter, error) {
 	switch cfg.AgentAdapter {
 	case "", "default":
-		return adapter.NewDefaultAdapter(cfg.NodeID), nil
+		return adapter.NewDefaultAdapter(nodeID), nil
 	case "openclaw":
 		return adapter.NewOpenClawAdapter(adapter.OpenClawConfig{
-			NodeID: cfg.NodeID,
+			NodeID: nodeID,
 			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "openclaw")),
 		})
 	case "webhook":
 		return adapter.NewWebhookAdapter(adapter.WebhookConfig{
-			NodeID: cfg.NodeID,
+			NodeID: nodeID,
 			URL:    cfg.WebhookURL,
 			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "webhook")),
 		})
@@ -142,7 +152,6 @@ func newAgentAdapter(cfg config.Config, log *slog.Logger) (adapter.AgentAdapter,
 
 func (a *App) Run(ctx context.Context) error {
 	a.log.Info("starting clawsynapsed",
-		slog.String("nodeId", a.cfg.NodeID),
 		slog.String("apiAddr", a.cfg.LocalAPIAddr),
 		slog.String("trustMode", a.cfg.TrustMode),
 		slog.String("identityFingerprint", identity.Fingerprint(a.identity.PublicKey)),

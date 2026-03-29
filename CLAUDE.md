@@ -14,7 +14,7 @@ go build ./...                    # 全部
 go build ./cmd/clawsynapsed       # 仅 daemon
 
 # 运行
-make run                          # 或 go run ./cmd/clawsynapsed --node-id node-alpha
+make run                          # 或 go run ./cmd/clawsynapsed
 
 # 测试
 go test ./...                     # 全部测试
@@ -70,7 +70,7 @@ module: `auth | trust | discovery | control | msg | events | pubsub | transfer`
 
 ## 环境变量
 
-`NATS_SERVERS`, `NODE_ID`, `LOCAL_API_ADDR`, `HEARTBEAT_INTERVAL_MS`, `ANNOUNCE_TTL_MS`, `TRUST_MODE` (open|tofu|explicit), `AGENT_ADAPTER` (default|openclaw|webhook), `WEBHOOK_URL` (webhook 适配器的目标 URL), `DELIVERABLE_PREFIXES` (默认 `chat,task`)
+`NATS_SERVERS`, `LOCAL_API_ADDR`, `HEARTBEAT_INTERVAL_MS`, `ANNOUNCE_TTL_MS`, `TRUST_MODE` (open|tofu|explicit), `AGENT_ADAPTER` (default|openclaw|webhook), `WEBHOOK_URL` (webhook 适配器的目标 URL), `DELIVERABLE_PREFIXES` (默认 `chat,task`)
 
 ## 编辑工作流
 

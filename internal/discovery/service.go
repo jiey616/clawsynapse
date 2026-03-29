@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"clawsynapse/internal/identity"
 	"clawsynapse/internal/logging"
 	"clawsynapse/internal/natsbus"
 	"clawsynapse/internal/protocol"
@@ -17,37 +20,50 @@ import (
 )
 
 const (
-	announceSubject = "clawsynapse.discovery.global.announce"
-	departSubject   = "clawsynapse.discovery.global.depart"
+	announceSubject         = "clawsynapse.discovery.global.announce"
+	departSubject           = "clawsynapse.discovery.global.depart"
+	legacyAnnounceLogWindow = 5 * time.Minute
+)
+
+var (
+	errAnnouncePublicKeyRequired = errors.New("publicKey is required")
+	errAnnounceDIDRequired       = errors.New("did is required")
+	errAnnounceDIDMismatch       = errors.New("did does not match publicKey")
+	errAnnounceNodeIDMismatch    = errors.New("nodeId does not match did")
 )
 
 type Service struct {
-	log       *slog.Logger
-	bus       *natsbus.Client
-	peers     *Registry
-	store     *store.FSStore
-	nodeID    string
-	publicKey string
-	ttl       time.Duration
-	heartbeat time.Duration
-	trustMode string
-	autoAuth  func(context.Context, string) error
-	authMu    sync.Mutex
-	authing   map[string]struct{}
+	log                *slog.Logger
+	bus                *natsbus.Client
+	peers              *Registry
+	store              *store.FSStore
+	nodeID             string
+	did                string
+	publicKey          string
+	ttl                time.Duration
+	heartbeat          time.Duration
+	trustMode          string
+	autoAuth           func(context.Context, string) error
+	authMu             sync.Mutex
+	authing            map[string]struct{}
+	legacyAnnounceMu   sync.Mutex
+	legacyAnnounceSeen map[string]time.Time
 }
 
-func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *store.FSStore, nodeID string, publicKey string, heartbeat, ttl time.Duration, trustMode string) *Service {
+func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *store.FSStore, nodeID string, did string, publicKey string, heartbeat, ttl time.Duration, trustMode string) *Service {
 	return &Service{
-		log:       log,
-		bus:       bus,
-		peers:     peers,
-		store:     fs,
-		nodeID:    nodeID,
-		publicKey: publicKey,
-		ttl:       ttl,
-		heartbeat: heartbeat,
-		trustMode: trustMode,
-		authing:   map[string]struct{}{},
+		log:                log,
+		bus:                bus,
+		peers:              peers,
+		store:              fs,
+		nodeID:             nodeID,
+		did:                did,
+		publicKey:          publicKey,
+		ttl:                ttl,
+		heartbeat:          heartbeat,
+		trustMode:          trustMode,
+		authing:            map[string]struct{}{},
+		legacyAnnounceSeen: map[string]time.Time{},
 	}
 }
 
@@ -96,6 +112,7 @@ func (s *Service) publishAnnounce() error {
 		MessageID:    randID(),
 		MessageType:  "discovery.announce",
 		NodeID:       s.nodeID,
+		DID:          s.did,
 		Version:      "v0.1.0",
 		AgentProduct: "clawsynapse",
 		Capabilities: []string{"chat", "tools"},
@@ -131,6 +148,10 @@ func (s *Service) handleAnnounce(_ string, data []byte) {
 	if msg.NodeID == s.nodeID {
 		return
 	}
+	if err := validateAnnounceIdentity(msg); err != nil {
+		s.logInvalidAnnounceIdentity(msg, err)
+		return
+	}
 
 	authStatus := types.AuthSeen
 	trustStatus := s.persistedTrustStatus(msg.NodeID)
@@ -157,6 +178,7 @@ func (s *Service) handleAnnounce(_ string, data []byte) {
 
 	s.peers.Upsert(types.Peer{
 		NodeID:       msg.NodeID,
+		DID:          msg.DID,
 		Version:      msg.Version,
 		AgentProduct: msg.AgentProduct,
 		Capabilities: msg.Capabilities,
@@ -332,6 +354,62 @@ func metadataInt64(m map[string]any, key string) int64 {
 	default:
 		return 0
 	}
+}
+
+func validateAnnounceIdentity(msg protocol.DiscoveryAnnounce) error {
+	if msg.PublicKey == "" {
+		return errAnnouncePublicKeyRequired
+	}
+	if msg.DID == "" {
+		return errAnnounceDIDRequired
+	}
+
+	pub, err := identity.DecodePublicKey(msg.PublicKey)
+	if err != nil {
+		return fmt.Errorf("decode publicKey: %w", err)
+	}
+
+	expectedDID := identity.DeriveNodeDID(pub)
+	if msg.DID != expectedDID {
+		return errAnnounceDIDMismatch
+	}
+
+	expectedNodeID := identity.DeriveNodeID(expectedDID)
+	if msg.NodeID != expectedNodeID {
+		return errAnnounceNodeIDMismatch
+	}
+
+	return nil
+}
+
+func (s *Service) logInvalidAnnounceIdentity(msg protocol.DiscoveryAnnounce, err error) {
+	attrs := []any{
+		logging.Peer(msg.NodeID),
+		slog.String("did", msg.DID),
+		logging.Error(err),
+	}
+
+	if errors.Is(err, errAnnounceDIDRequired) {
+		if !s.shouldLogLegacyAnnounce(msg.NodeID, time.Now()) {
+			return
+		}
+		s.log.Info("reject legacy announce without did", attrs...)
+		return
+	}
+
+	s.log.Warn("reject invalid announce identity", attrs...)
+}
+
+func (s *Service) shouldLogLegacyAnnounce(peer string, now time.Time) bool {
+	s.legacyAnnounceMu.Lock()
+	defer s.legacyAnnounceMu.Unlock()
+
+	last, ok := s.legacyAnnounceSeen[peer]
+	if ok && now.Sub(last) < legacyAnnounceLogWindow {
+		return false
+	}
+	s.legacyAnnounceSeen[peer] = now
+	return true
 }
 
 func randID() string {
