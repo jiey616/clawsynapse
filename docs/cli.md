@@ -236,7 +236,7 @@ POST /v1/publish
 对目标节点发起 challenge：
 
 ```bash
-go run ./cmd/clawsynapse auth challenge --target node-beta
+go run ./cmd/clawsynapse auth challenge --target n1-11223344556677889900aabbccddeeff
 ```
 
 对应 API：
@@ -251,7 +251,7 @@ POST /v1/auth/challenge
 
 ```bash
 go run ./cmd/clawsynapse trust request \
-  --target node-beta \
+  --target n1-11223344556677889900aabbccddeeff \
   --reason "需要建立跨节点协作" \
   --capability chat \
   --capability tools
@@ -283,7 +283,7 @@ go run ./cmd/clawsynapse trust reject \
 
 ```bash
 go run ./cmd/clawsynapse trust revoke \
-  --target node-beta \
+  --target n1-11223344556677889900aabbccddeeff \
   --reason "密钥已轮换"
 ```
 
@@ -307,7 +307,7 @@ POST /v1/trust/revoke
 
 ```bash
 go run ./cmd/clawsynapse transfer send \
-  --target node-beta \
+  --target n1-11223344556677889900aabbccddeeff \
   --file /tmp/report.pdf
 ```
 
@@ -315,7 +315,7 @@ go run ./cmd/clawsynapse transfer send \
 
 ```bash
 go run ./cmd/clawsynapse transfer send \
-  --target node-beta \
+  --target n1-11223344556677889900aabbccddeeff \
   --file /tmp/report.pdf \
   --mime-type application/pdf
 ```

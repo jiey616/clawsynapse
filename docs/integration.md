@@ -129,7 +129,7 @@ ws.onmessage = (event) => {
       method: "chat.send",
       params: {
         message: "你好",
-        sessionKey: "nats:node-alpha:node-beta",
+        sessionKey: "nats:n1-localnodeid:n1-11223344556677889900aabbccddeeff",
         idempotencyKey: crypto.randomUUID()
       }
     }));

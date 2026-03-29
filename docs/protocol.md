@@ -119,9 +119,9 @@ topic          ::= [a-z0-9-]+("."[a-z0-9-]+){0,7}
 示例：
 
 ```text
-clawsynapse.auth.node-beta.challenge.request
-clawsynapse.trust.node-beta.response
-clawsynapse.msg.node-beta.inbox
+clawsynapse.auth.n1-11223344556677889900aabbccddeeff.challenge.request
+clawsynapse.trust.n1-11223344556677889900aabbccddeeff.response
+clawsynapse.msg.n1-11223344556677889900aabbccddeeff.inbox
 clawsynapse.control.trust.poll
 ```
 
@@ -218,7 +218,7 @@ sig_input = messageType + "\n" + subject + "\n" + from + "\n" + to + "\n" + ts +
   "message": "trust request approved",
   "data": {
     "requestId": "req-123",
-    "peer": "node-beta",
+    "peer": "n1-11223344556677889900aabbccddeeff",
     "trustState": "trusted"
   },
   "ts": 1741680000300

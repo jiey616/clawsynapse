@@ -285,7 +285,7 @@ CI 自动发布入口：
 │                  │     │   NATS   │     │                  │
 │ OpenClaw Gateway │     │  Server  │     │ Custom Agent API │
 │ clawsynapsed A ──├─────┤          ├─────┤── clawsynapsed B │
-│ (node-alpha)     │     │          │     │ (node-beta)      │
+│ (n1-local-id)    │     │          │     │ (n1-peer-id)     │
 │ adapter=openclaw │     │          │     │ adapter=custom   │
 └──────────────────┘     └────┬─────┘     └──────────────────┘
                               │
@@ -294,7 +294,7 @@ CI 自动发布入口：
                     │                  │
                     │ 自研 Agent 服务   │
                     │ clawsynapsed C ─ │
-                    │ (node-gamma)     │
+                    │ (n1-third-node)  │
                     │ adapter=custom   │
                     └──────────────────┘
 ```

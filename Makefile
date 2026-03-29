@@ -12,7 +12,7 @@ test-unit:
 	go test ./...
 
 run:
-	go run ./cmd/clawsynapsed --node-id node-alpha
+	go run ./cmd/clawsynapsed
 
 build: build-daemon build-cli
 

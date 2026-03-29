@@ -231,9 +231,9 @@ title: "ClawSynapse API Reference"
   "code": "msg.published",
   "message": "message published",
   "data": {
-    "targetNode": "node-beta",
+    "targetNode": "n1-11223344556677889900aabbccddeeff",
     "messageId": "msg-abc123",
-    "sessionKey": "nats:node-alpha:node-beta"
+    "sessionKey": "nats:n1-localnodeid:n1-11223344556677889900aabbccddeeff"
   },
   "ts": 1710000000000
 }
@@ -245,9 +245,9 @@ title: "ClawSynapse API Reference"
 {
   "ok": false,
   "code": "msg.publish_failed",
-  "message": "peer not found: node-beta",
+  "message": "peer not found: n1-11223344556677889900aabbccddeeff",
   "data": {
-    "targetNode": "node-beta"
+    "targetNode": "n1-11223344556677889900aabbccddeeff"
   },
   "ts": 1710000000000
 }
@@ -271,10 +271,10 @@ title: "ClawSynapse API Reference"
       {
         "id": "msg-abc123",
         "type": "chat.message",
-        "from": "node-beta",
-        "to": "node-alpha",
+        "from": "n1-11223344556677889900aabbccddeeff",
+        "to": "n1-localnodeid",
         "content": "报告已完成",
-        "sessionKey": "nats:node-alpha:node-beta",
+        "sessionKey": "nats:n1-localnodeid:n1-11223344556677889900aabbccddeeff",
         "ts": 1710000000000,
         "sig": "base64-signature",
         "metadata": {},
@@ -311,7 +311,7 @@ title: "ClawSynapse API Reference"
 
 ```json
 {
-  "targetNode": "node-beta"
+  "targetNode": "n1-11223344556677889900aabbccddeeff"
 }
 ```
 
@@ -327,7 +327,7 @@ title: "ClawSynapse API Reference"
   "code": "auth.challenge_accepted",
   "message": "challenge completed",
   "data": {
-    "targetNode": "node-beta",
+    "targetNode": "n1-11223344556677889900aabbccddeeff",
     "status": "authenticated"
   },
   "ts": 1710000000000
@@ -340,9 +340,9 @@ title: "ClawSynapse API Reference"
 {
   "ok": false,
   "code": "auth.challenge_failed",
-  "message": "peer not found: node-beta",
+  "message": "peer not found: n1-11223344556677889900aabbccddeeff",
   "data": {
-    "targetNode": "node-beta"
+    "targetNode": "n1-11223344556677889900aabbccddeeff"
   },
   "ts": 1710000000000
 }
@@ -365,8 +365,8 @@ title: "ClawSynapse API Reference"
     "items": [
       {
         "requestId": "req-xyz789",
-        "from": "node-beta",
-        "to": "node-alpha",
+        "from": "n1-11223344556677889900aabbccddeeff",
+        "to": "n1-localnodeid",
         "direction": "incoming",
         "reason": "需要协作完成任务",
         "receivedAtMs": 1710000000000
@@ -398,7 +398,7 @@ title: "ClawSynapse API Reference"
 
 ```json
 {
-  "targetNode": "node-beta",
+  "targetNode": "n1-11223344556677889900aabbccddeeff",
   "reason": "需要协作完成任务",
   "capabilities": ["chat", "tools"]
 }
@@ -418,7 +418,7 @@ title: "ClawSynapse API Reference"
   "code": "trust.requested",
   "message": "trust request sent",
   "data": {
-    "targetNode": "node-beta",
+    "targetNode": "n1-11223344556677889900aabbccddeeff",
     "requestId": "req-xyz789"
   },
   "ts": 1710000000000
@@ -431,9 +431,9 @@ title: "ClawSynapse API Reference"
 {
   "ok": false,
   "code": "trust.request_failed",
-  "message": "peer not found: node-beta",
+  "message": "peer not found: n1-11223344556677889900aabbccddeeff",
   "data": {
-    "targetNode": "node-beta"
+    "targetNode": "n1-11223344556677889900aabbccddeeff"
   },
   "ts": 1710000000000
 }
@@ -519,7 +519,7 @@ title: "ClawSynapse API Reference"
 
 ```json
 {
-  "targetNode": "node-beta",
+  "targetNode": "n1-11223344556677889900aabbccddeeff",
   "reason": "节点行为异常"
 }
 ```
@@ -537,7 +537,7 @@ title: "ClawSynapse API Reference"
   "code": "trust.revoked",
   "message": "trust revoked",
   "data": {
-    "targetNode": "node-beta"
+    "targetNode": "n1-11223344556677889900aabbccddeeff"
   },
   "ts": 1710000000000
 }
@@ -553,7 +553,7 @@ title: "ClawSynapse API Reference"
 
 ```json
 {
-  "targetNode": "node-beta",
+  "targetNode": "n1-11223344556677889900aabbccddeeff",
   "filePath": "/tmp/report.pdf",
   "mimeType": "application/pdf"
 }
@@ -574,7 +574,7 @@ title: "ClawSynapse API Reference"
   "message": "file transfer initiated",
   "data": {
     "transferId": "tf_abc123",
-    "bucket": "clawsynapse-transfer-node-beta",
+    "bucket": "clawsynapse-transfer-n1-11223344556677889900aabbccddeeff",
     "size": 24576,
     "checksum": "SHA-256=abcdef..."
   },
@@ -603,7 +603,7 @@ JetStream 不可用：
   "code": "transfer.send_failed",
   "message": "peer is not authenticated",
   "data": {
-    "targetNode": "node-beta"
+    "targetNode": "n1-11223344556677889900aabbccddeeff"
   },
   "ts": 1710000000000
 }
@@ -627,7 +627,7 @@ JetStream 不可用：
       {
         "transferId": "tf_abc123",
         "direction": "outbound",
-        "peerNode": "node-beta",
+        "peerNode": "n1-11223344556677889900aabbccddeeff",
         "fileName": "report.pdf",
         "fileSize": 24576,
         "mimeType": "application/pdf",
@@ -692,7 +692,7 @@ JetStream 不可用时，列表接口仍然可用；只有当传输服务未初�
     "transfer": {
       "transferId": "tf_abc123",
       "direction": "inbound",
-      "peerNode": "node-beta",
+      "peerNode": "n1-11223344556677889900aabbccddeeff",
       "fileName": "report.pdf",
       "fileSize": 24576,
       "mimeType": "application/pdf",
@@ -780,7 +780,7 @@ result, err := c.Get(ctx, "/v1/peers")
 
 // POST 请求
 result, err := c.Post(ctx, "/v1/publish", map[string]any{
-    "targetNode": "node-beta",
+    "targetNode": "n1-11223344556677889900aabbccddeeff",
     "message":    "hello",
 })
 

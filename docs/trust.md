@@ -41,8 +41,8 @@ ClawSynapse 使用基于 Ed25519 的节点身份模型：
 ├── trust.json
 ├── replay-cache.json
 └── peers/
-    ├── node-beta.json
-    └── node-gamma.json
+    ├── n1-11223344556677889900aabbccddeeff.json
+    └── n1-ffeeddccbbaa00998877665544332211.json
 ```
 
 - `identity.key`：本地私钥，仅本机可读
@@ -434,7 +434,7 @@ clawsynapse.trust.<targetNodeId>.revoke
 {
   "trusted": [
     {
-      "nodeId": "node-beta",
+      "nodeId": "n1-11223344556677889900aabbccddeeff",
       "publicKey": "base64url-ed25519-public-key",
       "fingerprint": "sha256:abcd1234",
       "approvedAt": "2026-03-12T10:00:00Z",
@@ -445,7 +445,7 @@ clawsynapse.trust.<targetNodeId>.revoke
   "pending": [
     {
       "requestId": "req-123",
-      "nodeId": "node-gamma",
+      "nodeId": "n1-ffeeddccbbaa00998877665544332211",
       "reason": "request access to task queue",
       "receivedAt": "2026-03-12T10:01:00Z"
     }
