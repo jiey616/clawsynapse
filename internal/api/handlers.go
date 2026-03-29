@@ -136,6 +136,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Code:    "health.ok",
 		Message: "service healthy",
 		Data: map[string]any{
+			"self": map[string]any{
+				"nodeId":              s.self.NodeID,
+				"did":                 s.self.DID,
+				"identityFingerprint": s.self.IdentityFingerprint,
+				"trustMode":           s.self.TrustMode,
+			},
 			"peersCount": len(s.peers.List()),
 			"nats":       natsStatus,
 			"adapter":    adapterStatus,

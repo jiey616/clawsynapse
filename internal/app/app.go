@@ -47,9 +47,9 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("load identity: %w", err)
 	}
 
-	// derive DID and short node ID from public key
+	// derive DID and subject-safe node ID from public key
 	nodeDID := identity.DeriveNodeDID(id.PublicKey)
-	nodeID := identity.ShortID(nodeDID)
+	nodeID := identity.DeriveNodeID(nodeDID)
 
 	log := logging.New(logging.Options{
 		Level:     cfg.LogLevel,
@@ -108,7 +108,12 @@ func New(cfg config.Config) (*App, error) {
 	)
 	messagingSvc.SetTransferHandler(transferSvc.HandleTransferNotification)
 
-	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter)
+	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter, api.SelfInfo{
+		NodeID:              nodeID,
+		DID:                 nodeDID,
+		IdentityFingerprint: identity.Fingerprint(id.PublicKey),
+		TrustMode:           cfg.TrustMode,
+	})
 
 	return &App{
 		log:       log,

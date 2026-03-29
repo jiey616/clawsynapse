@@ -2,39 +2,31 @@ package discovery
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"clawsynapse/internal/identity"
 	"clawsynapse/internal/protocol"
 	"clawsynapse/internal/store"
 	"clawsynapse/pkg/types"
 )
 
 func TestHandleAnnouncePreservesAuthAndTrustStatus(t *testing.T) {
+	msg := testAnnounce(t, 1)
 	r := NewRegistry()
 	r.Upsert(types.Peer{
-		NodeID:      "node-beta",
+		NodeID:      msg.NodeID,
 		AuthStatus:  types.AuthAuthenticated,
 		TrustStatus: types.TrustTrusted,
 		LastSeenMs:  1,
 	})
 
 	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
-	msg := protocol.DiscoveryAnnounce{
-		MessageID:    "m1",
-		MessageType:  "discovery.announce",
-		NodeID:       "node-beta",
-		Version:      "v0.1.1",
-		AgentProduct: "clawsynapse",
-		Capabilities: []string{"chat"},
-		Inbox:        "clawsynapse.msg.node-beta.inbox",
-		PublicKey:    "pub",
-		Ts:           time.Now().UnixMilli(),
-		TTLms:        30000,
-	}
 
 	b, err := json.Marshal(msg)
 	if err != nil {
@@ -43,7 +35,7 @@ func TestHandleAnnouncePreservesAuthAndTrustStatus(t *testing.T) {
 
 	svc.handleAnnounce("", b)
 
-	peer, ok := r.Get("node-beta")
+	peer, ok := r.Get(msg.NodeID)
 	if !ok {
 		t.Fatal("peer should still exist")
 	}
@@ -59,13 +51,14 @@ func TestHandleAnnouncePreservesAuthAndTrustStatus(t *testing.T) {
 }
 
 func TestHandleAnnounceRestoresPersistedTrustStatusForNewPeer(t *testing.T) {
+	msg := testAnnounce(t, 2)
 	fs := store.NewFSStore(t.TempDir())
 	if err := fs.EnsureLayout(); err != nil {
 		t.Fatalf("ensure layout failed: %v", err)
 	}
 	if err := fs.SaveTrustState(store.TrustState{
 		SchemaVersion: 1,
-		Trusted:       []store.TrustPeerState{{NodeID: "node-beta", AtMs: 100, Reason: "approve for test"}},
+		Trusted:       []store.TrustPeerState{{NodeID: msg.NodeID, AtMs: 100, Reason: "approve for test"}},
 		Pending:       []store.TrustPendingState{},
 		Rejected:      []store.TrustPeerState{},
 		Revoked:       []store.TrustPeerState{},
@@ -75,18 +68,6 @@ func TestHandleAnnounceRestoresPersistedTrustStatusForNewPeer(t *testing.T) {
 
 	r := NewRegistry()
 	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
-	msg := protocol.DiscoveryAnnounce{
-		MessageID:    "m1",
-		MessageType:  "discovery.announce",
-		NodeID:       "node-beta",
-		Version:      "v0.1.1",
-		AgentProduct: "clawsynapse",
-		Capabilities: []string{"chat"},
-		Inbox:        "clawsynapse.msg.node-beta.inbox",
-		PublicKey:    "pub",
-		Ts:           time.Now().UnixMilli(),
-		TTLms:        30000,
-	}
 
 	b, err := json.Marshal(msg)
 	if err != nil {
@@ -95,7 +76,7 @@ func TestHandleAnnounceRestoresPersistedTrustStatusForNewPeer(t *testing.T) {
 
 	svc.handleAnnounce("", b)
 
-	peer, ok := r.Get("node-beta")
+	peer, ok := r.Get(msg.NodeID)
 	if !ok {
 		t.Fatal("peer should exist")
 	}
@@ -108,13 +89,14 @@ func TestHandleAnnounceRestoresPersistedTrustStatusForNewPeer(t *testing.T) {
 }
 
 func TestHandleAnnounceAutoAuthenticatesTrustedPeer(t *testing.T) {
+	msg := testAnnounce(t, 3)
 	fs := store.NewFSStore(t.TempDir())
 	if err := fs.EnsureLayout(); err != nil {
 		t.Fatalf("ensure layout failed: %v", err)
 	}
 	if err := fs.SaveTrustState(store.TrustState{
 		SchemaVersion: 1,
-		Trusted:       []store.TrustPeerState{{NodeID: "node-beta", AtMs: 100}},
+		Trusted:       []store.TrustPeerState{{NodeID: msg.NodeID, AtMs: 100}},
 		Pending:       []store.TrustPendingState{},
 		Rejected:      []store.TrustPeerState{},
 		Revoked:       []store.TrustPeerState{},
@@ -130,19 +112,6 @@ func TestHandleAnnounceAutoAuthenticatesTrustedPeer(t *testing.T) {
 		return nil
 	})
 
-	msg := protocol.DiscoveryAnnounce{
-		MessageID:    "m1",
-		MessageType:  "discovery.announce",
-		NodeID:       "node-beta",
-		Version:      "v0.1.1",
-		AgentProduct: "clawsynapse",
-		Capabilities: []string{"chat"},
-		Inbox:        "clawsynapse.msg.node-beta.inbox",
-		PublicKey:    "pub",
-		Ts:           time.Now().UnixMilli(),
-		TTLms:        30000,
-	}
-
 	b, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal announce: %v", err)
@@ -152,8 +121,8 @@ func TestHandleAnnounceAutoAuthenticatesTrustedPeer(t *testing.T) {
 
 	select {
 	case nodeID := <-called:
-		if nodeID != "node-beta" {
-			t.Fatalf("expected auto auth for node-beta, got %s", nodeID)
+		if nodeID != msg.NodeID {
+			t.Fatalf("expected auto auth for %s, got %s", msg.NodeID, nodeID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected auto auth to be triggered")
@@ -161,13 +130,14 @@ func TestHandleAnnounceAutoAuthenticatesTrustedPeer(t *testing.T) {
 }
 
 func TestHandleAnnounceDeduplicatesAutoAuthentication(t *testing.T) {
+	msg := testAnnounce(t, 4)
 	fs := store.NewFSStore(t.TempDir())
 	if err := fs.EnsureLayout(); err != nil {
 		t.Fatalf("ensure layout failed: %v", err)
 	}
 	if err := fs.SaveTrustState(store.TrustState{
 		SchemaVersion: 1,
-		Trusted:       []store.TrustPeerState{{NodeID: "node-beta", AtMs: 100}},
+		Trusted:       []store.TrustPeerState{{NodeID: msg.NodeID, AtMs: 100}},
 		Pending:       []store.TrustPendingState{},
 		Rejected:      []store.TrustPeerState{},
 		Revoked:       []store.TrustPeerState{},
@@ -187,19 +157,6 @@ func TestHandleAnnounceDeduplicatesAutoAuthentication(t *testing.T) {
 		return nil
 	})
 
-	msg := protocol.DiscoveryAnnounce{
-		MessageID:    "m1",
-		MessageType:  "discovery.announce",
-		NodeID:       "node-beta",
-		Version:      "v0.1.1",
-		AgentProduct: "clawsynapse",
-		Capabilities: []string{"chat"},
-		Inbox:        "clawsynapse.msg.node-beta.inbox",
-		PublicKey:    "pub",
-		Ts:           time.Now().UnixMilli(),
-		TTLms:        30000,
-	}
-
 	b, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal announce: %v", err)
@@ -218,5 +175,88 @@ func TestHandleAnnounceDeduplicatesAutoAuthentication(t *testing.T) {
 
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected 1 auto auth call, got %d", got)
+	}
+}
+
+func TestHandleAnnounceRejectsDIDMismatch(t *testing.T) {
+	msg := testAnnounce(t, 5)
+	msg.DID = "did:key:zinvalid"
+
+	r := NewRegistry()
+	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal announce: %v", err)
+	}
+
+	svc.handleAnnounce("", b)
+
+	if _, ok := r.Get(msg.NodeID); ok {
+		t.Fatal("peer should not be stored when did mismatches public key")
+	}
+}
+
+func TestHandleAnnounceRejectsNodeIDMismatch(t *testing.T) {
+	msg := testAnnounce(t, 6)
+	msg.NodeID = "n1-deadbeefdeadbeefdeadbeefdeadbeef"
+	msg.Inbox = "clawsynapse.msg." + msg.NodeID + ".inbox"
+
+	r := NewRegistry()
+	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal announce: %v", err)
+	}
+
+	svc.handleAnnounce("", b)
+
+	if _, ok := r.Get(msg.NodeID); ok {
+		t.Fatal("peer should not be stored when nodeId mismatches did")
+	}
+}
+
+func TestShouldLogLegacyAnnounceRateLimitsByPeer(t *testing.T) {
+	svc := NewService(slog.Default(), nil, NewRegistry(), nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	now := time.Now()
+
+	if !svc.shouldLogLegacyAnnounce("node-test-005", now) {
+		t.Fatal("expected first legacy announce log to be emitted")
+	}
+	if svc.shouldLogLegacyAnnounce("node-test-005", now.Add(time.Minute)) {
+		t.Fatal("expected repeated legacy announce log to be rate limited")
+	}
+	if !svc.shouldLogLegacyAnnounce("node-test-005", now.Add(legacyAnnounceLogWindow+time.Second)) {
+		t.Fatal("expected legacy announce log after window expires")
+	}
+	if !svc.shouldLogLegacyAnnounce("node-test-006", now.Add(time.Minute)) {
+		t.Fatal("expected rate limit to be tracked per peer")
+	}
+}
+
+func testAnnounce(t *testing.T, marker byte) protocol.DiscoveryAnnounce {
+	t.Helper()
+
+	seed := make([]byte, ed25519.SeedSize)
+	seed[0] = marker
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+
+	did := identity.DeriveNodeDID(pub)
+	nodeID := identity.DeriveNodeID(did)
+
+	return protocol.DiscoveryAnnounce{
+		MessageID:    "m1",
+		MessageType:  "discovery.announce",
+		NodeID:       nodeID,
+		DID:          did,
+		Version:      "v0.1.1",
+		AgentProduct: "clawsynapse",
+		Capabilities: []string{"chat"},
+		Inbox:        "clawsynapse.msg." + nodeID + ".inbox",
+		PublicKey:    base64.RawURLEncoding.EncodeToString(pub),
+		Ts:           time.Now().UnixMilli(),
+		TTLms:        30000,
 	}
 }

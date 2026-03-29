@@ -76,7 +76,6 @@ go run ./cmd/clawsynapse init
 ```bash
 go run ./cmd/clawsynapse init \
   --overwrite \
-  --node-id node-alpha \
   --nats-servers nats://127.0.0.1:4222 \
   --agent-adapter openclaw
 ```
@@ -84,8 +83,13 @@ go run ./cmd/clawsynapse init \
 常见用途：
 
 - 首次安装后补全 daemon 配置
-- 修改 `nodeId`、NATS 地址或 adapter
+- 修改 NATS 地址或 adapter
 - 生成标准化的 `~/.clawsynapse/config.yaml`
+
+说明：
+
+- `nodeId` 不在配置中手工设置
+- daemon 会从本地 Ed25519 公钥自动派生 `did:key` 和 `nodeId`
 
 配置写入后，使用 service 子命令应用变更：
 
@@ -195,7 +199,7 @@ GET /v1/messages
 
 ```bash
 go run ./cmd/clawsynapse publish \
-  --target node-beta \
+  --target <peer-node-id> \
   --message "请汇总最新报告"
 ```
 
@@ -203,7 +207,7 @@ go run ./cmd/clawsynapse publish \
 
 ```bash
 go run ./cmd/clawsynapse publish \
-  --target node-beta \
+  --target <peer-node-id> \
   --type task.assign \
   --message "请处理数据清洗任务"
 ```
@@ -212,9 +216,9 @@ go run ./cmd/clawsynapse publish \
 
 ```bash
 go run ./cmd/clawsynapse publish \
-  --target node-beta \
+  --target <peer-node-id> \
   --message "请汇总最新报告" \
-  --session-key nats:node-alpha:node-beta \
+  --session-key nats:<local-node-id>:<peer-node-id> \
   --metadata priority=high \
   --metadata source=cli
 ```

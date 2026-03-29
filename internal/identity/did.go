@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math/big"
-	"strings"
 )
 
 const base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -23,20 +22,11 @@ func DeriveNodeDID(pub ed25519.PublicKey) string {
 	return "did:key:z" + encodeBase58(prefixed)
 }
 
-// ShortID extracts a short identifier from a did:key string for use in
-// NATS subjects, logs, and internal routing. Returns the first 12 characters
-// of the method-specific-id (the base58btc-encoded part).
-func ShortID(did string) string {
-	// did:key:z6MkhaXg... → z6MkhaXgBZDv
-	const prefix = "did:key:"
-	if !strings.HasPrefix(did, prefix) {
-		return did
-	}
-	id := did[len(prefix):]
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
+// DeriveNodeID returns a deterministic, subject-safe node ID from a DID.
+// Format: n1-<lowercase hex of the first 16 bytes of sha256(did)>
+func DeriveNodeID(did string) string {
+	h := sha256.Sum256([]byte(did))
+	return "n1-" + hex.EncodeToString(h[:16])
 }
 
 // FingerprintFromDID returns a sha256 fingerprint from a DID string,

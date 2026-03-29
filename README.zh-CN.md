@@ -34,17 +34,18 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-  bash -s -- --daemon --node-id node-alpha
+  bash -s -- --daemon
 ```
 
 如果是非交互式安装，建议显式传参：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-  bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
+  bash -s -- --daemon --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
 安装脚本会在首次安装 daemon 时创建 `~/.clawsynapse/config.yaml`。后续升级会保留已有配置；如果配置文件已存在，交互安装也不会再次询问这些值。
+`nodeId` 不再手工配置；daemon 会根据本地 Ed25519 身份密钥自动派生 `did:key` 和满足 subject 规则的 `nodeId`。
 
 ## 升级
 
@@ -90,14 +91,14 @@ clawsynapse logs --follow
 发送消息：
 
 ```bash
-clawsynapse publish --target node-beta --message "hello from alpha"
+clawsynapse publish --target <peer-node-id> --message "hello from local node"
 ```
 
 发起认证和信任流程：
 
 ```bash
-clawsynapse auth challenge --target node-beta
-clawsynapse trust request --target node-beta --reason "collaboration"
+clawsynapse auth challenge --target <peer-node-id>
+clawsynapse trust request --target <peer-node-id> --reason "collaboration"
 clawsynapse trust pending
 clawsynapse trust approve --request-id <req-id>
 ```
@@ -120,14 +121,14 @@ clawsynapse messages
 
 ```bash
 clawsynapse init
-clawsynapse init --overwrite --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+clawsynapse init --overwrite --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 clawsynapse service restart
 ```
 
 如果只想查看 daemon 最终生效的配置：
 
 ```bash
-clawsynapsed --node-id node-alpha --check-config
+clawsynapsed --check-config
 ```
 
 ## 卸载

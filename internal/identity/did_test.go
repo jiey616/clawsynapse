@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -41,25 +42,28 @@ func TestDeriveNodeDID(t *testing.T) {
 	t.Logf("DID: %s", did)
 }
 
-func TestShortID(t *testing.T) {
+func TestDeriveNodeID(t *testing.T) {
 	did := "did:key:z6MkhaXgBZDvotDkL5257faKDeqbSBpiGGfEQnGhKeTLn"
-	short := ShortID(did)
+	nodeID := DeriveNodeID(did)
 
-	if len(short) != 12 {
-		t.Fatalf("ShortID must be 12 chars, got %d: %s", len(short), short)
+	if nodeID != "n1-ba6c9fd35949fa645a1b0dbdca0201e5" {
+		t.Fatalf("unexpected node ID: %s", nodeID)
 	}
-	if short != "z6MkhaXgBZDv" {
-		t.Fatalf("unexpected ShortID: %s", short)
-	}
-
-	// non did:key input returns as-is
-	plain := ShortID("node-alpha")
-	if plain != "node-alpha" {
-		t.Fatalf("non-DID input should pass through, got %s", plain)
+	if ok, err := regexp.MatchString(`^n1-[a-f0-9]{32}$`, nodeID); err != nil || !ok {
+		t.Fatalf("node ID must be subject-safe lowercase hex, got %s", nodeID)
 	}
 }
 
-func TestShortIDUniqueness(t *testing.T) {
+func TestDeriveNodeIDDeterministic(t *testing.T) {
+	did := "did:key:z6MkhaXgBZDvotDkL5257faKDeqbSBpiGGfEQnGhKeTLn"
+	nodeID1 := DeriveNodeID(did)
+	nodeID2 := DeriveNodeID(did)
+	if nodeID1 != nodeID2 {
+		t.Fatalf("node ID must be deterministic: %s != %s", nodeID1, nodeID2)
+	}
+}
+
+func TestDeriveNodeIDUniqueness(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 1000; i++ {
 		seed := make([]byte, ed25519.SeedSize)
@@ -67,11 +71,11 @@ func TestShortIDUniqueness(t *testing.T) {
 		seed[1] = byte(i)
 		priv := ed25519.NewKeyFromSeed(seed)
 		pub := priv.Public().(ed25519.PublicKey)
-		short := ShortID(DeriveNodeDID(pub))
-		if seen[short] {
-			t.Fatalf("ShortID collision at iteration %d: %s", i, short)
+		nodeID := DeriveNodeID(DeriveNodeDID(pub))
+		if seen[nodeID] {
+			t.Fatalf("node ID collision at iteration %d: %s", i, nodeID)
 		}
-		seen[short] = true
+		seen[nodeID] = true
 	}
 }
 

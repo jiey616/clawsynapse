@@ -111,6 +111,7 @@ topic          ::= [a-z0-9-]+("."[a-z0-9-]+){0,7}
 约束：
 
 - 不允许 `*`、`>`、空格或大写字符出现在协议定义的固定 subject 中
+- `nodeId` 必须是由节点身份公钥派生出的 subject-safe 标识，不能由外部随意指定
 - `subject` 中的目标节点（若存在）必须与 payload 的 `to` 一致
 - `messageType` 与 `subject` 的模块必须一致
 - `subject` 必须参与签名，避免跨 subject 重放
@@ -123,6 +124,13 @@ clawsynapse.trust.node-beta.response
 clawsynapse.msg.node-beta.inbox
 clawsynapse.control.trust.poll
 ```
+
+身份派生规则：
+
+- 节点长期身份由 Ed25519 公钥确定
+- `did = did:key:z...`
+- `nodeId = "n1-" + hex(sha256(did)[:16])`
+- 收到 discovery announce 时，接收方必须校验 `publicKey -> did -> nodeId` 三者一致
 
 ### `messageType` 约定
 
@@ -147,8 +155,8 @@ clawsynapse.control.trust.poll
 |------|------|------|------|
 | `messageId` | `string` | 是 | 消息唯一 ID，用于去重与审计 |
 | `messageType` | `string` | 是 | 逻辑消息类型，例如 `trust.request` |
-| `from` | `string` | 视场景 | 发起方 nodeId |
-| `to` | `string` | 视场景 | 目标 nodeId |
+| `from` | `string` | 视场景 | 发起方 nodeId（由 DID 派生） |
+| `to` | `string` | 视场景 | 目标 nodeId（由 DID 派生） |
 | `ts` | `number` | 是 | Unix 毫秒时间戳 |
 | `ttlMs` | `number` | 否 | 消息有效期 |
 | `alg` | `string` | 否 | 签名算法，默认 `ed25519` |

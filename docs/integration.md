@@ -69,7 +69,7 @@ type AgentAdapter interface {
 投递时将请求格式化为带 header 的文本：
 
 ```
-[clawsynapse type=chat.message from=node-beta to=node-alpha session=sess-1 key=value]
+[clawsynapse type=chat.message from=<peer-node-id> to=<local-node-id> session=sess-1 key=value]
 消息正文内容
 ```
 
@@ -78,7 +78,7 @@ header 中包含 `type`、`from`、`to`、`session` 以及 metadata 中的键值
 ### 会话映射
 
 - 优先使用请求中的 `SessionKey`
-- 如果为空，自动生成 `cs-{from}-{nodeID}` 格式的会话 ID
+- 如果为空，自动生成 `cs-{from}-{localNodeId}` 格式的会话 ID
 
 ### 网关通信验证
 
@@ -155,7 +155,7 @@ WEBHOOK_URL=https://example.com/hooks/clawsynapse
 命令行：
 
 ```bash
-clawsynapsed --node-id node-alpha --agent-adapter webhook --webhook-url https://example.com/hooks/clawsynapse
+clawsynapsed --agent-adapter webhook --webhook-url https://example.com/hooks/clawsynapse
 ```
 
 YAML 配置文件（`~/.clawsynapse/config.yaml`）：
@@ -171,10 +171,10 @@ webhookUrl: https://example.com/hooks/clawsynapse
 
 ```json
 {
-  "nodeId": "node-alpha",
+  "nodeId": "n1-2f4c6e8a0b1d3f557799aabbccddeeff",
   "type": "chat.message",
-  "from": "node-beta",
-  "sessionKey": "nats:node-beta:node-alpha",
+  "from": "n1-11223344556677889900aabbccddeeff",
+  "sessionKey": "nats:n1-11223344556677889900aabbccddeeff:n1-2f4c6e8a0b1d3f557799aabbccddeeff",
   "message": "请汇总最新报告",
   "metadata": { "priority": "high" }
 }
@@ -184,7 +184,7 @@ webhookUrl: https://example.com/hooks/clawsynapse
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `nodeId` | string | 本地节点 ID |
+| `nodeId` | string | 本地节点 ID，由本地 DID 自动派生 |
 | `type` | string | 消息类型（如 `chat.message`, `task.assign`） |
 | `from` | string | 发送方节点 ID |
 | `sessionKey` | string | 会话标识，可能为空 |

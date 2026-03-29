@@ -34,17 +34,18 @@ Install only the daemon:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-  bash -s -- --daemon --node-id node-alpha
+  bash -s -- --daemon
 ```
 
 For non-interactive installs, pass the values explicitly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
-  bash -s -- --node-id node-alpha --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
+  bash -s -- --daemon --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
 The installer creates `~/.clawsynapse/config.yaml` on first daemon install and keeps your existing config on later upgrades. If the config file already exists, interactive installs skip those prompts.
+`nodeId` is no longer configured manually; the daemon derives `did:key` and a subject-safe `nodeId` automatically from the local Ed25519 identity key.
 
 ## Upgrade
 
@@ -90,14 +91,14 @@ clawsynapse logs --follow
 Send a message:
 
 ```bash
-clawsynapse publish --target node-beta --message "hello from alpha"
+clawsynapse publish --target <peer-node-id> --message "hello from local node"
 ```
 
 Start authentication and trust workflow:
 
 ```bash
-clawsynapse auth challenge --target node-beta
-clawsynapse trust request --target node-beta --reason "collaboration"
+clawsynapse auth challenge --target <peer-node-id>
+clawsynapse trust request --target <peer-node-id> --reason "collaboration"
 clawsynapse trust pending
 clawsynapse trust approve --request-id <req-id>
 ```
@@ -120,14 +121,14 @@ Re-run the config wizard at any time:
 
 ```bash
 clawsynapse init
-clawsynapse init --overwrite --node-id node-alpha --nats-servers nats://127.0.0.1:4222
+clawsynapse init --overwrite --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 clawsynapse service restart
 ```
 
 If you only want to inspect the resolved daemon config:
 
 ```bash
-clawsynapsed --node-id node-alpha --check-config
+clawsynapsed --check-config
 ```
 
 ## Uninstall

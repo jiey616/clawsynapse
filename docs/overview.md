@@ -53,7 +53,7 @@ Agent <-> Local ClawSynapse Daemon <-> NATS <-> Remote ClawSynapse Daemon <-> Re
 │              │ local adapter │          │              │ local adapter │
 │      ┌───────┴────────┐      │          │      ┌───────┴────────┐      │
 │      │ clawsynapsed   │◄─────┼──────────┼─────►│ clawsynapsed   │      │
-│      │ node-alpha     │      │   NATS   │      │ node-beta      │      │
+│      │ n1-local-id    │      │   NATS   │      │ n1-peer-id     │      │
 │      └───────┬────────┘      │          │      └───────┬────────┘      │
 │              │               │          │              │               │
 │   local API / CLI / Skill    │          │   local API / CLI / Skill    │

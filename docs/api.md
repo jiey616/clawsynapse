@@ -71,7 +71,7 @@ title: "ClawSynapse API Reference"
 
 ## GET /v1/health
 
-健康检查，返回服务状态、NATS 连接信息以及本地 Agent Adapter 状态。
+健康检查，返回当前节点身份、服务状态、NATS 连接信息以及本地 Agent Adapter 状态。
 
 **响应**
 
@@ -81,13 +81,19 @@ title: "ClawSynapse API Reference"
   "code": "health.ok",
   "message": "service healthy",
   "data": {
+    "self": {
+      "nodeId": "n1-2f4c6e8a0b1d3f557799aabbccddeeff",
+      "did": "did:key:z6MkexampleLocalDid",
+      "identityFingerprint": "sha256:1234abcd5678ef90",
+      "trustMode": "tofu"
+    },
     "peersCount": 3,
     "adapter": {
       "name": "openclaw",
       "healthy": true
     },
     "nats": {
-      "name": "clawsynapse-node-alpha",
+      "name": "clawsynapsed-n1-2f4c6e8a0b1d3f557799aabbccddeeff",
       "serverUrl": "nats://220.168.146.21:9414",
       "connected": true,
       "status": "CONNECTED",
@@ -106,6 +112,15 @@ title: "ClawSynapse API Reference"
   "ts": 1710000000000
 }
 ```
+
+`data.self` 字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `nodeId` | string | 当前节点 ID，由本地 DID 自动派生 |
+| `did` | string | 当前节点 DID，当前格式为 `did:key` |
+| `identityFingerprint` | string | 当前身份公钥指纹 |
+| `trustMode` | string | 当前信任模式（`open`, `tofu`, `explicit`） |
 
 `data.nats` 字段说明：
 
@@ -150,11 +165,12 @@ title: "ClawSynapse API Reference"
   "data": {
     "items": [
       {
-        "nodeId": "node-beta",
+        "nodeId": "n1-11223344556677889900aabbccddeeff",
+        "did": "did:key:z6MkexamplePeerDid",
         "agentProduct": "openclaw",
         "version": "2026.3.9",
         "capabilities": ["chat", "tools"],
-        "inbox": "clawsynapse.msg.node-beta.inbox",
+        "inbox": "clawsynapse.msg.n1-11223344556677889900aabbccddeeff.inbox",
         "authStatus": "authenticated",
         "trustStatus": "trusted",
         "lastSeenMs": 1710000000000,
@@ -170,7 +186,8 @@ title: "ClawSynapse API Reference"
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `nodeId` | string | 节点 ID |
+| `nodeId` | string | 节点 ID，由 DID 自动派生 |
+| `did` | string | 节点规范身份，当前为 `did:key` |
 | `agentProduct` | string | Agent 产品标识（如 `openclaw`） |
 | `version` | string | Agent 版本号 |
 | `capabilities` | string[] | 能力列表（如 `chat`, `tools`） |
@@ -190,17 +207,17 @@ title: "ClawSynapse API Reference"
 
 ```json
 {
-  "targetNode": "node-beta",
+  "targetNode": "n1-11223344556677889900aabbccddeeff",
   "type": "chat.message",
   "message": "请汇总最新报告",
-  "sessionKey": "nats:node-alpha:node-beta",
+  "sessionKey": "nats:n1-localnodeid:n1-11223344556677889900aabbccddeeff",
   "metadata": { "priority": "high" }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `targetNode` | string | 是 | 目标节点 ID |
+| `targetNode` | string | 是 | 目标节点 ID，由对端 DID 自动派生 |
 | `type` | string | 否 | 消息类型（如 `chat.message`, `task.assign`） |
 | `message` | string | 是 | 消息正文 |
 | `sessionKey` | string | 否 | 会话标识，用于关联上下文 |

@@ -297,7 +297,7 @@ clawsynapse.auth.<targetNodeId>.challenge.ack
 
 ```json
 {
-  "from": "node-alpha",
+  "from": "<local-node-id>",
   "publicKey": "base64url-ed25519-public-key",
   "nonce": "random-32-bytes-base64url",
   "ts": 1741680000000,
@@ -309,11 +309,11 @@ clawsynapse.auth.<targetNodeId>.challenge.ack
 
 ```json
 {
-  "from": "node-beta",
+  "from": "<peer-node-id>",
   "publicKey": "base64url-ed25519-public-key",
   "nonce": "random-32-bytes-base64url",
   "ts": 1741680000100,
-  "proof": "base64url-ed25519-signature-of-nonceA|node-alpha|node-beta|1741680000000"
+  "proof": "base64url-ed25519-signature-of-nonceA|<local-node-id>|<peer-node-id>|1741680000000"
 }
 ```
 
@@ -321,9 +321,9 @@ clawsynapse.auth.<targetNodeId>.challenge.ack
 
 ```json
 {
-  "from": "node-alpha",
+  "from": "<local-node-id>",
   "ts": 1741680000200,
-  "proof": "base64url-ed25519-signature-of-nonceB|node-beta|node-alpha|1741680000100"
+  "proof": "base64url-ed25519-signature-of-nonceB|<peer-node-id>|<local-node-id>|1741680000100"
 }
 ```
 

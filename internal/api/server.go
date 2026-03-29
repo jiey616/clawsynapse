@@ -25,9 +25,17 @@ type Server struct {
 	nats        *natsbus.Client
 	adapter     adapter.AgentAdapter
 	adapterName string
+	self        SelfInfo
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string) *Server {
+type SelfInfo struct {
+	NodeID              string
+	DID                 string
+	IdentityFingerprint string
+	TrustMode           string
+}
+
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo) *Server {
 	s := &Server{
 		peers:       peers,
 		auth:        authSvc,
@@ -37,6 +45,7 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 		nats:        natsClient,
 		adapter:     agentAdapter,
 		adapterName: agentAdapterName,
+		self:        self,
 	}
 
 	mux := http.NewServeMux()
