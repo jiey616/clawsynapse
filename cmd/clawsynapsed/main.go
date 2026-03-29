@@ -43,7 +43,6 @@ func main() {
 		AddSource: cfg.LogAddSource,
 	}).With(
 		slog.String("service", "clawsynapsed"),
-		slog.String("nodeId", cfg.NodeID),
 	)
 
 	a, err := app.New(cfg)

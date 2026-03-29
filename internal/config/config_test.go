@@ -19,7 +19,7 @@ func TestLoadFromOSReadsHomeConfig(t *testing.T) {
 	}
 
 	configPath := filepath.Join(configDir, "config.yaml")
-	content := []byte("nodeId: home-node\nnatsServers:\n  - nats://10.0.0.1:4222\nlocalApiAddr: 127.0.0.1:19090\ntrustMode: explicit\nheartbeatInterval: 20s\nannounceTtl: 45s\n")
+	content := []byte("natsServers:\n  - nats://10.0.0.1:4222\nlocalApiAddr: 127.0.0.1:19090\ntrustMode: explicit\nheartbeatInterval: 20s\nannounceTtl: 45s\n")
 	if err := os.WriteFile(configPath, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -29,9 +29,6 @@ func TestLoadFromOSReadsHomeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.NodeID != "home-node" {
-		t.Fatalf("expected node id from config, got %q", cfg.NodeID)
-	}
 	if len(cfg.NATSServers) != 1 || cfg.NATSServers[0] != "nats://10.0.0.1:4222" {
 		t.Fatalf("unexpected nats servers: %#v", cfg.NATSServers)
 	}
@@ -67,12 +64,12 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(configDir, "config.yaml")
-	content := []byte("nodeId: config-node\nnatsServers:\n  - nats://10.0.0.1:4222\nlocalApiAddr: 127.0.0.1:19090\ntrustMode: tofu\n")
+	content := []byte("natsServers:\n  - nats://10.0.0.1:4222\nlocalApiAddr: 127.0.0.1:19090\ntrustMode: tofu\n")
 	if err := os.WriteFile(configPath, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("NODE_ID=dotenv-node\nTRUST_MODE=open\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,14 +84,11 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadFromOS([]string{"--node-id", "flag-node", "--trust-mode", "explicit"})
+	cfg, err := LoadFromOS([]string{"--trust-mode", "explicit"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cfg.NodeID != "flag-node" {
-		t.Fatalf("expected flag node id, got %q", cfg.NodeID)
-	}
 	if cfg.TrustMode != "explicit" {
 		t.Fatalf("expected flag trust mode, got %q", cfg.TrustMode)
 	}
@@ -126,7 +120,7 @@ func TestLoadFromOSUsesExplicitConfigPath(t *testing.T) {
 	chdirTempProject(t, project)
 
 	customPath := filepath.Join(project, "custom.yaml")
-	content := []byte("nodeId: custom-node\nnatsServers:\n  - nats://10.0.0.3:4222\n")
+	content := []byte("natsServers:\n  - nats://10.0.0.3:4222\n")
 	if err := os.WriteFile(customPath, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -136,9 +130,6 @@ func TestLoadFromOSUsesExplicitConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.NodeID != "custom-node" {
-		t.Fatalf("expected custom node id, got %q", cfg.NodeID)
-	}
 	if len(cfg.NATSServers) != 1 || cfg.NATSServers[0] != "nats://10.0.0.3:4222" {
 		t.Fatalf("unexpected nats servers: %#v", cfg.NATSServers)
 	}
@@ -147,7 +138,6 @@ func TestLoadFromOSUsesExplicitConfigPath(t *testing.T) {
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"NODE_ID",
 		"NATS_SERVERS",
 		"LOCAL_API_ADDR",
 		"DATA_DIR",

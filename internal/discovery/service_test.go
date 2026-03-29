@@ -22,7 +22,7 @@ func TestHandleAnnouncePreservesAuthAndTrustStatus(t *testing.T) {
 		LastSeenMs:  1,
 	})
 
-	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
 	msg := protocol.DiscoveryAnnounce{
 		MessageID:    "m1",
 		MessageType:  "discovery.announce",
@@ -74,7 +74,7 @@ func TestHandleAnnounceRestoresPersistedTrustStatusForNewPeer(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
 	msg := protocol.DiscoveryAnnounce{
 		MessageID:    "m1",
 		MessageType:  "discovery.announce",
@@ -123,7 +123,7 @@ func TestHandleAnnounceAutoAuthenticatesTrustedPeer(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
 	called := make(chan string, 1)
 	svc.SetAutoAuthenticator(func(_ context.Context, nodeID string) error {
 		called <- nodeID
@@ -176,7 +176,7 @@ func TestHandleAnnounceDeduplicatesAutoAuthentication(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var calls atomic.Int32

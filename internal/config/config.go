@@ -25,7 +25,6 @@ const (
 )
 
 type Config struct {
-	NodeID              string   `json:"nodeId"`
 	NATSServers         []string `json:"natsServers"`
 	LocalAPIAddr        string   `json:"localApiAddr"`
 	DataDir             string   `json:"dataDir"`
@@ -47,7 +46,6 @@ type Config struct {
 }
 
 type runtimeConfig struct {
-	NodeID              string
 	NATSServers         []string
 	LocalAPIAddr        string
 	DataDir             string
@@ -69,7 +67,6 @@ type runtimeConfig struct {
 }
 
 type configValues struct {
-	NodeID              string
 	NATSServers         []string
 	LocalAPIAddr        string
 	DataDir             string
@@ -94,7 +91,6 @@ func (c Config) Runtime() runtimeConfig {
 	t, _ := time.ParseDuration(c.AnnounceTTL)
 	tt, _ := time.ParseDuration(c.TransferTTL)
 	return runtimeConfig{
-		NodeID:              c.NodeID,
 		NATSServers:         c.NATSServers,
 		LocalAPIAddr:        c.LocalAPIAddr,
 		DataDir:             c.DataDir,
@@ -140,7 +136,6 @@ func LoadFromOS(args []string) (Config, error) {
 	fs := flag.NewFlagSet("clawsynapsed", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		nodeID              = fs.String("node-id", merged.NodeID, "node id")
 		natsServers         = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
 		apiAddr             = fs.String("local-api-addr", merged.LocalAPIAddr, "http api address")
 		dataDir             = fs.String("data-dir", merged.DataDir, "state directory")
@@ -169,10 +164,6 @@ func LoadFromOS(args []string) (Config, error) {
 	rawServers := splitCSV(*natsServers)
 	if len(rawServers) == 0 {
 		return Config{}, errors.New("nats servers is empty")
-	}
-
-	if strings.TrimSpace(*nodeID) == "" && !*checkConfig {
-		return Config{}, errors.New("node id is required (set --node-id or NODE_ID)")
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(*trustMode))
@@ -218,7 +209,6 @@ func LoadFromOS(args []string) (Config, error) {
 	}
 
 	return Config{
-		NodeID:              strings.TrimSpace(*nodeID),
 		NATSServers:         rawServers,
 		LocalAPIAddr:        strings.TrimSpace(*apiAddr),
 		DataDir:             resolvedDataDir,
@@ -262,9 +252,6 @@ func defaultConfigValues(defaultDataDir string) configValues {
 }
 
 func mergeConfigValues(base, override configValues) configValues {
-	if strings.TrimSpace(override.NodeID) != "" {
-		base.NodeID = strings.TrimSpace(override.NodeID)
-	}
 	if len(override.NATSServers) > 0 {
 		base.NATSServers = append([]string(nil), override.NATSServers...)
 	}

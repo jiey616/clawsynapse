@@ -9,7 +9,8 @@
       "Bash(python3 -m json.tool)",
       "Bash(gofmt -w ./cmd/clawsynapse/dashboard.go)",
       "Bash(curl:*)",
-      "Bash(go build:*)"
+      "Bash(go build:*)",
+      "WebFetch(domain:docs.gokite.ai)"
     ]
   }
 }

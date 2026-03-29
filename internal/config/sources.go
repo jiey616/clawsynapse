@@ -12,7 +12,6 @@ import (
 )
 
 type fileConfig struct {
-	NodeID              string   `yaml:"nodeId"`
 	NATSServers         []string `yaml:"natsServers"`
 	LocalAPIAddr        string   `yaml:"localApiAddr"`
 	DataDir             string   `yaml:"dataDir"`
@@ -52,7 +51,6 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 	}
 
 	values := configValues{
-		NodeID:              strings.TrimSpace(cfg.NodeID),
 		NATSServers:         cloneStrings(cfg.NATSServers),
 		LocalAPIAddr:        strings.TrimSpace(cfg.LocalAPIAddr),
 		DataDir:             strings.TrimSpace(cfg.DataDir),
@@ -135,7 +133,6 @@ func loadOSEnvValues() configValues {
 
 func loadValuesFromMap(values map[string]string) configValues {
 	return configValues{
-		NodeID:              strings.TrimSpace(values["NODE_ID"]),
 		NATSServers:         splitCSV(values["NATS_SERVERS"]),
 		LocalAPIAddr:        strings.TrimSpace(values["LOCAL_API_ADDR"]),
 		DataDir:             strings.TrimSpace(values["DATA_DIR"]),

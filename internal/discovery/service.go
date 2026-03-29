@@ -27,6 +27,7 @@ type Service struct {
 	peers     *Registry
 	store     *store.FSStore
 	nodeID    string
+	did       string
 	publicKey string
 	ttl       time.Duration
 	heartbeat time.Duration
@@ -36,13 +37,14 @@ type Service struct {
 	authing   map[string]struct{}
 }
 
-func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *store.FSStore, nodeID string, publicKey string, heartbeat, ttl time.Duration, trustMode string) *Service {
+func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *store.FSStore, nodeID string, did string, publicKey string, heartbeat, ttl time.Duration, trustMode string) *Service {
 	return &Service{
 		log:       log,
 		bus:       bus,
 		peers:     peers,
 		store:     fs,
 		nodeID:    nodeID,
+		did:       did,
 		publicKey: publicKey,
 		ttl:       ttl,
 		heartbeat: heartbeat,
@@ -96,6 +98,7 @@ func (s *Service) publishAnnounce() error {
 		MessageID:    randID(),
 		MessageType:  "discovery.announce",
 		NodeID:       s.nodeID,
+		DID:          s.did,
 		Version:      "v0.1.0",
 		AgentProduct: "clawsynapse",
 		Capabilities: []string{"chat", "tools"},
@@ -157,6 +160,7 @@ func (s *Service) handleAnnounce(_ string, data []byte) {
 
 	s.peers.Upsert(types.Peer{
 		NodeID:       msg.NodeID,
+		DID:          msg.DID,
 		Version:      msg.Version,
 		AgentProduct: msg.AgentProduct,
 		Capabilities: msg.Capabilities,
