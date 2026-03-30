@@ -510,12 +510,17 @@ install_systemd_service() {
     local tmpfile
     local service_user
     local service_group
+    local was_active=0
 
     service_user="$(id -un)"
     service_group="$(id -gn)"
     service_path="$(build_service_path)"
     openclaw_bin="$(detect_openclaw_bin)"
     require_sudo
+
+    if ${SUDO} systemctl is-active --quiet "${SYSTEMD_UNIT_NAME}"; then
+        was_active=1
+    fi
 
     tmpfile="$(mktemp)"
 
@@ -547,8 +552,13 @@ EOF
     rm -f "$tmpfile"
     ${SUDO} systemctl daemon-reload
     if [ "$AUTO_START" -eq 1 ]; then
-        ${SUDO} systemctl enable --now "${SYSTEMD_UNIT_NAME}"
-        info "systemd service enabled and started: ${SYSTEMD_UNIT_NAME}"
+        ${SUDO} systemctl enable "${SYSTEMD_UNIT_NAME}"
+        ${SUDO} systemctl restart "${SYSTEMD_UNIT_NAME}"
+        if [ "$was_active" -eq 1 ]; then
+            info "systemd service enabled and restarted: ${SYSTEMD_UNIT_NAME}"
+        else
+            info "systemd service enabled and started: ${SYSTEMD_UNIT_NAME}"
+        fi
     else
         ${SUDO} systemctl enable "${SYSTEMD_UNIT_NAME}"
         info "systemd service enabled: ${SYSTEMD_UNIT_NAME}"
