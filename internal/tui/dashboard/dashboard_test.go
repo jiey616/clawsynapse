@@ -1,4 +1,4 @@
-package main
+package dashboard
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func (s stubLogProvider) ReadLogs(_ context.Context, _ int) (string, error) {
 	return s.text, s.err
 }
 
-func TestLoadDashboardSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
+func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 	client := stubDashboardClient{
 		results: map[string]types.APIResult{
 			"/v1/health": {
@@ -77,7 +77,7 @@ func TestLoadDashboardSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 		},
 	}
 
-	snapshot, err := loadDashboardSnapshot(context.Background(), client, stubLogProvider{text: "line-a\nline-b"})
+	snapshot, err := loadSnapshot(context.Background(), client, stubLogProvider{text: "line-a\nline-b"}, dashboardDefaultLogLines)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,16 +99,19 @@ func TestLoadDashboardSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 }
 
 func TestDashboardViewRendersStructuredPanels(t *testing.T) {
-	model := dashboardModel{
+	model := model{
 		apiAddr:     "127.0.0.1:18080",
+		version:     "dev",
+		logSource:   "journalctl -u clawsynapsed.service",
+		logLines:    dashboardDefaultLogLines,
 		width:       120,
 		height:      32,
 		activeTab:   1,
 		lastUpdated: time.Unix(0, 0),
-		snapshot: dashboardSnapshot{
-			Health: dashboardHealth{
+		snapshot: snapshot{
+			Health: health{
 				PeersCount: 1,
-				NATS: dashboardNATS{
+				NATS: natsState{
 					Connected: true,
 					Status:    "CONNECTED",
 					InMsgs:    10,
@@ -140,9 +143,59 @@ func TestDashboardViewRendersStructuredPanels(t *testing.T) {
 	}
 }
 
+func TestHeaderViewKeepsReadyWhileLoading(t *testing.T) {
+	model := model{
+		apiAddr:   "127.0.0.1:18080",
+		version:   "dev",
+		logSource: "journalctl -u clawsynapsed.service",
+		logLines:  dashboardDefaultLogLines,
+		width:     120,
+		height:    32,
+		loading:   true,
+		snapshot:  snapshot{},
+	}
+	model.recalcLayout()
+
+	header := model.headerView(model.width)
+	if strings.Contains(header, "SYNCING") {
+		t.Fatalf("expected header to stop showing syncing status, got:\n%s", header)
+	}
+	if !strings.Contains(header, "READY") {
+		t.Fatalf("expected header to keep ready status, got:\n%s", header)
+	}
+}
+
+func TestPeerListLinesShowFullNodeIDWhenWidthAllows(t *testing.T) {
+	const nodeID = "n1-1234567890abcdef1234567890abcdef"
+
+	model := model{
+		snapshot: snapshot{
+			Peers: []types.Peer{
+				{
+					NodeID:       nodeID,
+					AuthStatus:   types.AuthAuthenticated,
+					TrustStatus:  types.TrustTrusted,
+					AgentProduct: "openclaw",
+					Version:      "v0.0.3",
+				},
+			},
+		},
+	}
+
+	lines := model.peerListLines(4, 78)
+	if got := parseTaggedOnly(lines[1]); !strings.Contains(got, nodeID) {
+		t.Fatalf("expected peer row to contain full nodeId %q, got %q", nodeID, got)
+	}
+	for _, line := range lines {
+		if got := visibleLen(parseTaggedOnly(line)); got > 78 {
+			t.Fatalf("line exceeds width: got %d want <= 78, line=%q", got, line)
+		}
+	}
+}
+
 func TestMessageListLinesFitPanelWidth(t *testing.T) {
-	model := dashboardModel{
-		snapshot: dashboardSnapshot{
+	model := model{
+		snapshot: snapshot{
 			Messages: []protocol.MessageEnvelope{
 				{
 					Type:    "conversation.message",
