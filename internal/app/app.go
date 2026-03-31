@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -95,7 +96,8 @@ func New(cfg config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)
 	}
-	messagingSvc.SetMessageHandler(messaging.NewAdapterMessageHandler(agentAdapter, 30*time.Second))
+	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, 30*time.Second)
+	messagingSvc.SetMessageHandler(adapterHandler)
 
 	transferSvc := transfer.NewService(
 		log.With(slog.String("component", "transfer")),
@@ -107,6 +109,29 @@ func New(cfg config.Config) (*App, error) {
 		},
 	)
 	messagingSvc.SetTransferHandler(transferSvc.HandleTransferNotification)
+
+	transferSvc.OnReceived(func(rec transfer.TransferRecord) {
+		content, _ := json.Marshal(map[string]any{
+			"transferId": rec.TransferID,
+			"fileName":   rec.FileName,
+			"fileSize":   rec.FileSize,
+			"localPath":  rec.LocalPath,
+			"mimeType":   rec.MimeType,
+		})
+		msg := messaging.IncomingMessage{
+			Type:     "transfer.received",
+			From:     rec.PeerNode,
+			To:       nodeID,
+			Message:  string(content),
+			Metadata: rec.Metadata,
+		}
+		if _, err := adapterHandler.HandleMessage(msg); err != nil {
+			log.Warn("deliver transfer.received to agent failed",
+				slog.String("transferId", rec.TransferID),
+				slog.String("error", err.Error()),
+			)
+		}
+	})
 
 	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter, api.SelfInfo{
 		NodeID:              nodeID,

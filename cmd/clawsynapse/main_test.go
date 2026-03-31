@@ -60,6 +60,47 @@ func TestRunTransferSendPostsExpectedPayload(t *testing.T) {
 	}
 }
 
+func TestRunTransferSendIncludesMetadata(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.sent"}}
+	_, err := runTransfer(context.Background(), client, []string{
+		"send",
+		"--target", "node-beta",
+		"--file", "/tmp/demo.txt",
+		"--metadata", "taskId=task-001",
+		"--metadata", "todoId=todo-042",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := client.payload.(map[string]any)
+	md, ok := body["metadata"].(map[string]any)
+	if !ok {
+		t.Fatal("expected metadata in payload")
+	}
+	if md["taskId"] != "task-001" {
+		t.Fatalf("metadata taskId = %v, want task-001", md["taskId"])
+	}
+	if md["todoId"] != "todo-042" {
+		t.Fatalf("metadata todoId = %v, want todo-042", md["todoId"])
+	}
+}
+
+func TestRunTransferSendOmitsEmptyMetadata(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.sent"}}
+	_, err := runTransfer(context.Background(), client, []string{
+		"send",
+		"--target", "node-beta",
+		"--file", "/tmp/demo.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := client.payload.(map[string]any)
+	if _, exists := body["metadata"]; exists {
+		t.Fatal("expected no metadata key when --metadata not provided")
+	}
+}
+
 func TestRunTransferGetFetchesTransferByID(t *testing.T) {
 	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.detail"}}
 	_, err := runTransfer(context.Background(), client, []string{"get", "--id", "tr-123"})

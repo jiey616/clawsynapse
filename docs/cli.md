@@ -320,6 +320,16 @@ go run ./cmd/clawsynapse transfer send \
   --mime-type application/pdf
 ```
 
+带业务元数据发送：
+
+```bash
+go run ./cmd/clawsynapse transfer send \
+  --target n1-11223344556677889900aabbccddeeff \
+  --file /tmp/report.pdf \
+  --metadata taskId=task-001 \
+  --metadata todoId=todo-042
+```
+
 获取单个传输详情：
 
 ```bash

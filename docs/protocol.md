@@ -663,7 +663,7 @@ type Envelope struct {
 ### 协议层建议关注点
 
 - transfer session / transfer id
-- 文件元数据，例如 `name`、`size`、`mimeType`、`checksum`
+- 文件元数据，例如 `name`、`size`、`mimeType`、`checksum`、`metadata`（业务扩展）
 - chunk 分片结构
 - chunk ack / retry 机制
 - transfer complete / abort 语义
@@ -695,6 +695,7 @@ type Envelope struct {
 | `chunkSize` | `number` | 是 | 分片大小 |
 | `encoding` | `string` | 否 | 例如 `binary`、`base64`、`gzip+binary` |
 | `resume` | `boolean` | 否 | 是否允许断点续传 |
+| `metadata` | `object` | 否 | 业务扩展元数据，透传给接收方（如 `taskId`、`todoId`） |
 | `ts` | `number` | 是 | 发起时间 |
 | `signature` | `string` | 否 | 可选签名 |
 

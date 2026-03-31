@@ -309,9 +309,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, _ *http.Request) {
 }
 
 type transferSendReq struct {
-	TargetNode string `json:"targetNode"`
-	FilePath   string `json:"filePath"`
-	MimeType   string `json:"mimeType,omitempty"`
+	TargetNode string         `json:"targetNode"`
+	FilePath   string         `json:"filePath"`
+	MimeType   string         `json:"mimeType,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 func (s *Server) handleTransferSend(w http.ResponseWriter, r *http.Request) {
@@ -335,6 +336,7 @@ func (s *Server) handleTransferSend(w http.ResponseWriter, r *http.Request) {
 		TargetNode: req.TargetNode,
 		FilePath:   req.FilePath,
 		MimeType:   req.MimeType,
+		Metadata:   req.Metadata,
 	})
 	if err != nil {
 		respondJSON(w, http.StatusBadRequest, types.APIResult{

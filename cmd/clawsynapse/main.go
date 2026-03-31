@@ -260,6 +260,8 @@ func runTransfer(ctx context.Context, client localAPIClient, args []string) (typ
 		target := fs.String("target", "", "target node id")
 		filePath := fs.String("file", "", "local file path")
 		mimeType := fs.String("mime-type", "", "mime type")
+		var metadataFlags stringList
+		fs.Var(&metadataFlags, "metadata", "metadata key=value; repeatable")
 		if err := fs.Parse(args[1:]); err != nil {
 			return types.APIResult{}, err
 		}
@@ -269,11 +271,19 @@ func runTransfer(ctx context.Context, client localAPIClient, args []string) (typ
 		if strings.TrimSpace(*filePath) == "" {
 			return types.APIResult{}, fmt.Errorf("missing --file")
 		}
-		return client.Post(ctx, "/v1/transfer/send", map[string]any{
+		metadata, err := parseMetadata(metadataFlags)
+		if err != nil {
+			return types.APIResult{}, err
+		}
+		payload := map[string]any{
 			"targetNode": *target,
 			"filePath":   *filePath,
 			"mimeType":   *mimeType,
-		})
+		}
+		if len(metadata) > 0 {
+			payload["metadata"] = metadata
+		}
+		return client.Post(ctx, "/v1/transfer/send", payload)
 	case "get":
 		fs := flag.NewFlagSet("transfer get", flag.ContinueOnError)
 		transferID := fs.String("id", "", "transfer id")

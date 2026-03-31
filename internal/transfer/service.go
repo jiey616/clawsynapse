@@ -22,6 +22,8 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+type ReceivedNotifier func(rec TransferRecord)
+
 type Service struct {
 	mu          sync.Mutex
 	log         *slog.Logger
@@ -35,6 +37,7 @@ type Service struct {
 	maxFileSize int64
 	ttl         time.Duration
 	transfers   map[string]*TransferRecord
+	onReceived  ReceivedNotifier
 }
 
 func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, msgSvc *messaging.Service, nodeID string, id *identity.Identity, trustMode string, cfg TransferConfig) *Service {
@@ -62,6 +65,12 @@ func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client
 		ttl:         ttl,
 		transfers:   make(map[string]*TransferRecord),
 	}
+}
+
+func (s *Service) OnReceived(fn ReceivedNotifier) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onReceived = fn
 }
 
 func (s *Service) Enabled() bool {
@@ -182,6 +191,11 @@ func (s *Service) SendFile(req SendFileRequest) (SendFileResult, error) {
 	if req.MimeType != "" {
 		meta.Headers.Set("X-Mime-Type", req.MimeType)
 	}
+	if len(req.Metadata) > 0 {
+		if mdBytes, err := json.Marshal(req.Metadata); err == nil {
+			meta.Headers.Set("X-Metadata", string(mdBytes))
+		}
+	}
 
 	objInfo, err := store.Put(meta, f)
 	if err != nil {
@@ -201,6 +215,7 @@ func (s *Service) SendFile(req SendFileRequest) (SendFileResult, error) {
 		Checksum:   checksum,
 		Status:     "completed",
 		Bucket:     bucket,
+		Metadata:   req.Metadata,
 		CreatedAt:  time.Now().UnixMilli(),
 	}
 	s.mu.Lock()
@@ -218,10 +233,7 @@ func (s *Service) SendFile(req SendFileRequest) (SendFileResult, error) {
 		TargetNode: req.TargetNode,
 		Type:       "transfer.available",
 		Message:    string(notifyContent),
-		Metadata: map[string]any{
-			"transferId": transferID,
-			"bucket":     bucket,
-		},
+		Metadata:   req.Metadata,
 	})
 
 	s.log.Info("file sent",
@@ -294,6 +306,7 @@ func (s *Service) pullAndSave(transferID, bucket string) error {
 	from := ""
 	fileName := transferID
 	mimeType := ""
+	var metadata map[string]any
 	if objInfo.Headers != nil {
 		if v := objInfo.Headers.Get("X-From"); v != "" {
 			from = v
@@ -303,6 +316,9 @@ func (s *Service) pullAndSave(transferID, bucket string) error {
 		}
 		if v := objInfo.Headers.Get("X-Mime-Type"); v != "" {
 			mimeType = v
+		}
+		if v := objInfo.Headers.Get("X-Metadata"); v != "" {
+			_ = json.Unmarshal([]byte(v), &metadata)
 		}
 	}
 
@@ -352,6 +368,7 @@ func (s *Service) pullAndSave(transferID, bucket string) error {
 		Status:      "completed",
 		LocalPath:   localPath,
 		Bucket:      bucket,
+		Metadata:    metadata,
 		CreatedAt:   objInfo.ModTime.UnixMilli(),
 		CompletedAt: time.Now().UnixMilli(),
 	}
@@ -366,6 +383,13 @@ func (s *Service) pullAndSave(transferID, bucket string) error {
 		slog.Int64("fileSize", written),
 		slog.String("localPath", localPath),
 	)
+
+	s.mu.Lock()
+	fn := s.onReceived
+	s.mu.Unlock()
+	if fn != nil {
+		go fn(*rec)
+	}
 
 	return nil
 }
@@ -443,6 +467,7 @@ func toTransferInfo(rec *TransferRecord) TransferInfo {
 		Checksum:    rec.Checksum,
 		Status:      rec.Status,
 		LocalPath:   rec.LocalPath,
+		Metadata:    rec.Metadata,
 		CreatedAt:   rec.CreatedAt,
 		CompletedAt: rec.CompletedAt,
 	}
