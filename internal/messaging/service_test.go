@@ -143,6 +143,50 @@ func TestMaybeDeliverForwardsDeliverableTypes(t *testing.T) {
 	}
 }
 
+func TestMaybeDeliverRoutesTransferAvailableToTransferHandler(t *testing.T) {
+	peers := discovery.NewRegistry()
+	base := t.TempDir()
+	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
+	if err != nil {
+		t.Fatalf("identity init failed: %v", err)
+	}
+
+	received := make(chan protocol.MessageEnvelope, 1)
+	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open", nil)
+	svc.SetTransferHandler(func(env protocol.MessageEnvelope) {
+		received <- env
+	})
+
+	// Should NOT be delivered to message handler
+	messageDelivered := false
+	svc.SetMessageHandler(MessageHandlerFunc(func(msg IncomingMessage) (HandlerResult, error) {
+		messageDelivered = true
+		return HandlerResult{}, nil
+	}))
+
+	svc.maybeDeliver(protocol.MessageEnvelope{
+		Type:    "transfer.available",
+		From:    "node-beta",
+		Content: `{"transferId":"tf-1","bucket":"clawsynapse-transfer-node-alpha"}`,
+	})
+
+	select {
+	case env := <-received:
+		if env.Type != "transfer.available" {
+			t.Fatalf("Type = %q, want transfer.available", env.Type)
+		}
+		if env.From != "node-beta" {
+			t.Fatalf("From = %q, want node-beta", env.From)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transfer handler not called within timeout")
+	}
+
+	if messageDelivered {
+		t.Fatal("transfer.available should not be delivered to message handler")
+	}
+}
+
 func TestIsDeliverableType(t *testing.T) {
 	defaultPrefixes := []string{"chat", "task"}
 	cases := []struct {

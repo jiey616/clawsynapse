@@ -48,6 +48,51 @@ type AgentAdapter interface {
 |------|------|------|
 | `Healthy` | bool | Agent 是否健康 |
 
+### 系统消息投递
+
+除了由 `DELIVERABLE_PREFIXES` 控制的用户消息外，部分系统消息会**直接投递**给 Adapter，不受前缀过滤限制：
+
+| 消息类型 | 触发时机 | 说明 |
+|----------|----------|------|
+| `transfer.received` | 文件接收完成并落盘后 | 通知本地 Agent 有新文件到达 |
+
+#### `transfer.received` 消息
+
+当远端节点向本节点发送文件，文件下载并保存到本地后，守护进程自动通过 Adapter 投递一条 `transfer.received` 消息。
+
+`Message` 字段为 JSON，包含传输固有信息：
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `transferId` | string | 传输 ID |
+| `fileName` | string | 文件名 |
+| `fileSize` | int64 | 文件大小（字节） |
+| `localPath` | string | 本地文件路径 |
+| `mimeType` | string | 文件 MIME 类型 |
+
+`Metadata` 字段为发送方附带的业务扩展元数据（如 `taskId`、`todoId`），与 `POST /v1/publish` 中 `metadata` 的语义一致。
+
+OpenClaw Adapter 收到的格式示例：
+
+```
+[clawsynapse type=transfer.received from=n1-sender to=n1-local taskId=task-001]
+{"transferId":"tf_abc123","fileName":"report.pdf","fileSize":24576,"localPath":"/data/transfers/tf_abc123-report.pdf","mimeType":"application/pdf"}
+```
+
+Webhook Adapter 收到的 JSON 示例：
+
+```json
+{
+  "nodeId": "n1-local",
+  "type": "transfer.received",
+  "from": "n1-sender",
+  "message": "{\"transferId\":\"tf_abc123\",\"fileName\":\"report.pdf\",\"fileSize\":24576,\"localPath\":\"/data/transfers/tf_abc123-report.pdf\",\"mimeType\":\"application/pdf\"}",
+  "metadata": {
+    "taskId": "task-001"
+  }
+}
+```
+
 ### 已实现的适配器
 
 | 适配器 | `AGENT_ADAPTER` 值 | 说明 |

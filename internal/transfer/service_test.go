@@ -55,6 +55,7 @@ func TestToTransferInfo(t *testing.T) {
 		Checksum:    "sha256-abc",
 		Status:      "completed",
 		LocalPath:   "/tmp/transfers/tf-1-test.txt",
+		Metadata:    map[string]any{"taskId": "task-001"},
 		CreatedAt:   1000,
 		CompletedAt: 2000,
 	}
@@ -76,6 +77,12 @@ func TestToTransferInfo(t *testing.T) {
 	}
 	if info.LocalPath != rec.LocalPath {
 		t.Fatalf("LocalPath = %q, want %q", info.LocalPath, rec.LocalPath)
+	}
+	if info.Metadata == nil {
+		t.Fatal("Metadata is nil, want non-nil")
+	}
+	if info.Metadata["taskId"] != "task-001" {
+		t.Fatalf("Metadata[taskId] = %v, want task-001", info.Metadata["taskId"])
 	}
 }
 
@@ -146,6 +153,69 @@ func TestGetTransfer(t *testing.T) {
 	_, ok = svc.GetTransfer("tf-missing")
 	if ok {
 		t.Fatal("expected not to find tf-missing")
+	}
+}
+
+func TestOnReceivedCallback(t *testing.T) {
+	called := make(chan TransferRecord, 1)
+	svc := &Service{
+		transfers: make(map[string]*TransferRecord),
+	}
+	svc.OnReceived(func(rec TransferRecord) {
+		called <- rec
+	})
+
+	// Simulate what pullAndSave does after file download
+	rec := &TransferRecord{
+		TransferID:  "tf-cb",
+		Direction:   "inbound",
+		PeerNode:    "node-gamma",
+		FileName:    "data.csv",
+		FileSize:    512,
+		MimeType:    "text/csv",
+		Status:      "completed",
+		LocalPath:   "/tmp/transfers/tf-cb-data.csv",
+		Metadata:    map[string]any{"todoId": "todo-99"},
+		CreatedAt:   1000,
+		CompletedAt: 2000,
+	}
+	svc.mu.Lock()
+	svc.transfers[rec.TransferID] = rec
+	svc.mu.Unlock()
+
+	svc.mu.Lock()
+	fn := svc.onReceived
+	svc.mu.Unlock()
+	if fn != nil {
+		go fn(*rec)
+	}
+
+	select {
+	case got := <-called:
+		if got.TransferID != "tf-cb" {
+			t.Fatalf("TransferID = %q, want tf-cb", got.TransferID)
+		}
+		if got.FileName != "data.csv" {
+			t.Fatalf("FileName = %q, want data.csv", got.FileName)
+		}
+		if got.Metadata["todoId"] != "todo-99" {
+			t.Fatalf("Metadata[todoId] = %v, want todo-99", got.Metadata["todoId"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("onReceived callback not called within timeout")
+	}
+}
+
+func TestOnReceivedNilDoesNotPanic(t *testing.T) {
+	svc := &Service{
+		transfers: make(map[string]*TransferRecord),
+	}
+	// onReceived is nil by default — simulate the guard in pullAndSave
+	svc.mu.Lock()
+	fn := svc.onReceived
+	svc.mu.Unlock()
+	if fn != nil {
+		t.Fatal("expected onReceived to be nil")
 	}
 }
 

@@ -21,6 +21,11 @@ type queueLogProvider struct {
 	idx   int
 }
 
+type stubLogProvider struct {
+	text string
+	err  error
+}
+
 func (s *stubLogRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	s.calls = append(s.calls, serviceCall{name: name, args: append([]string(nil), args...)})
 	key := name + " " + joinArgs(args)
@@ -37,6 +42,10 @@ func (q *queueLogProvider) ReadLogs(_ context.Context, _ int) (string, error) {
 	value := q.items[q.idx]
 	q.idx++
 	return value, nil
+}
+
+func (s stubLogProvider) ReadLogs(_ context.Context, _ int) (string, error) {
+	return s.text, s.err
 }
 
 func TestDefaultLogProviderLinuxUsesJournalctl(t *testing.T) {

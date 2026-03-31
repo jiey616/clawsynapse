@@ -10,7 +10,8 @@
       "Bash(gofmt -w ./cmd/clawsynapse/dashboard.go)",
       "Bash(curl:*)",
       "Bash(go build:*)",
-      "WebFetch(domain:docs.gokite.ai)"
+      "WebFetch(domain:docs.gokite.ai)",
+      "Bash(gofmt:*)"
     ]
   }
 }
