@@ -154,18 +154,37 @@ detect_openclaw_dir() {
     fi
 }
 
+detect_opencode_bin() {
+    local opencode_path
+    opencode_path="$(command -v opencode 2>/dev/null || true)"
+    if [ -n "$opencode_path" ]; then
+        printf '%s\n' "$opencode_path"
+    fi
+}
+
+detect_opencode_dir() {
+    local opencode_path
+    opencode_path="$(detect_opencode_bin)"
+    if [ -n "$opencode_path" ]; then
+        dirname "$opencode_path"
+    fi
+}
+
 build_service_path() {
     local path_value=""
     local candidate
     local openclaw_dir
+    local opencode_dir
 
     openclaw_dir="$(detect_openclaw_dir)"
+    opencode_dir="$(detect_opencode_dir)"
 
     for candidate in \
         "$INSTALL_DIR" \
         "$HOME/.local/bin" \
         "$HOME/.npm-global/bin" \
         ${openclaw_dir:+"$openclaw_dir"} \
+        ${opencode_dir:+"$opencode_dir"} \
         "/opt/homebrew/bin" \
         "/opt/homebrew/sbin" \
         "/usr/local/bin" \
@@ -279,7 +298,7 @@ maybe_prompt_daemon_config() {
     info "interactive daemon configuration"
     info "reading answers from your terminal"
     NATS_SERVERS="$(prompt_value "NATS servers (comma-separated)" "$NATS_SERVERS")"
-    AGENT_ADAPTER="$(prompt_choice "Agent adapter" "$AGENT_ADAPTER" default openclaw webhook)"
+    AGENT_ADAPTER="$(prompt_choice "Agent adapter" "$AGENT_ADAPTER" default openclaw opencode webhook)"
     if [ "$AGENT_ADAPTER" = "webhook" ]; then
         WEBHOOK_URL="$(prompt_required "Webhook URL" "$WEBHOOK_URL")"
     else
@@ -506,7 +525,6 @@ install_systemd_service() {
     local daemon_path="${INSTALL_DIR}/${DAEMON_BINARY}"
     local unit_path="/etc/systemd/system/${SYSTEMD_UNIT_NAME}"
     local service_path
-    local openclaw_bin
     local tmpfile
     local service_user
     local service_group
@@ -515,7 +533,6 @@ install_systemd_service() {
     service_user="$(id -un)"
     service_group="$(id -gn)"
     service_path="$(build_service_path)"
-    openclaw_bin="$(detect_openclaw_bin)"
     require_sudo
 
     if ${SUDO} systemctl is-active --quiet "${SYSTEMD_UNIT_NAME}"; then
@@ -536,7 +553,6 @@ User=${service_user}
 Group=${service_group}
 Environment=HOME=${HOME}
 Environment=PATH=${service_path}
-${openclaw_bin:+Environment=OPENCLAW_BIN=${openclaw_bin}}
 WorkingDirectory=${HOME}
 ExecStart=${daemon_path} --config ${CONFIG_PATH}
 Restart=on-failure
@@ -580,18 +596,11 @@ install_launchd_service() {
     local plist_dir="${HOME}/Library/LaunchAgents"
     local plist_path="${plist_dir}/${LAUNCHD_LABEL}.plist"
     local service_path
-    local openclaw_bin
-    local openclaw_env_block=""
     local tmpfile
     local domain
 
     install -d -m 755 "$plist_dir"
     service_path="$(build_service_path)"
-    openclaw_bin="$(detect_openclaw_bin)"
-    if [ -n "$openclaw_bin" ]; then
-        openclaw_env_block="    <key>OPENCLAW_BIN</key>
-    <string>${openclaw_bin}</string>"
-    fi
     tmpfile="$(mktemp)"
 
     cat >"$tmpfile" <<EOF
@@ -613,7 +622,6 @@ install_launchd_service() {
   <dict>
     <key>PATH</key>
     <string>${service_path}</string>
-${openclaw_env_block:+${openclaw_env_block}}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -959,12 +967,14 @@ main() {
     info "install dir: ${INSTALL_DIR}"
     info "platform: $(detect_platform)"
 
-    local _openclaw_bin
+    local _openclaw_bin _opencode_bin
     _openclaw_bin="$(detect_openclaw_bin)"
     if [ -n "$_openclaw_bin" ]; then
         info "detected openclaw: ${_openclaw_bin}"
-    else
-        warn "openclaw not found in PATH; service will not set OPENCLAW_BIN"
+    fi
+    _opencode_bin="$(detect_opencode_bin)"
+    if [ -n "$_opencode_bin" ]; then
+        info "detected opencode: ${_opencode_bin}"
     fi
 
     if [ "$ACTION" = "uninstall" ]; then

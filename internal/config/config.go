@@ -144,7 +144,7 @@ func LoadFromOS(args []string) (Config, error) {
 		heartbeat           = fs.Duration("heartbeat", merged.Heartbeat, "announce heartbeat interval")
 		announceTTL         = fs.Duration("announce-ttl", merged.AnnounceTTL, "announce ttl")
 		trustMode           = fs.String("trust-mode", merged.TrustMode, "trust mode: open|tofu|explicit")
-		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|webhook")
+		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|webhook")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -174,8 +174,8 @@ func LoadFromOS(args []string) (Config, error) {
 	if adapterName == "" {
 		adapterName = defaultAgentAdapter
 	}
-	if adapterName != "default" && adapterName != "openclaw" && adapterName != "webhook" {
-		return Config{}, errors.New("agent adapter must be one of: default|openclaw|webhook")
+	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "webhook" {
+		return Config{}, errors.New("agent adapter must be one of: default|openclaw|opencode|webhook")
 	}
 
 	webhookURL := strings.TrimSpace(*webhookURLFlag)

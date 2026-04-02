@@ -226,8 +226,10 @@ launchctl print gui/$(id -u)/io.github.yuanjun5681.clawsynapse.clawsynapsed
 推荐把版本发布也收敛成标准流程：
 
 - 用 Git tag 作为唯一版本源，例如 `v0.0.4`
+- 测试版 tag 使用 semver prerelease 后缀，例如 `v0.0.4-rc.1`
 - 由 `make release-prep` 统一生成 `dist/`、`checksums.txt` 和 release notes
 - 由 GitHub Actions 在 `v*` tag push 时自动创建 GitHub Release
+- 带 prerelease 后缀的 tag 会自动标记为 GitHub prerelease，不会进入 `releases/latest`
 
 本地预演：
 
@@ -242,6 +244,12 @@ make release-prep VERSION=v0.0.4
 ./scripts/cut-release.sh v0.0.4
 ```
 
+切测试版也可以直接用同一个脚本：
+
+```bash
+./scripts/cut-release.sh v0.0.4-rc.1
+```
+
 脚本默认会：
 
 - 检查工作区是否干净
@@ -250,8 +258,19 @@ make release-prep VERSION=v0.0.4
 - 先 fast-forward 到 `origin/main`
 - 再把 `origin/develop` 合入 `main`
 - 推送 `main`
-- 创建并推送 `v0.0.4` tag
+- 创建并推送目标 tag，例如 `v0.0.4` 或 `v0.0.4-rc.1`
 - 最后切回你原来的分支
+
+当 tag 是 `v0.0.4-rc.1`、`v0.0.4-beta.1` 这类 prerelease 版本时：
+
+- GitHub Release 会自动标记为 prerelease
+- 一键安装脚本默认使用的 `releases/latest` 不会切到这个版本
+- 如需安装测试版，显式指定版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --version v0.0.4-rc.1
+```
 
 如果只想本地预演，不立即推送：
 
@@ -269,6 +288,12 @@ make release-prep VERSION=v0.0.4
 
 ```bash
 ./scripts/release.sh --version v0.0.4
+```
+
+本地直接发布测试版：
+
+```bash
+./scripts/release.sh --version v0.0.4-rc.1
 ```
 
 CI 自动发布入口：

@@ -79,7 +79,7 @@ trap 'rm -f "$TMP_FILE"' EXIT
 	echo
 	echo "## Install"
 	echo
-	echo "Latest release:"
+	echo "Latest stable release:"
 	echo
 	echo '```bash'
 	echo "curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash"

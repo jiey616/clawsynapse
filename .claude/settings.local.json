@@ -11,7 +11,11 @@
       "Bash(curl:*)",
       "Bash(go build:*)",
       "WebFetch(domain:docs.gokite.ai)",
-      "Bash(gofmt:*)"
+      "Bash(gofmt:*)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:opencode.ai)",
+      "WebFetch(domain:developers.openai.com)"
     ]
   }
 }
