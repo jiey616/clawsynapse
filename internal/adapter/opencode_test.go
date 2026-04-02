@@ -4,23 +4,31 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"clawsynapse/internal/store"
 )
 
-func TestOpenCodeAdapterDeliverMessage(t *testing.T) {
+func TestOpenCodeAdapterDeliverMessageCreatesAndStoresSessionMapping(t *testing.T) {
+	fs := store.NewFSStore(t.TempDir())
+	if err := fs.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout failed: %v", err)
+	}
+
 	adapter, err := NewOpenCodeAdapter(OpenCodeConfig{
-		NodeID: "node-alpha",
+		NodeID:       "node-alpha",
+		SessionStore: fs,
 	})
 	if err != nil {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
 	adapter.execCmd = func(_ context.Context, args ...string) ([]byte, error) {
-		// args: run <msg> --format json --session <id>
-		if len(args) < 6 || args[0] != "run" {
+		if len(args) != 4 || args[0] != "run" {
 			t.Fatalf("unexpected args: %v", args)
 		}
 		wantMsg := "[clawsynapse from=node-beta to=node-alpha session=session-1]\nhello"
@@ -30,11 +38,8 @@ func TestOpenCodeAdapterDeliverMessage(t *testing.T) {
 		if args[2] != "--format" || args[3] != "json" {
 			t.Fatalf("format args = %v, want [--format json]", args[2:4])
 		}
-		if args[4] != "--session" || args[5] != "session-1" {
-			t.Fatalf("session args = %v, want [--session session-1]", args[4:6])
-		}
 
-		return []byte(`{"type":"result","content":"done"}` + "\n"), nil
+		return []byte(`{"type":"step_start","sessionID":"ses_123"}` + "\n" + `{"type":"result","content":"done","sessionID":"ses_123"}` + "\n"), nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -56,6 +61,20 @@ func TestOpenCodeAdapterDeliverMessage(t *testing.T) {
 	}
 	if result.Reply != "done" {
 		t.Fatalf("reply = %q, want done", result.Reply)
+	}
+	if result.SessionID != "ses_123" {
+		t.Fatalf("sessionID = %q, want ses_123", result.SessionID)
+	}
+
+	st, ok, err := fs.LoadSessionState("opencode", "session-1")
+	if err != nil {
+		t.Fatalf("LoadSessionState failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected session mapping to be saved")
+	}
+	if st.SessionID != "ses_123" {
+		t.Fatalf("saved SessionID = %q, want ses_123", st.SessionID)
 	}
 }
 
@@ -119,29 +138,49 @@ func TestOpenCodeAdapterGetStatus(t *testing.T) {
 	}
 }
 
-func TestOpenCodeResolveSessionID(t *testing.T) {
-	a, _ := NewOpenCodeAdapter(OpenCodeConfig{NodeID: "node-1"})
-
-	got := a.resolveSessionID(DeliverMessageRequest{SessionKey: "task-1", From: "node-2"})
-	if got != "task-1" {
-		t.Fatalf("got %q, want task-1", got)
+func TestOpenCodeAdapterDeliverMessageUsesMappedSessionID(t *testing.T) {
+	fs := store.NewFSStore(t.TempDir())
+	if err := fs.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout failed: %v", err)
+	}
+	if err := fs.SaveSessionState(store.SessionState{
+		Adapter:     "opencode",
+		SessionKey:  "session-1",
+		SessionID:   "ses_existing",
+		CreatedAtMs: 1000,
+		UpdatedAtMs: 1000,
+	}); err != nil {
+		t.Fatalf("SaveSessionState failed: %v", err)
 	}
 
-	got = a.resolveSessionID(DeliverMessageRequest{From: "node-2"})
-	if got != "cs-node-2-node-1" {
-		t.Fatalf("got %q, want cs-node-2-node-1", got)
+	a, _ := NewOpenCodeAdapter(OpenCodeConfig{NodeID: "node-1", SessionStore: fs})
+	a.execCmd = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) != 6 {
+			t.Fatalf("unexpected args: %v", args)
+		}
+		if args[4] != "--session" || args[5] != "ses_existing" {
+			t.Fatalf("session args = %v, want [--session ses_existing]", args[4:6])
+		}
+		return []byte(`{"type":"result","content":"done","sessionID":"ses_existing"}` + "\n"), nil
 	}
 
-	got = a.resolveSessionID(DeliverMessageRequest{})
-	if got != "cs-_anon-node-1" {
-		t.Fatalf("got %q, want cs-_anon-node-1", got)
+	result, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		SessionKey: "session-1",
+		Message:    "hello",
+		From:       "node-2",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if result.SessionID != "ses_existing" {
+		t.Fatalf("sessionID = %q, want ses_existing", result.SessionID)
 	}
 }
 
 func TestParseOpenCodeResultNDJSON(t *testing.T) {
-	data := []byte(`{"type":"thinking","content":"analyzing..."}
-{"type":"text","content":"here is the answer"}
-{"type":"result","content":"final result"}
+	data := []byte(`{"type":"thinking","content":"analyzing...","sessionID":"ses_1"}
+{"type":"text","content":"here is the answer","sessionID":"ses_1"}
+{"type":"result","content":"final result","sessionID":"ses_1"}
 `)
 
 	result, err := parseOpenCodeResult(data)
@@ -154,10 +193,13 @@ func TestParseOpenCodeResultNDJSON(t *testing.T) {
 	if result.Reply != "final result" {
 		t.Fatalf("reply = %q, want final result", result.Reply)
 	}
+	if result.SessionID != "ses_1" {
+		t.Fatalf("sessionID = %q, want ses_1", result.SessionID)
+	}
 }
 
 func TestParseOpenCodeResultTextField(t *testing.T) {
-	data := []byte(`{"type":"message","text":"hello from opencode"}`)
+	data := []byte(`{"type":"message","text":"hello from opencode","sessionID":"ses_2"}`)
 
 	result, err := parseOpenCodeResult(data)
 	if err != nil {
@@ -165,6 +207,9 @@ func TestParseOpenCodeResultTextField(t *testing.T) {
 	}
 	if result.Reply != "hello from opencode" {
 		t.Fatalf("reply = %q, want hello from opencode", result.Reply)
+	}
+	if result.SessionID != "ses_2" {
+		t.Fatalf("sessionID = %q, want ses_2", result.SessionID)
 	}
 }
 
@@ -205,6 +250,73 @@ func TestParseOpenCodeResultErrorEvent(t *testing.T) {
 	}
 	if result.Error != "rate limit exceeded" {
 		t.Fatalf("error = %q, want rate limit exceeded", result.Error)
+	}
+}
+
+func TestOpenCodeAdapterRetriesUnknownMappedSession(t *testing.T) {
+	fs := store.NewFSStore(t.TempDir())
+	if err := fs.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout failed: %v", err)
+	}
+	if err := fs.SaveSessionState(store.SessionState{
+		Adapter:     "opencode",
+		SessionKey:  "session-1",
+		SessionID:   "ses_stale",
+		CreatedAtMs: 100,
+		UpdatedAtMs: 100,
+	}); err != nil {
+		t.Fatalf("SaveSessionState failed: %v", err)
+	}
+
+	adapter, err := NewOpenCodeAdapter(OpenCodeConfig{
+		NodeID:       "node-alpha",
+		SessionStore: fs,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
+	}
+
+	var calls int
+	adapter.execCmd = func(_ context.Context, args ...string) ([]byte, error) {
+		calls++
+		switch calls {
+		case 1:
+			if len(args) != 6 || args[4] != "--session" || args[5] != "ses_stale" {
+				t.Fatalf("unexpected first args: %v", args)
+			}
+			return nil, errors.New("unknown session id")
+		case 2:
+			if len(args) != 4 {
+				t.Fatalf("unexpected retry args: %v", args)
+			}
+			return []byte(`{"type":"result","content":"done","sessionID":"ses_fresh"}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected exec count: %d", calls)
+			return nil, nil
+		}
+	}
+
+	result, err := adapter.DeliverMessage(context.Background(), DeliverMessageRequest{
+		SessionKey: "session-1",
+		Message:    "hello",
+		From:       "node-beta",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if result.SessionID != "ses_fresh" {
+		t.Fatalf("sessionID = %q, want ses_fresh", result.SessionID)
+	}
+
+	st, ok, err := fs.LoadSessionState("opencode", "session-1")
+	if err != nil {
+		t.Fatalf("LoadSessionState failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected session mapping to exist")
+	}
+	if st.SessionID != "ses_fresh" {
+		t.Fatalf("saved SessionID = %q, want ses_fresh", st.SessionID)
 	}
 }
 
@@ -274,5 +386,40 @@ func TestOpenCodeAdapterDeliverMessageLogsCommand(t *testing.T) {
 	}
 	if !strings.Contains(command, `opencode "run" "`) {
 		t.Fatalf("command = %q, missing command prefix", command)
+	}
+}
+
+func TestOpenCodeAdapterStoresSessionUnderSessionsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	fs := store.NewFSStore(dir)
+	if err := fs.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout failed: %v", err)
+	}
+
+	adapter, err := NewOpenCodeAdapter(OpenCodeConfig{
+		NodeID:       "node-alpha",
+		SessionStore: fs,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
+	}
+	adapter.execCmd = func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte(`{"type":"result","content":"done","sessionID":"ses_123"}` + "\n"), nil
+	}
+
+	_, err = adapter.DeliverMessage(context.Background(), DeliverMessageRequest{
+		SessionKey: "session-1",
+		Message:    "hello",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+
+	path, err := fs.SessionPath("opencode", "session-1")
+	if err != nil {
+		t.Fatalf("SessionPath failed: %v", err)
+	}
+	if !strings.HasPrefix(path, filepath.Join(dir, "sessions", "opencode")) {
+		t.Fatalf("path = %q, want under sessions/opencode", path)
 	}
 }

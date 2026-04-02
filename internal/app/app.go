@@ -92,7 +92,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("init trust service: %w", err)
 	}
 	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, nodeID, id, cfg.TrustMode, cfg.DeliverablePrefixes)
-	agentAdapter, err := newAgentAdapter(cfg, nodeID, log)
+	agentAdapter, err := newAgentAdapter(cfg, nodeID, log, fs)
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)
 	}
@@ -155,7 +155,7 @@ func New(cfg config.Config) (*App, error) {
 	}, nil
 }
 
-func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger) (adapter.AgentAdapter, error) {
+func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *store.FSStore) (adapter.AgentAdapter, error) {
 	switch cfg.AgentAdapter {
 	case "", "default":
 		return adapter.NewDefaultAdapter(nodeID), nil
@@ -166,8 +166,9 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger) (adapte
 		})
 	case "opencode":
 		return adapter.NewOpenCodeAdapter(adapter.OpenCodeConfig{
-			NodeID: nodeID,
-			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "opencode")),
+			NodeID:       nodeID,
+			Logger:       log.With(slog.String("component", "adapter"), slog.String("adapter", "opencode")),
+			SessionStore: fs,
 		})
 	case "webhook":
 		return adapter.NewWebhookAdapter(adapter.WebhookConfig{

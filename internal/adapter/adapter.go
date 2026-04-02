@@ -16,11 +16,12 @@ type DeliverMessageRequest struct {
 }
 
 type DeliverMessageResult struct {
-	Success  bool
-	Accepted bool
-	RunID    string
-	Reply    string
-	Error    string
+	Success   bool
+	Accepted  bool
+	RunID     string
+	SessionID string
+	Reply     string
+	Error     string
 }
 
 type AgentStatus struct {

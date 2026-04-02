@@ -10,41 +10,52 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"clawsynapse/internal/store"
 )
 
 type OpenCodeConfig struct {
-	NodeID string
-	Logger *slog.Logger
+	NodeID       string
+	Logger       *slog.Logger
+	SessionStore *store.FSStore
 }
 
 type OpenCodeAdapter struct {
-	nodeID  string
-	log     *slog.Logger
-	execCmd func(ctx context.Context, args ...string) ([]byte, error)
+	nodeID       string
+	log          *slog.Logger
+	sessionStore *store.FSStore
+	execCmd      func(ctx context.Context, args ...string) ([]byte, error)
 }
 
 func NewOpenCodeAdapter(cfg OpenCodeConfig) (*OpenCodeAdapter, error) {
 	return &OpenCodeAdapter{
-		nodeID:  strings.TrimSpace(cfg.NodeID),
-		log:     cfg.Logger,
-		execCmd: defaultOpenCodeExecCmd,
+		nodeID:       strings.TrimSpace(cfg.NodeID),
+		log:          cfg.Logger,
+		sessionStore: cfg.SessionStore,
+		execCmd:      defaultOpenCodeExecCmd,
 	}, nil
 }
 
 func (a *OpenCodeAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRequest) (*DeliverMessageResult, error) {
 	msg := formatDeliverMessage(a.nodeID, req)
-	sessionID := a.resolveSessionID(req)
+	sessionID := a.loadMappedSessionID(req.SessionKey)
 
-	args := []string{"run", msg, "--format", "json", "--session", sessionID}
-
-	a.logCommand(args)
-
-	out, err := a.execCmd(ctx, args...)
+	out, err := a.runCommand(ctx, msg, sessionID)
+	if err != nil && sessionID != "" && isOpenCodeUnknownSessionError(err) {
+		a.deleteMappedSession(req.SessionKey)
+		out, err = a.runCommand(ctx, msg, "")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("opencode run command: %w", err)
 	}
 
-	return parseOpenCodeResult(out)
+	result, err := parseOpenCodeResult(out)
+	if err != nil {
+		return nil, err
+	}
+	a.saveMappedSession(req.SessionKey, result.SessionID)
+	return result, nil
 }
 
 func (a *OpenCodeAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
@@ -58,22 +69,12 @@ func (a *OpenCodeAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
 	return &AgentStatus{Healthy: true}, nil
 }
 
-func (a *OpenCodeAdapter) resolveSessionID(req DeliverMessageRequest) string {
-	if s := strings.TrimSpace(req.SessionKey); s != "" {
-		return s
-	}
-	from := req.From
-	if from == "" {
-		from = "_anon"
-	}
-	return "cs-" + from + "-" + a.nodeID
-}
-
 type openCodeEvent struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	Text    string `json:"text"`
-	Error   string `json:"error"`
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+	Text      string `json:"text"`
+	Error     string `json:"error"`
+	SessionID string `json:"sessionID"`
 }
 
 func parseOpenCodeResult(data []byte) (*DeliverMessageResult, error) {
@@ -81,6 +82,7 @@ func parseOpenCodeResult(data []byte) (*DeliverMessageResult, error) {
 
 	var lastText string
 	var lastError string
+	var lastSessionID string
 	var parsed bool
 
 	for _, line := range lines {
@@ -95,6 +97,9 @@ func parseOpenCodeResult(data []byte) (*DeliverMessageResult, error) {
 		parsed = true
 		if evt.Error != "" {
 			lastError = evt.Error
+		}
+		if evt.SessionID != "" {
+			lastSessionID = strings.TrimSpace(evt.SessionID)
 		}
 		text := firstNonEmpty(evt.Content, evt.Text)
 		if text != "" {
@@ -111,9 +116,10 @@ func parseOpenCodeResult(data []byte) (*DeliverMessageResult, error) {
 			}, nil
 		}
 		return &DeliverMessageResult{
-			Success:  true,
-			Accepted: true,
-			Reply:    text,
+			Success:   true,
+			Accepted:  true,
+			SessionID: lastSessionID,
+			Reply:     text,
 		}, nil
 	}
 
@@ -125,9 +131,10 @@ func parseOpenCodeResult(data []byte) (*DeliverMessageResult, error) {
 	}
 
 	return &DeliverMessageResult{
-		Success:  true,
-		Accepted: true,
-		Reply:    lastText,
+		Success:   true,
+		Accepted:  true,
+		SessionID: lastSessionID,
+		Reply:     lastText,
 	}, nil
 }
 
@@ -139,6 +146,102 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (a *OpenCodeAdapter) runCommand(ctx context.Context, msg string, sessionID string) ([]byte, error) {
+	args := []string{"run", msg, "--format", "json"}
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		args = append(args, "--session", sessionID)
+	}
+
+	a.logCommand(args)
+	return a.execCmd(ctx, args...)
+}
+
+func (a *OpenCodeAdapter) loadMappedSessionID(sessionKey string) string {
+	if a.sessionStore == nil {
+		return ""
+	}
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return ""
+	}
+
+	st, ok, err := a.sessionStore.LoadSessionState("opencode", sessionKey)
+	if err != nil {
+		a.logStoreWarning("load opencode session mapping failed", sessionKey, err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(st.SessionID)
+}
+
+func (a *OpenCodeAdapter) saveMappedSession(sessionKey string, sessionID string) {
+	if a.sessionStore == nil {
+		return
+	}
+	sessionKey = strings.TrimSpace(sessionKey)
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionKey == "" || sessionID == "" {
+		return
+	}
+
+	existing, ok, err := a.sessionStore.LoadSessionState("opencode", sessionKey)
+	if err != nil {
+		a.logStoreWarning("load opencode session mapping failed", sessionKey, err)
+		return
+	}
+	if ok && strings.TrimSpace(existing.SessionID) == sessionID {
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	createdAt := now
+	if ok && existing.CreatedAtMs > 0 {
+		createdAt = existing.CreatedAtMs
+	}
+	if err := a.sessionStore.SaveSessionState(store.SessionState{
+		Adapter:     "opencode",
+		SessionKey:  sessionKey,
+		SessionID:   sessionID,
+		CreatedAtMs: createdAt,
+		UpdatedAtMs: now,
+	}); err != nil {
+		a.logStoreWarning("save opencode session mapping failed", sessionKey, err)
+	}
+}
+
+func (a *OpenCodeAdapter) deleteMappedSession(sessionKey string) {
+	if a.sessionStore == nil {
+		return
+	}
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return
+	}
+	if err := a.sessionStore.DeleteSessionState("opencode", sessionKey); err != nil {
+		a.logStoreWarning("delete opencode session mapping failed", sessionKey, err)
+	}
+}
+
+func (a *OpenCodeAdapter) logStoreWarning(msg string, sessionKey string, err error) {
+	if a.log == nil {
+		return
+	}
+	a.log.Warn(msg,
+		slog.String("sessionKey", sessionKey),
+		slog.String("error", err.Error()),
+	)
+}
+
+func isOpenCodeUnknownSessionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unknown session") || strings.Contains(msg, "session not found")
 }
 
 func (a *OpenCodeAdapter) logCommand(args []string) {
