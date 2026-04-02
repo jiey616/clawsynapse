@@ -164,6 +164,11 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger) (adapte
 			NodeID: nodeID,
 			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "openclaw")),
 		})
+	case "opencode":
+		return adapter.NewOpenCodeAdapter(adapter.OpenCodeConfig{
+			NodeID: nodeID,
+			Logger: log.With(slog.String("component", "adapter"), slog.String("adapter", "opencode")),
+		})
 	case "webhook":
 		return adapter.NewWebhookAdapter(adapter.WebhookConfig{
 			NodeID: nodeID,
