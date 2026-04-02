@@ -62,6 +62,13 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
   bash -s -- --version v0.0.x
 ```
 
+To install a prerelease build, pass the exact tag explicitly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --version v0.0.4-rc.1
+```
+
 After upgrading, restart the daemon to make sure the new version is active:
 
 ```bash

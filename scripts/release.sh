@@ -3,6 +3,7 @@
 set -euo pipefail
 
 DEFAULT_REPO="yuanjun5681/clawsynapse"
+SEMVER_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
 
 usage() {
 	cat <<'EOF'
@@ -10,6 +11,7 @@ Build and publish a ClawSynapse GitHub Release.
 
 Usage:
   ./scripts/release.sh --version v0.0.4
+  ./scripts/release.sh --version v0.0.4-rc.1
 
 Options:
   --version VERSION    Release tag to build and publish
@@ -19,6 +21,21 @@ Options:
   --skip-publish       Only build dist/, checksums, and release notes
   -h, --help           Show this help
 EOF
+}
+
+is_valid_version() {
+	printf '%s\n' "$1" | grep -Eq "$SEMVER_REGEX"
+}
+
+is_prerelease_version() {
+	case "$1" in
+		*-*)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
 }
 
 VERSION=""
@@ -70,9 +87,18 @@ if [ -z "$VERSION" ]; then
 	exit 1
 fi
 
+if ! is_valid_version "$VERSION"; then
+	echo "release version must use semantic tag format like v0.0.4 or v0.0.4-rc.1" >&2
+	exit 1
+fi
+
 if ! git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null 2>&1; then
 	echo "tag not found: ${VERSION}" >&2
 	exit 1
+fi
+
+if is_prerelease_version "$VERSION"; then
+	PRERELEASE=1
 fi
 
 make release-prep VERSION="$VERSION"

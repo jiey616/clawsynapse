@@ -5,6 +5,7 @@ set -euo pipefail
 DEFAULT_REMOTE="origin"
 DEFAULT_BASE_BRANCH="develop"
 DEFAULT_RELEASE_BRANCH="main"
+SEMVER_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
 
 usage() {
 	cat <<'EOF'
@@ -12,6 +13,7 @@ Prepare and cut a ClawSynapse release from develop to main.
 
 Usage:
   ./scripts/cut-release.sh v0.0.4
+  ./scripts/cut-release.sh v0.0.4-rc.1
 
 Options:
   --remote NAME          Git remote name (default: origin)
@@ -32,6 +34,21 @@ Behavior:
   8. Push the release tag.
   9. Checkout your original branch again.
 EOF
+}
+
+is_valid_version() {
+	printf '%s\n' "$1" | grep -Eq "$SEMVER_REGEX"
+}
+
+is_prerelease_version() {
+	case "$1" in
+		*-*)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
 }
 
 VERSION=""
@@ -90,14 +107,10 @@ if [ -z "$VERSION" ]; then
 	exit 1
 fi
 
-case "$VERSION" in
-	v[0-9]*.[0-9]*.[0-9]*)
-		;;
-	*)
-		echo "release version must use semantic tag format like v0.0.4" >&2
-		exit 1
-		;;
-esac
+if ! is_valid_version "$VERSION"; then
+	echo "release version must use semantic tag format like v0.0.4 or v0.0.4-rc.1" >&2
+	exit 1
+fi
 
 current_branch="$(git branch --show-current)"
 cleanup() {
@@ -156,7 +169,11 @@ git tag "$VERSION"
 if [ "$NO_PUSH" -eq 0 ]; then
 	git push "$REMOTE" "$VERSION"
 	echo "release pushed: branch ${RELEASE_BRANCH}, tag ${VERSION}"
-	echo "GitHub Actions will publish release assets for ${VERSION}."
+	if is_prerelease_version "$VERSION"; then
+		echo "GitHub Actions will publish prerelease assets for ${VERSION} without updating latest."
+	else
+		echo "GitHub Actions will publish release assets for ${VERSION}."
+	fi
 else
 	echo "local release prepared: branch ${RELEASE_BRANCH}, tag ${VERSION}"
 	echo "next steps:"

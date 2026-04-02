@@ -62,6 +62,13 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
   bash -s -- --version v0.0.x
 ```
 
+如果需要安装测试版，也使用显式版本号，例如：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+  bash -s -- --version v0.0.4-rc.1
+```
+
 升级后建议重启 daemon，确保新版本已经生效：
 
 ```bash
