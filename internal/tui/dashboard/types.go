@@ -11,7 +11,7 @@ import (
 
 const (
 	dashboardRefreshInterval  = 3 * time.Second
-	dashboardTabCount         = 4
+	dashboardTabCount         = 5
 	dashboardMinWidth         = 60
 	dashboardMinHeight        = 20
 	dashboardNarrowBreakpoint = 100
@@ -58,6 +58,7 @@ var dashboardANSIRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 type Client interface {
 	Get(ctx context.Context, endpoint string) (types.APIResult, error)
+	Put(ctx context.Context, endpoint string, payload any) (types.APIResult, error)
 }
 
 type LogProvider interface {
@@ -80,11 +81,12 @@ type config struct {
 }
 
 type snapshot struct {
-	Health   health
-	Peers    []types.Peer
-	Messages []protocol.MessageEnvelope
-	Logs     string
-	Updated  time.Time
+	Health     health
+	Peers      []types.Peer
+	Messages   []protocol.MessageEnvelope
+	Logs       string
+	ConfigData map[string]any
+	Updated    time.Time
 }
 
 type health struct {
@@ -107,6 +109,40 @@ type natsState struct {
 	ConnectedAt      int64
 	LastDisconnectAt int64
 	LastReconnectAt  int64
+}
+
+type configFieldKind int
+
+const (
+	cfkText configFieldKind = iota
+	cfkEnum
+	cfkBool
+	cfkStringSlice
+)
+
+type configField struct {
+	Label   string
+	Key     string
+	Group   string
+	Kind    configFieldKind
+	Enums   []string
+	Value   string
+	EditBuf string
+	Changed bool
+}
+
+type configEditState struct {
+	fields     []configField
+	editing    bool
+	editIdx    int
+	dirty      bool
+	statusMsg  string
+	statusAt   time.Time
+	configPath string
+}
+
+type configSaveMsg struct {
+	err error
 }
 
 type refreshMsg struct {
@@ -179,6 +215,7 @@ type model struct {
 	cursors        [dashboardTabCount]int
 	offsets        [dashboardTabCount]int
 	logsFollowTail bool
+	cfgState       configEditState
 }
 
 func (m *model) recalcLayout() {

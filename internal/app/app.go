@@ -138,7 +138,7 @@ func New(cfg config.Config) (*App, error) {
 		DID:                 nodeDID,
 		IdentityFingerprint: identity.Fingerprint(id.PublicKey),
 		TrustMode:           cfg.TrustMode,
-	})
+	}, cfg)
 
 	return &App{
 		log:       log,

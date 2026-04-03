@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"clawsynapse/internal/config"
 	"clawsynapse/internal/messaging"
 	"clawsynapse/internal/transfer"
 	"clawsynapse/pkg/types"
@@ -451,5 +452,67 @@ func (s *Server) handleTransferDelete(w http.ResponseWriter, r *http.Request) {
 			"transferId": transferID,
 		},
 		TS: time.Now().UnixMilli(),
+	})
+}
+
+func (s *Server) handleConfigGet(w http.ResponseWriter, _ *http.Request) {
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "config.ok",
+		Message: "config fetched",
+		Data: map[string]any{
+			"config": s.cfg,
+		},
+		TS: time.Now().UnixMilli(),
+	})
+}
+
+func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
+	var cfg config.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{
+			OK:      false,
+			Code:    "invalid_argument",
+			Message: "invalid json payload",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	if err := config.Validate(cfg); err != nil {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{
+			OK:      false,
+			Code:    "config.invalid",
+			Message: err.Error(),
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	if s.configPath == "" {
+		respondJSON(w, http.StatusInternalServerError, types.APIResult{
+			OK:      false,
+			Code:    "config.no_path",
+			Message: "config file path not available",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	if err := config.SaveToFile(s.configPath, cfg); err != nil {
+		respondJSON(w, http.StatusInternalServerError, types.APIResult{
+			OK:      false,
+			Code:    "config.save_failed",
+			Message: err.Error(),
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "config.saved",
+		Message: "config saved, restart daemon to apply",
+		TS:      time.Now().UnixMilli(),
 	})
 }

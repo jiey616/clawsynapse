@@ -8,6 +8,7 @@ import (
 
 	"clawsynapse/internal/adapter"
 	"clawsynapse/internal/auth"
+	"clawsynapse/internal/config"
 	"clawsynapse/internal/discovery"
 	"clawsynapse/internal/messaging"
 	"clawsynapse/internal/natsbus"
@@ -26,6 +27,8 @@ type Server struct {
 	adapter     adapter.AgentAdapter
 	adapterName string
 	self        SelfInfo
+	cfg         config.Config
+	configPath  string
 }
 
 type SelfInfo struct {
@@ -35,7 +38,7 @@ type SelfInfo struct {
 	TrustMode           string
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo) *Server {
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, cfg config.Config) *Server {
 	s := &Server{
 		peers:       peers,
 		auth:        authSvc,
@@ -46,6 +49,8 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 		adapter:     agentAdapter,
 		adapterName: agentAdapterName,
 		self:        self,
+		cfg:         cfg,
+		configPath:  cfg.ConfigPath,
 	}
 
 	mux := http.NewServeMux()
@@ -63,6 +68,8 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 	mux.HandleFunc("GET /v1/transfer/{transferId}", s.handleTransfer)
 	mux.HandleFunc("DELETE /v1/transfer/{transferId}", s.handleTransferDelete)
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
+	mux.HandleFunc("GET /v1/config", s.handleConfigGet)
+	mux.HandleFunc("PUT /v1/config", s.handleConfigSave)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,

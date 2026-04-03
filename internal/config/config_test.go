@@ -155,6 +155,97 @@ func clearConfigEnv(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsValidConfig(t *testing.T) {
+	cfg := Config{
+		NATSServers:  []string{"nats://127.0.0.1:4222"},
+		TrustMode:    "tofu",
+		AgentAdapter: "default",
+		LogLevel:     "info",
+		LogFormat:    "json",
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected valid config, got error: %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidTrustMode(t *testing.T) {
+	cfg := Config{
+		NATSServers:  []string{"nats://127.0.0.1:4222"},
+		TrustMode:    "invalid",
+		AgentAdapter: "default",
+		LogLevel:     "info",
+		LogFormat:    "json",
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid trust mode")
+	}
+}
+
+func TestValidateRejectsInvalidAdapter(t *testing.T) {
+	cfg := Config{
+		NATSServers:  []string{"nats://127.0.0.1:4222"},
+		TrustMode:    "tofu",
+		AgentAdapter: "unknown",
+		LogLevel:     "info",
+		LogFormat:    "json",
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid adapter")
+	}
+}
+
+func TestValidateRejectsEmptyNATS(t *testing.T) {
+	cfg := Config{
+		TrustMode:    "tofu",
+		AgentAdapter: "default",
+		LogLevel:     "info",
+		LogFormat:    "json",
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for empty NATS servers")
+	}
+}
+
+func TestSaveToFileAndReadBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := Config{
+		NATSServers:       []string{"nats://10.0.0.1:4222", "nats://10.0.0.2:4222"},
+		LocalAPIAddr:      "127.0.0.1:19090",
+		TrustMode:         "explicit",
+		AgentAdapter:      "openclaw",
+		LogLevel:          "debug",
+		LogFormat:         "text",
+		HeartbeatInterval: "20s",
+		AnnounceTTL:       "45s",
+		TransferTTL:       "12h",
+		LogAddSource:      true,
+	}
+
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	loaded, err := loadConfigValues(path, true)
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+
+	if len(loaded.NATSServers) != 2 || loaded.NATSServers[0] != "nats://10.0.0.1:4222" {
+		t.Fatalf("unexpected nats servers: %#v", loaded.NATSServers)
+	}
+	if loaded.TrustMode != "explicit" {
+		t.Fatalf("expected trust mode explicit, got %q", loaded.TrustMode)
+	}
+	if loaded.LogLevel != "debug" {
+		t.Fatalf("expected log level debug, got %q", loaded.LogLevel)
+	}
+	if !loaded.LogAddSource {
+		t.Fatal("expected log add source true")
+	}
+}
+
 func chdirTempProject(t *testing.T, dir string) {
 	t.Helper()
 	wd, err := os.Getwd()

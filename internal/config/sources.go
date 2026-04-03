@@ -31,6 +31,30 @@ type fileConfig struct {
 	LogAddSource        *bool    `yaml:"logAddSource"`
 }
 
+func toFileConfig(cfg Config) fileConfig {
+	las := cfg.LogAddSource
+	mfs := cfg.TransferMaxFileSize
+	return fileConfig{
+		NATSServers:         cfg.NATSServers,
+		LocalAPIAddr:        cfg.LocalAPIAddr,
+		DataDir:             cfg.DataDir,
+		IdentityKeyPath:     cfg.IdentityKeyPath,
+		IdentityPubPath:     cfg.IdentityPubPath,
+		HeartbeatInterval:   cfg.HeartbeatInterval,
+		AnnounceTTL:         cfg.AnnounceTTL,
+		TrustMode:           cfg.TrustMode,
+		AgentAdapter:        cfg.AgentAdapter,
+		WebhookURL:          cfg.WebhookURL,
+		DeliverablePrefixes: cfg.DeliverablePrefixes,
+		TransferDir:         cfg.TransferDir,
+		TransferMaxFileSize: &mfs,
+		TransferTTL:         cfg.TransferTTL,
+		LogLevel:            cfg.LogLevel,
+		LogFormat:           cfg.LogFormat,
+		LogAddSource:        &las,
+	}
+}
+
 func loadConfigValues(path string, required bool) (configValues, error) {
 	path, err := expandPath(path)
 	if err != nil {

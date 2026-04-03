@@ -3,11 +3,14 @@ package config
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -43,6 +46,53 @@ type Config struct {
 	TransferTTL         string   `json:"transferTtl"`
 	LogAddSource        bool     `json:"logAddSource"`
 	CheckConfig         bool     `json:"checkConfig"`
+	ConfigPath          string   `json:"-"`
+}
+
+func Validate(cfg Config) error {
+	if len(cfg.NATSServers) == 0 {
+		return errors.New("nats servers is empty")
+	}
+	mode := strings.ToLower(strings.TrimSpace(cfg.TrustMode))
+	if mode != "open" && mode != "tofu" && mode != "explicit" {
+		return errors.New("trust mode must be one of: open|tofu|explicit")
+	}
+	adapterName := strings.ToLower(strings.TrimSpace(cfg.AgentAdapter))
+	if adapterName == "" {
+		adapterName = defaultAgentAdapter
+	}
+	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "webhook" {
+		return errors.New("agent adapter must be one of: default|openclaw|opencode|webhook")
+	}
+	if adapterName == "webhook" && strings.TrimSpace(cfg.WebhookURL) == "" {
+		return errors.New("webhook url is required when agent adapter is webhook")
+	}
+	level := strings.ToLower(strings.TrimSpace(cfg.LogLevel))
+	if level != "debug" && level != "info" && level != "warn" && level != "error" {
+		return errors.New("log level must be one of: debug|info|warn|error")
+	}
+	format := strings.ToLower(strings.TrimSpace(cfg.LogFormat))
+	if format != "json" && format != "text" {
+		return errors.New("log format must be one of: json|text")
+	}
+	return nil
+}
+
+func SaveToFile(path string, cfg Config) error {
+	fc := toFileConfig(cfg)
+	data, err := yaml.Marshal(fc)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename config: %w", err)
+	}
+	return nil
 }
 
 type runtimeConfig struct {
@@ -227,6 +277,7 @@ func LoadFromOS(args []string) (Config, error) {
 		LogFormat:           format,
 		LogAddSource:        *logAddSource,
 		CheckConfig:         *checkConfig,
+		ConfigPath:          configPath,
 	}, nil
 }
 

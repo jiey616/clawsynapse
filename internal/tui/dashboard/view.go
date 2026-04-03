@@ -3,11 +3,13 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	appconfig "clawsynapse/internal/config"
 	"clawsynapse/pkg/types"
 )
 
@@ -22,6 +24,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.recalcLayout()
 	case tea.KeyPressMsg:
+		if m.activeTab == 4 && m.cfgState.editing {
+			return m.handleConfigEditKey(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -40,6 +45,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = 2
 		case "4":
 			m.activeTab = 3
+		case "5":
+			m.activeTab = 4
 		case "down", "j":
 			m.moveSelection(1)
 		case "up", "k":
@@ -57,10 +64,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offsets[3] = 0
 				m.logsFollowTail = false
 			}
+		case "enter", "e":
+			if m.activeTab == 4 {
+				return m.startConfigEdit()
+			}
+		case "S":
+			if m.activeTab == 4 && m.cfgState.dirty {
+				return m, m.saveConfigCmd()
+			}
 		case "r":
 			m.loading = true
 			return m, m.refreshCmd()
 		}
+	case configSaveMsg:
+		if msg.err != nil {
+			m.cfgState.statusMsg = "Save failed: " + msg.err.Error()
+		} else {
+			m.cfgState.statusMsg = "Saved. Restart daemon to apply."
+			m.cfgState.dirty = false
+			for i := range m.cfgState.fields {
+				m.cfgState.fields[i].Changed = false
+			}
+		}
+		m.cfgState.statusAt = time.Now()
 	case refreshMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -71,6 +97,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastUpdated = msg.snapshot.Updated
 		m.errText = ""
 		m.clampSelections()
+		m.syncConfigFields(msg.snapshot.ConfigData)
 	case time.Time:
 		if m.loading {
 			return m, dashboardTickCmd()
@@ -183,9 +210,9 @@ func (m model) headerView(width int) string {
 }
 
 func (m model) tabsView(width int) string {
-	fullLabels := []string{"Overview", "Peers", "Messages", "Logs"}
-	shortLabels := []string{"Ovw", "Prs", "Msg", "Log"}
-	nums := []string{"1", "2", "3", "4"}
+	fullLabels := []string{"Overview", "Peers", "Messages", "Logs", "Config"}
+	shortLabels := []string{"Ovw", "Prs", "Msg", "Log", "Cfg"}
+	nums := []string{"1", "2", "3", "4", "5"}
 
 	labels := fullLabels
 	sep := "  "
@@ -228,6 +255,8 @@ func (m model) bodyView(width, height int) string {
 		return m.messagesView(width, height)
 	case 3:
 		return m.logsView(width, height)
+	case 4:
+		return m.configView(width, height)
 	default:
 		return renderPanel("Dashboard", width, height, []string{taggedLine(dashboardTagBad, "unknown view")})
 	}
@@ -595,10 +624,14 @@ func (m model) footerView(width int) string {
 	}
 
 	var left string
-	if m.layout.narrow {
+	if m.activeTab == 4 && m.cfgState.editing {
+		left = fmt.Sprintf(" Enter confirm %s Esc cancel %s j/k cycle (enum)", boxV, boxV)
+	} else if m.activeTab == 4 {
+		left = fmt.Sprintf(" Enter/e edit %s S save %s j/k navigate %s tab switch", boxV, boxV, boxV)
+	} else if m.layout.narrow {
 		left = fmt.Sprintf(" q quit %s tab %s j/k %s r refresh", boxV, boxV, boxV)
 	} else {
-		left = fmt.Sprintf(" Keys: q quit %s tab switch %s 1-4 select %s j/k scroll %s d/u page %s r refresh",
+		left = fmt.Sprintf(" Keys: q quit %s tab switch %s 1-5 select %s j/k scroll %s d/u page %s r refresh",
 			boxV, boxV, boxV, boxV, boxV)
 	}
 	right := fmt.Sprintf("Updated %s ", updated)
@@ -631,6 +664,11 @@ func (m *model) moveSelection(delta int) {
 		lines := splitLogLines(m.snapshot.Logs)
 		m.offsets[3] = clampInt(m.offsets[3]+delta, 0, maxInt(0, len(lines)-1))
 		m.logsFollowTail = false
+	case 4:
+		n := len(m.cfgState.fields)
+		if n > 0 {
+			m.cursors[4] = clampInt(m.cursors[4]+delta, 0, n-1)
+		}
 	}
 }
 
@@ -653,6 +691,289 @@ func (m model) natsStatusLabel() string {
 		return strings.ToUpper(m.snapshot.Health.NATS.Status)
 	}
 	return "OFFLINE"
+}
+
+func (m model) configView(width, height int) string {
+	lo := m.layout
+	fields := m.cfgState.fields
+
+	labelW := 0
+	for _, f := range fields {
+		if w := displayWidth(f.Label); w > labelW {
+			labelW = w
+		}
+	}
+	labelW += 2
+
+	contentHeight := maxInt(1, height-3)
+	visibleRows := maxInt(1, contentHeight-2)
+	offset := ensureVisible(m.offsets[4], m.cursors[4], len(fields), visibleRows)
+
+	// Build all display rows first: group headers + field rows
+	type displayRow struct {
+		line     string
+		fieldIdx int // -1 for group header
+	}
+	var allRows []displayRow
+	prevGroup := ""
+	for i, f := range fields {
+		if f.Group != prevGroup {
+			prevGroup = f.Group
+			allRows = append(allRows, displayRow{
+				line:     taggedLine(dashboardTagSection, fmt.Sprintf(" %s %s", boxHH, f.Group)),
+				fieldIdx: -1,
+			})
+		}
+
+		prefix := "  "
+		tag := ""
+		if i == m.cursors[4] {
+			prefix = " " + arrowR
+			tag = dashboardTagSelected
+		}
+
+		valStr := f.Value
+		if m.cfgState.editing && i == m.cfgState.editIdx {
+			valStr = f.EditBuf + "_"
+			tag = dashboardTagAccent
+		} else if f.Changed {
+			tag = dashboardTagWarn
+		}
+
+		row := fmt.Sprintf("%s %-*s  %s", prefix, labelW, f.Label, valStr)
+		allRows = append(allRows, displayRow{line: taggedLine(tag, row), fieldIdx: i})
+	}
+
+	// Find the display row index of the first field at `offset`
+	startRow := 0
+	for i, r := range allRows {
+		if r.fieldIdx == offset {
+			// Include group header just before if present
+			if i > 0 && allRows[i-1].fieldIdx == -1 {
+				startRow = i - 1
+			} else {
+				startRow = i
+			}
+			break
+		}
+	}
+
+	var lines []string
+	for i := startRow; i < len(allRows) && len(lines) < contentHeight; i++ {
+		lines = append(lines, allRows[i].line)
+	}
+
+	if m.cfgState.statusMsg != "" && time.Since(m.cfgState.statusAt) < 10*time.Second {
+		lines = append(lines, "", taggedLine(dashboardTagGood, " "+m.cfgState.statusMsg))
+	}
+	if m.cfgState.dirty {
+		lines = append(lines, taggedLine(dashboardTagWarn, " Unsaved changes. Press S to save."))
+	}
+
+	detail := m.configDetailLines()
+
+	if lo.narrow {
+		listH := maxInt(8, height*3/5)
+		detailH := maxInt(8, height-listH-1)
+		left := renderPanel("Config", width, listH, lines)
+		right := renderPanel("Field Detail", width, detailH, detail)
+		return strings.Join([]string{left, right}, "\n")
+	}
+
+	left := renderPanel("Config", lo.splitLeftW, height, lines)
+	right := renderPanel("Field Detail", lo.splitRightW, height, detail)
+	return joinHorizontal([]string{left, right}, 1)
+}
+
+func (m model) configDetailLines() []string {
+	if len(m.cfgState.fields) == 0 {
+		return []string{taggedLine(dashboardTagMuted, "No config fields.")}
+	}
+	f := m.cfgState.fields[m.cursors[4]]
+	lines := []string{
+		taggedLine(dashboardTagAccent, fmt.Sprintf("  %s", f.Label)),
+		fmt.Sprintf("  key:   %s", f.Key),
+		fmt.Sprintf("  group: %s", f.Group),
+		fmt.Sprintf("  value: %s", f.Value),
+		"",
+	}
+
+	switch f.Kind {
+	case cfkEnum:
+		lines = append(lines, taggedLine(dashboardTagSection, arrowR+" Options"))
+		for _, opt := range f.Enums {
+			marker := "  "
+			tag := ""
+			if opt == f.Value {
+				marker = arrowR + " "
+				tag = dashboardTagGood
+			}
+			lines = append(lines, taggedLine(tag, fmt.Sprintf("  %s%s", marker, opt)))
+		}
+	case cfkBool:
+		lines = append(lines, taggedLine(dashboardTagSection, arrowR+" Toggle"))
+		lines = append(lines, taggedLine(dashboardTagMuted, "  Press Enter/Space to toggle"))
+	case cfkStringSlice:
+		lines = append(lines, taggedLine(dashboardTagSection, arrowR+" List"))
+		lines = append(lines, taggedLine(dashboardTagMuted, "  Comma-separated values"))
+	case cfkText:
+		lines = append(lines, taggedLine(dashboardTagSection, arrowR+" Text"))
+		lines = append(lines, taggedLine(dashboardTagMuted, "  Type to edit value"))
+	}
+
+	lines = append(lines, "", taggedLine(dashboardTagMuted, "  Changes require daemon restart."))
+	return lines
+}
+
+func (m model) startConfigEdit() (tea.Model, tea.Cmd) {
+	if len(m.cfgState.fields) == 0 {
+		return m, nil
+	}
+	idx := m.cursors[4]
+	f := &m.cfgState.fields[idx]
+	m.cfgState.editing = true
+	m.cfgState.editIdx = idx
+	f.EditBuf = f.Value
+	return m, nil
+}
+
+func (m model) handleConfigEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	idx := m.cfgState.editIdx
+	f := &m.cfgState.fields[idx]
+
+	switch msg.String() {
+	case "escape":
+		m.cfgState.editing = false
+		return m, nil
+	case "enter":
+		if f.Kind == cfkBool {
+			if f.EditBuf == "true" {
+				f.EditBuf = "false"
+			} else {
+				f.EditBuf = "true"
+			}
+		}
+		f.Value = f.EditBuf
+		f.Changed = true
+		m.cfgState.editing = false
+		m.cfgState.dirty = true
+		return m, nil
+	case "backspace":
+		if f.Kind == cfkText || f.Kind == cfkStringSlice {
+			if len(f.EditBuf) > 0 {
+				f.EditBuf = f.EditBuf[:len(f.EditBuf)-1]
+			}
+		}
+		return m, nil
+	case "up", "k":
+		if f.Kind == cfkEnum {
+			for i, opt := range f.Enums {
+				if opt == f.EditBuf {
+					if i > 0 {
+						f.EditBuf = f.Enums[i-1]
+					} else {
+						f.EditBuf = f.Enums[len(f.Enums)-1]
+					}
+					return m, nil
+				}
+			}
+			if len(f.Enums) > 0 {
+				f.EditBuf = f.Enums[0]
+			}
+		}
+		return m, nil
+	case "down", "j":
+		if f.Kind == cfkEnum {
+			for i, opt := range f.Enums {
+				if opt == f.EditBuf {
+					f.EditBuf = f.Enums[(i+1)%len(f.Enums)]
+					return m, nil
+				}
+			}
+			if len(f.Enums) > 0 {
+				f.EditBuf = f.Enums[0]
+			}
+		}
+		return m, nil
+	case " ":
+		if f.Kind == cfkBool {
+			if f.EditBuf == "true" {
+				f.EditBuf = "false"
+			} else {
+				f.EditBuf = "true"
+			}
+		} else if f.Kind == cfkText || f.Kind == cfkStringSlice {
+			f.EditBuf += " "
+		}
+		return m, nil
+	default:
+		key := msg.String()
+		if len(key) == 1 && (f.Kind == cfkText || f.Kind == cfkStringSlice) {
+			f.EditBuf += key
+		}
+		return m, nil
+	}
+}
+
+func (m model) saveConfigCmd() tea.Cmd {
+	fields := make([]configField, len(m.cfgState.fields))
+	copy(fields, m.cfgState.fields)
+	configPath := m.cfgState.configPath
+	return func() tea.Msg {
+		cfg := buildConfigFromFields(fields)
+		if err := appconfig.Validate(cfg); err != nil {
+			return configSaveMsg{err: err}
+		}
+		if configPath == "" {
+			return configSaveMsg{err: fmt.Errorf("config file path not available")}
+		}
+		err := appconfig.SaveToFile(configPath, cfg)
+		return configSaveMsg{err: err}
+	}
+}
+
+func buildConfigFromFields(fields []configField) appconfig.Config {
+	valMap := make(map[string]configField, len(fields))
+	for _, f := range fields {
+		valMap[f.Key] = f
+	}
+	v := func(key string) string {
+		return valMap[key].Value
+	}
+	csv := func(key string) []string {
+		parts := strings.Split(valMap[key].Value, ",")
+		clean := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				clean = append(clean, p)
+			}
+		}
+		return clean
+	}
+	var maxFileSize int64
+	if n, err := strconv.ParseInt(v("transferMaxFileSize"), 10, 64); err == nil {
+		maxFileSize = n
+	}
+	return appconfig.Config{
+		NATSServers:         csv("natsServers"),
+		LocalAPIAddr:        v("localApiAddr"),
+		DataDir:             v("dataDir"),
+		IdentityKeyPath:     v("identityKeyPath"),
+		IdentityPubPath:     v("identityPubPath"),
+		HeartbeatInterval:   v("heartbeatInterval"),
+		AnnounceTTL:         v("announceTtl"),
+		TrustMode:           v("trustMode"),
+		AgentAdapter:        v("agentAdapter"),
+		WebhookURL:          v("webhookUrl"),
+		DeliverablePrefixes: csv("deliverablePrefixes"),
+		TransferDir:         v("transferDir"),
+		TransferMaxFileSize: maxFileSize,
+		TransferTTL:         v("transferTtl"),
+		LogLevel:            v("logLevel"),
+		LogFormat:           v("logFormat"),
+		LogAddSource:        v("logAddSource") == "true",
+	}
 }
 
 func dashboardTickCmd() tea.Cmd {
