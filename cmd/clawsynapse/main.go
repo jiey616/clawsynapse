@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -40,6 +41,9 @@ func main() {
 func run(args []string, stdout, stderr *os.File) int {
 	fs := flag.NewFlagSet("clawsynapse", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		printUsage(stderr)
+	}
 
 	defaultAPIAddr := strings.TrimSpace(os.Getenv("LOCAL_API_ADDR"))
 	if defaultAPIAddr == "" {
@@ -51,6 +55,9 @@ func run(args []string, stdout, stderr *os.File) int {
 	asJSON := fs.Bool("json", false, "print raw JSON response")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 
@@ -61,6 +68,9 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 	if rest[0] == "init" {
 		if err := runInit(rest[1:], os.Stdin, stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
@@ -68,6 +78,9 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 	if rest[0] == "service" {
 		if err := runService(rest[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
@@ -75,6 +88,9 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 	if rest[0] == "dashboard" {
 		if err := runDashboard(rest[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
@@ -82,6 +98,9 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 	if rest[0] == "logs" {
 		if err := runLogs(rest[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
@@ -98,6 +117,9 @@ func run(args []string, stdout, stderr *os.File) int {
 
 	result, err := dispatch(ctx, client, rest)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		printResult(stdout, stderr, result, *asJSON)
 		if strings.TrimSpace(result.Message) == "" {
 			fmt.Fprintf(stderr, "error: %v\n", err)
@@ -165,9 +187,28 @@ func runPublish(ctx context.Context, client localAPIClient, args []string) (type
 	return client.Post(ctx, "/v1/publish", body)
 }
 
+func printPublishHelp(stderr *os.File) {
+	fmt.Fprintln(stderr, "usage: clawsynapse publish [flags]")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Flags:")
+	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.String("target", "", "target node id")
+	fs.String("type", "", "message type (e.g. chat.message, task.assign)")
+	fs.String("message", "", "message content")
+	fs.String("session-key", "", "session key")
+	fs.Var(&stringList{}, "metadata", "metadata key=value; repeatable")
+	fs.PrintDefaults()
+}
+
 func runAuth(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	if len(args) == 0 {
 		return types.APIResult{}, fmt.Errorf("missing auth subcommand")
+	}
+	if args[0] == "help" || args[0] == "-h" {
+		flag.CommandLine.SetOutput(os.Stderr)
+		flag.CommandLine.PrintDefaults()
+		return types.APIResult{}, flag.ErrHelp
 	}
 	if args[0] != "challenge" {
 		return types.APIResult{}, fmt.Errorf("unknown auth subcommand: %s", args[0])
@@ -190,6 +231,11 @@ func runAuth(ctx context.Context, client localAPIClient, args []string) (types.A
 func runTrust(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	if len(args) == 0 {
 		return types.APIResult{}, fmt.Errorf("missing trust subcommand")
+	}
+
+	if args[0] == "-h" || args[0] == "--help" {
+		printTrustHelp(os.Stderr)
+		return types.APIResult{}, flag.ErrHelp
 	}
 
 	switch args[0] {
@@ -244,14 +290,38 @@ func runTrust(ctx context.Context, client localAPIClient, args []string) (types.
 			"targetNode": *target,
 			"reason":     *reason,
 		})
+	case "help":
+		printTrustHelp(os.Stderr)
+		return types.APIResult{}, flag.ErrHelp
 	default:
 		return types.APIResult{}, fmt.Errorf("unknown trust subcommand: %s", args[0])
 	}
 }
 
+func printTrustHelp(stderr *os.File) {
+	fmt.Fprintln(stderr, "usage: clawsynapse trust <subcommand>")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Subcommands:")
+	fmt.Fprintln(stderr, "  pending              list pending trust requests")
+	fmt.Fprintln(stderr, "  request               send a trust request")
+	fmt.Fprintln(stderr, "  approve               approve a trust request")
+	fmt.Fprintln(stderr, "  reject                reject a trust request")
+	fmt.Fprintln(stderr, "  revoke                revoke trust for a node")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Examples:")
+	fmt.Fprintln(stderr, "  clawsynapse trust pending")
+	fmt.Fprintln(stderr, "  clawsynapse trust request --target <node-id>")
+	fmt.Fprintln(stderr, "  clawsynapse trust approve --request-id <id>")
+}
+
 func runTransfer(ctx context.Context, client localAPIClient, args []string) (types.APIResult, error) {
 	if len(args) == 0 {
 		return types.APIResult{}, fmt.Errorf("missing transfer subcommand")
+	}
+
+	if args[0] == "-h" || args[0] == "--help" {
+		printTransferHelp(os.Stderr)
+		return types.APIResult{}, flag.ErrHelp
 	}
 
 	switch args[0] {
@@ -306,9 +376,27 @@ func runTransfer(ctx context.Context, client localAPIClient, args []string) (typ
 		return client.Delete(ctx, "/v1/transfer/"+strings.TrimSpace(*transferID))
 	case "list":
 		return client.Get(ctx, "/v1/transfers")
+	case "help":
+		printTransferHelp(os.Stderr)
+		return types.APIResult{}, flag.ErrHelp
 	default:
 		return types.APIResult{}, fmt.Errorf("unknown transfer subcommand: %s", args[0])
 	}
+}
+
+func printTransferHelp(stderr *os.File) {
+	fmt.Fprintln(stderr, "usage: clawsynapse transfer <subcommand>")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Subcommands:")
+	fmt.Fprintln(stderr, "  send     send a file to a target node")
+	fmt.Fprintln(stderr, "  get      get transfer details by id")
+	fmt.Fprintln(stderr, "  delete   delete a transfer by id")
+	fmt.Fprintln(stderr, "  list     list all transfers")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Examples:")
+	fmt.Fprintln(stderr, "  clawsynapse transfer send --target <node-id> --file <path>")
+	fmt.Fprintln(stderr, "  clawsynapse transfer get --id <transfer-id>")
+	fmt.Fprintln(stderr, "  clawsynapse transfer list")
 }
 
 func parseMetadata(values []string) (map[string]any, error) {
@@ -509,6 +597,35 @@ func asInt64(v any) (int64, bool) {
 }
 
 func printUsage(stderr *os.File) {
-	fmt.Fprintln(stderr, "usage: clawsynapse [--api-addr host:port] [--timeout 5s] [--json] <command>")
-	fmt.Fprintln(stderr, "commands: version, init, service status|start|stop|restart, dashboard, logs, health, peers, messages, publish, auth challenge, trust request|pending|approve|reject|revoke, transfer send|get|delete|list, transfers")
+	fmt.Fprintln(stderr, "usage: clawsynapse [--api-addr host:port] [--timeout 5s] [--json] <command> [args]")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Commands:")
+	fmt.Fprintln(stderr, "  init                 generate configuration file")
+	fmt.Fprintln(stderr, "  service              manage the daemon service (status|start|stop|restart)")
+	fmt.Fprintln(stderr, "  dashboard            run the TUI dashboard")
+	fmt.Fprintln(stderr, "  logs                 view daemon logs")
+	fmt.Fprintln(stderr, "  version              print version")
+	fmt.Fprintln(stderr, "  health               check daemon health")
+	fmt.Fprintln(stderr, "  peers                list connected peers")
+	fmt.Fprintln(stderr, "  messages             list recent messages")
+	fmt.Fprintln(stderr, "  publish              publish a message to a peer")
+	fmt.Fprintln(stderr, "  auth                 authentication commands")
+	fmt.Fprintln(stderr, "  trust                trust management commands")
+	fmt.Fprintln(stderr, "  transfer             file transfer commands")
+	fmt.Fprintln(stderr, "  transfers            list all transfers")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Global Flags:")
+	fmt.Fprintln(stderr, "  --api-addr string    local API address (default \"127.0.0.1:18080\")")
+	fmt.Fprintln(stderr, "  --timeout duration   local API timeout (default 5s)")
+	fmt.Fprintln(stderr, "  --json               print raw JSON response")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Examples:")
+	fmt.Fprintln(stderr, "  clawsynapse init")
+	fmt.Fprintln(stderr, "  clawsynapse service status")
+	fmt.Fprintln(stderr, "  clawsynapse logs --lines 50")
+	fmt.Fprintln(stderr, "  clawsynapse publish --target <node-id> --message \"hello\"")
+	fmt.Fprintln(stderr, "  clawsynapse trust request --target <node-id>")
+	fmt.Fprintln(stderr, "  clawsynapse transfer send --target <node-id> --file <path>")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Run \"clawsynapse <command> -h\" for more details on a command.")
 }
