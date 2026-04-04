@@ -57,7 +57,7 @@ func main() {
 		slog.String("service", "clawsynapsed"),
 	)
 
-	a, err := app.New(cfg)
+	a, err := app.New(cfg, version)
 	if err != nil {
 		log.Error("bootstrap failed", slog.String("error", err.Error()))
 		os.Exit(1)

@@ -20,6 +20,7 @@ DEFAULT_REPO="yuanjun5681/clawsynapse"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 FALLBACK_INSTALL_DIR="${HOME}/.local/bin"
 DEFAULT_CONFIG_ROOT="${HOME}/.clawsynapse"
+DEFAULT_MANIFEST_PATH="${DEFAULT_CONFIG_ROOT}/manifest.json"
 DEFAULT_CONFIG_PATH="${DEFAULT_CONFIG_ROOT}/config.yaml"
 DEFAULT_DATA_DIR="${DEFAULT_CONFIG_ROOT}"
 DEFAULT_TRANSFER_DIR="${DEFAULT_DATA_DIR}/transfers"
@@ -111,6 +112,16 @@ trim() {
     local value="$1"
     value="${value#"${value%%[![:space:]]*}"}"
     value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+json_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\t'/\\t}"
     printf '%s' "$value"
 }
 
@@ -442,6 +453,71 @@ ensure_config_root() {
     install -d -m 700 "$DATA_DIR"
     install -d -m 700 "$TRANSFER_DIR"
     install -d -m 700 "${DATA_DIR}/log"
+}
+
+read_installed_version() {
+    local binary="$1"
+    local target="${INSTALL_DIR}/${binary}"
+
+    if [ ! -x "$target" ]; then
+        return 1
+    fi
+    "$target" version 2>/dev/null | tr -d '\r' | awk 'NR == 1 { print; exit }'
+}
+
+sync_manifest() {
+    local manifest_path="$DEFAULT_MANIFEST_PATH"
+    local cli_present=0
+    local daemon_present=0
+    local detected_version=""
+    local service_manager_name=""
+    local tmpfile
+
+    if [ -x "${INSTALL_DIR}/${CLI_BINARY}" ]; then
+        cli_present=1
+        detected_version="$(read_installed_version "$CLI_BINARY" || true)"
+    fi
+    if [ -x "${INSTALL_DIR}/${DAEMON_BINARY}" ]; then
+        daemon_present=1
+        if [ -z "$detected_version" ]; then
+            detected_version="$(read_installed_version "$DAEMON_BINARY" || true)"
+        fi
+        service_manager_name="$(service_manager)"
+    fi
+
+    if [ "$cli_present" -eq 0 ] && [ "$daemon_present" -eq 0 ]; then
+        rm -f "$manifest_path"
+        return 0
+    fi
+
+    install -d -m 700 "$DEFAULT_CONFIG_ROOT"
+    tmpfile="$(mktemp)"
+    {
+        printf '{\n'
+        printf '  "product": "clawsynapse",\n'
+        printf '  "repo": "%s",\n' "$(json_escape "$GITHUB_REPO")"
+        printf '  "version": "%s",\n' "$(json_escape "$detected_version")"
+        printf '  "installDir": "%s",\n' "$(json_escape "$INSTALL_DIR")"
+        printf '  "components": ['
+        if [ "$cli_present" -eq 1 ]; then
+            printf '"cli"'
+        fi
+        if [ "$daemon_present" -eq 1 ]; then
+            if [ "$cli_present" -eq 1 ]; then
+                printf ', '
+            fi
+            printf '"daemon"'
+        fi
+        printf ']'
+        if [ -n "$service_manager_name" ]; then
+            printf ',\n  "serviceManager": "%s"\n' "$(json_escape "$service_manager_name")"
+        else
+            printf '\n'
+        fi
+        printf '}\n'
+    } >"$tmpfile"
+    install -m 600 "$tmpfile" "$manifest_path"
+    rm -f "$tmpfile"
 }
 
 yaml_write_list() {
@@ -936,6 +1012,7 @@ uninstall_selected() {
     if [ "$INSTALL_CLI" -eq 1 ]; then
         remove_binary_if_present "$CLI_BINARY"
     fi
+    sync_manifest
 }
 
 main() {
@@ -991,6 +1068,7 @@ main() {
     fi
 
     install_selected "$(detect_platform)"
+    sync_manifest
     print_post_install_notes
 }
 

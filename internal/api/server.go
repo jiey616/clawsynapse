@@ -27,6 +27,7 @@ type Server struct {
 	adapter     adapter.AgentAdapter
 	adapterName string
 	self        SelfInfo
+	version     string
 	cfg         config.Config
 	configPath  string
 }
@@ -38,7 +39,7 @@ type SelfInfo struct {
 	TrustMode           string
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, cfg config.Config) *Server {
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, version string, cfg config.Config) *Server {
 	s := &Server{
 		peers:       peers,
 		auth:        authSvc,
@@ -49,6 +50,7 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 		adapter:     agentAdapter,
 		adapterName: agentAdapterName,
 		self:        self,
+		version:     version,
 		cfg:         cfg,
 		configPath:  cfg.ConfigPath,
 	}

@@ -31,6 +31,47 @@ func TestRunVersionPrintsVersion(t *testing.T) {
 	}
 }
 
+func TestPrintResultHealthIncludesVersion(t *testing.T) {
+	stdout := tempFile(t)
+	stderr := tempFile(t)
+
+	printResult(stdout, stderr, types.APIResult{
+		OK:      true,
+		Code:    "health.ok",
+		Message: "service healthy",
+		Data: map[string]any{
+			"self": map[string]any{
+				"nodeId":    "n1-localnodeid0000000000000000000000",
+				"version":   "v0.3.2",
+				"trustMode": "tofu",
+			},
+			"peersCount": float64(2),
+			"nats": map[string]any{
+				"connected": true,
+				"status":    "connected",
+			},
+			"adapter": map[string]any{
+				"name":    "openclaw",
+				"healthy": true,
+			},
+		},
+	}, false)
+
+	got := readFile(t, stdout)
+	if !strings.Contains(got, "health.ok: service healthy\n") {
+		t.Fatalf("expected health status line, got %q", got)
+	}
+	if !strings.Contains(got, "version: v0.3.2\n") {
+		t.Fatalf("expected version line, got %q", got)
+	}
+	if !strings.Contains(got, "adapterHealthy: true\n") {
+		t.Fatalf("expected adapterHealthy line, got %q", got)
+	}
+	if readFile(t, stderr) != "" {
+		t.Fatalf("expected empty stderr, got %q", readFile(t, stderr))
+	}
+}
+
 func TestRunTransferSendPostsExpectedPayload(t *testing.T) {
 	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.sent"}}
 	_, err := runTransfer(context.Background(), client, []string{

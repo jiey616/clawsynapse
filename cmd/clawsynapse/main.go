@@ -106,6 +106,16 @@ func run(args []string, stdout, stderr *os.File) int {
 		}
 		return 0
 	}
+	if rest[0] == "upgrade" {
+		if err := runUpgrade(rest[1:], os.Stdin, stdout, stderr, *apiAddr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if rest[0] == "version" {
 		fmt.Fprintln(stdout, version)
 		return 0
@@ -437,6 +447,9 @@ func printResult(stdout, stderr *os.File, result types.APIResult, asJSON bool) {
 		fmt.Fprintln(stream, result.Message)
 	}
 	switch result.Code {
+	case "health.ok":
+		printHealthResult(stream, result.Data)
+		return
 	case "msg.published":
 		printPublishResult(stream, result.Data)
 		return
@@ -470,6 +483,37 @@ func printResult(stdout, stderr *os.File, result types.APIResult, asJSON bool) {
 		if err == nil {
 			fmt.Fprintln(stream, string(raw))
 		}
+	}
+}
+
+func printHealthResult(stream *os.File, data map[string]any) {
+	self, _ := data["self"].(map[string]any)
+	nats, _ := data["nats"].(map[string]any)
+	adapter, _ := data["adapter"].(map[string]any)
+
+	if nodeID, _ := self["nodeId"].(string); nodeID != "" {
+		fmt.Fprintf(stream, "nodeId: %s\n", nodeID)
+	}
+	if version, _ := self["version"].(string); version != "" {
+		fmt.Fprintf(stream, "version: %s\n", version)
+	}
+	if trustMode, _ := self["trustMode"].(string); trustMode != "" {
+		fmt.Fprintf(stream, "trustMode: %s\n", trustMode)
+	}
+	if peersCount, ok := asInt64(data["peersCount"]); ok {
+		fmt.Fprintf(stream, "peersCount: %d\n", peersCount)
+	}
+	if connected, ok := nats["connected"].(bool); ok {
+		fmt.Fprintf(stream, "natsConnected: %t\n", connected)
+	}
+	if status, _ := nats["status"].(string); status != "" {
+		fmt.Fprintf(stream, "natsStatus: %s\n", status)
+	}
+	if name, _ := adapter["name"].(string); name != "" {
+		fmt.Fprintf(stream, "adapter: %s\n", name)
+	}
+	if healthy, ok := adapter["healthy"].(bool); ok {
+		fmt.Fprintf(stream, "adapterHealthy: %t\n", healthy)
 	}
 }
 
@@ -604,6 +648,7 @@ func printUsage(stderr *os.File) {
 	fmt.Fprintln(stderr, "  service              manage the daemon service (status|start|stop|restart)")
 	fmt.Fprintln(stderr, "  dashboard            run the TUI dashboard")
 	fmt.Fprintln(stderr, "  logs                 view daemon logs")
+	fmt.Fprintln(stderr, "  upgrade              check for or apply upgrades")
 	fmt.Fprintln(stderr, "  version              print version")
 	fmt.Fprintln(stderr, "  health               check daemon health")
 	fmt.Fprintln(stderr, "  peers                list connected peers")
@@ -623,6 +668,7 @@ func printUsage(stderr *os.File) {
 	fmt.Fprintln(stderr, "  clawsynapse init")
 	fmt.Fprintln(stderr, "  clawsynapse service status")
 	fmt.Fprintln(stderr, "  clawsynapse logs --lines 50")
+	fmt.Fprintln(stderr, "  clawsynapse upgrade check")
 	fmt.Fprintln(stderr, "  clawsynapse publish --target <node-id> --message \"hello\"")
 	fmt.Fprintln(stderr, "  clawsynapse trust request --target <node-id>")
 	fmt.Fprintln(stderr, "  clawsynapse transfer send --target <node-id> --file <path>")
