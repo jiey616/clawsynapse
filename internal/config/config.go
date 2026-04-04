@@ -22,7 +22,7 @@ const (
 	defaultAgentAdapter        = "default"
 	defaultLogLevel            = "info"
 	defaultLogFormat           = "json"
-	defaultLogRotateMaxSizeMB  = 100
+	defaultLogRotateMaxSizeMB  = 10
 	defaultLogRotateMaxBackups = 3
 	defaultLogRotateMaxAgeDays = 7
 	defaultDeliverablePrefixes = "chat,task"

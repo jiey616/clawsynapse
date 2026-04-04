@@ -186,7 +186,7 @@ func TestValidateAcceptsValidConfig(t *testing.T) {
 		AgentAdapter:        "default",
 		LogLevel:            "info",
 		LogFormat:           "json",
-		LogRotateMaxSizeMB:  100,
+		LogRotateMaxSizeMB:  10,
 		LogRotateMaxBackups: 3,
 		LogRotateMaxAgeDays: 7,
 	}
@@ -202,7 +202,7 @@ func TestValidateRejectsInvalidTrustMode(t *testing.T) {
 		AgentAdapter:        "default",
 		LogLevel:            "info",
 		LogFormat:           "json",
-		LogRotateMaxSizeMB:  100,
+		LogRotateMaxSizeMB:  10,
 		LogRotateMaxBackups: 3,
 		LogRotateMaxAgeDays: 7,
 	}
@@ -218,7 +218,7 @@ func TestValidateRejectsInvalidAdapter(t *testing.T) {
 		AgentAdapter:        "unknown",
 		LogLevel:            "info",
 		LogFormat:           "json",
-		LogRotateMaxSizeMB:  100,
+		LogRotateMaxSizeMB:  10,
 		LogRotateMaxBackups: 3,
 		LogRotateMaxAgeDays: 7,
 	}
@@ -233,7 +233,7 @@ func TestValidateRejectsEmptyNATS(t *testing.T) {
 		AgentAdapter:        "default",
 		LogLevel:            "info",
 		LogFormat:           "json",
-		LogRotateMaxSizeMB:  100,
+		LogRotateMaxSizeMB:  10,
 		LogRotateMaxBackups: 3,
 		LogRotateMaxAgeDays: 7,
 	}
