@@ -52,11 +52,22 @@ func New(cfg config.Config) (*App, error) {
 	nodeDID := identity.DeriveNodeDID(id.PublicKey)
 	nodeID := identity.DeriveNodeID(nodeDID)
 
-	log := logging.New(logging.Options{
+	log, err := logging.New(logging.Options{
 		Level:     cfg.LogLevel,
 		Format:    cfg.LogFormat,
 		AddSource: cfg.LogAddSource,
-	}).With(
+		FilePath:  cfg.LogFilePath,
+		Rotate: logging.RotateOptions{
+			MaxSizeMB:  cfg.LogRotateMaxSizeMB,
+			MaxBackups: cfg.LogRotateMaxBackups,
+			MaxAgeDays: cfg.LogRotateMaxAgeDays,
+			Compress:   cfg.LogRotateCompress,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init logger: %w", err)
+	}
+	log = log.With(
 		slog.String("service", "clawsynapsed"),
 		slog.String("nodeId", nodeID),
 		slog.String("did", nodeDID),

@@ -115,12 +115,28 @@ func newLogContent(previous, current string) string {
 func (p defaultLogProvider) ReadLogs(ctx context.Context, lines int) (string, error) {
 	switch serviceGOOS {
 	case "linux":
-		return p.readSystemdLogs(ctx, lines)
+		return p.readLinuxLogs(ctx, lines)
 	case "darwin":
 		return p.readLaunchdLogs(lines)
 	default:
 		return "", fmt.Errorf("logs are not supported on %s", serviceGOOS)
 	}
+}
+
+func (p defaultLogProvider) readLinuxLogs(ctx context.Context, lines int) (string, error) {
+	home, err := serviceUserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	logPath := filepath.Join(home, ".clawsynapse", "log", "clawsynapsed.log")
+	text, fileErr := readLastLines(logPath, lines)
+	if fileErr == nil {
+		if strings.TrimSpace(text) == "" {
+			return "no logs available\n", nil
+		}
+		return text, nil
+	}
+	return p.readSystemdLogs(ctx, lines)
 }
 
 func (p defaultLogProvider) readSystemdLogs(ctx context.Context, lines int) (string, error) {
@@ -151,13 +167,22 @@ func (p defaultLogProvider) readLaunchdLogs(lines int) (string, error) {
 		return "", err
 	}
 	logDir := filepath.Join(home, ".clawsynapse", "log")
+	combinedPath := filepath.Join(logDir, "clawsynapsed.log")
 	stdoutPath := filepath.Join(logDir, "clawsynapsed.stdout.log")
 	stderrPath := filepath.Join(logDir, "clawsynapsed.stderr.log")
+
+	combinedText, combinedErr := readLastLines(combinedPath, lines)
+	if combinedErr == nil {
+		if strings.TrimSpace(combinedText) == "" {
+			return "no logs available\n", nil
+		}
+		return combinedText, nil
+	}
 
 	stdoutText, stdoutErr := readLastLines(stdoutPath, lines)
 	stderrText, stderrErr := readLastLines(stderrPath, lines)
 	if stdoutErr != nil && stderrErr != nil {
-		return "", fmt.Errorf("read launchd logs: %v; %v", stdoutErr, stderrErr)
+		return "", fmt.Errorf("read launchd logs: %v; %v; %v", combinedErr, stdoutErr, stderrErr)
 	}
 
 	parts := make([]string, 0, 2)

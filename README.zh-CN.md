@@ -95,6 +95,8 @@ clawsynapse logs
 clawsynapse logs --follow
 ```
 
+新安装默认会把 daemon 日志写到 `~/.clawsynapse/log/clawsynapsed.log`。
+
 发送消息：
 
 ```bash

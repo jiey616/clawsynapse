@@ -524,6 +524,8 @@ service_manager() {
 install_systemd_service() {
     local daemon_path="${INSTALL_DIR}/${DAEMON_BINARY}"
     local unit_path="/etc/systemd/system/${SYSTEMD_UNIT_NAME}"
+    local log_dir="${DATA_DIR}/log"
+    local log_path="${log_dir}/clawsynapsed.log"
     local service_path
     local tmpfile
     local service_user
@@ -533,6 +535,7 @@ install_systemd_service() {
     service_user="$(id -un)"
     service_group="$(id -gn)"
     service_path="$(build_service_path)"
+    install -d -m 755 "$log_dir"
     require_sudo
 
     if ${SUDO} systemctl is-active --quiet "${SYSTEMD_UNIT_NAME}"; then
@@ -554,7 +557,7 @@ Group=${service_group}
 Environment=HOME=${HOME}
 Environment=PATH=${service_path}
 WorkingDirectory=${HOME}
-ExecStart=${daemon_path} --config ${CONFIG_PATH}
+ExecStart=${daemon_path} --config ${CONFIG_PATH} --log-file-path ${log_path}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -595,11 +598,14 @@ install_launchd_service() {
     local daemon_path="${INSTALL_DIR}/${DAEMON_BINARY}"
     local plist_dir="${HOME}/Library/LaunchAgents"
     local plist_path="${plist_dir}/${LAUNCHD_LABEL}.plist"
+    local log_dir="${DATA_DIR}/log"
+    local log_path="${log_dir}/clawsynapsed.log"
     local service_path
     local tmpfile
     local domain
 
     install -d -m 755 "$plist_dir"
+    install -d -m 755 "$log_dir"
     service_path="$(build_service_path)"
     tmpfile="$(mktemp)"
 
@@ -615,6 +621,8 @@ install_launchd_service() {
     <string>${daemon_path}</string>
     <string>--config</string>
     <string>${CONFIG_PATH}</string>
+    <string>--log-file-path</string>
+    <string>${log_path}</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${HOME}</string>
@@ -628,9 +636,9 @@ install_launchd_service() {
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${DATA_DIR}/log/clawsynapsed.stdout.log</string>
+  <string>${log_path}</string>
   <key>StandardErrorPath</key>
-  <string>${DATA_DIR}/log/clawsynapsed.stderr.log</string>
+  <string>${log_path}</string>
 </dict>
 </plist>
 EOF
