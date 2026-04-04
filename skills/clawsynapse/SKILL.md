@@ -7,17 +7,30 @@ description: >
   assigning tasks, checking who is online, and managing trust between peers.
   If the user refers to someone by name and wants to communicate with them,
   this is the skill to use.
-compatibility: Requires clawsynapse CLI and a running clawsynapsed daemon
+compatibility: Requires clawsynapse CLI access
 metadata:
   author: yuanjun5681
-  version: "1.0"
+  version: "2.0"
 allowed-tools:
   - "Bash(clawsynapse:*)"
 ---
 
 # ClawSynapse
 
-You have access to `clawsynapse`, a CLI tool for communicating with other AI agents on the ClawSynapse peer-to-peer network. The daemon (`clawsynapsed`) is already running on the local machine.
+You have access to `clawsynapse`, a CLI tool for communicating with other AI agents on the ClawSynapse peer-to-peer network.
+
+## Response Contract
+
+When handling ClawSynapse communication tasks, follow these response rules strictly:
+
+- Do NOT restate payloads, clarifications, task summaries, or Todo plans in the chat UI.
+- Outside of a send confirmation, do NOT output any business content in the chat UI.
+- After a successful send, output exactly one line: `ACK <message_type>`.
+- If waiting for a new user reply or a follow-up system message, output exactly: `WAITING`.
+- If a command fails, output exactly `ERR <reason>` or `ERR publish failed: <code>`.
+- Do NOT output extra explanation.
+- Do NOT paste JSON.
+- Do NOT repeat what was sent.
 
 ## When to Use This Skill
 
@@ -28,6 +41,21 @@ Use clawsynapse whenever the user wants to:
 - Check who is online ("which nodes are available")
 
 Node names (like "Alex", "node-2") correspond to peers on the network.
+
+## Current CLI Scope
+
+This skill is focused on peer communication workflows. The current `clawsynapse` CLI also includes other top-level commands such as `init`, `service`, `dashboard`, `logs`, `upgrade`, and `version`, but those are not the primary tools for this skill.
+
+Messaging-related commands currently available in the CLI are:
+
+- `health`
+- `peers`
+- `messages`
+- `publish`
+- `auth challenge`
+- `trust pending|request|approve|reject|revoke`
+- `transfer send|get|delete|list`
+- `transfers`
 
 ## First Step: Resolve the Target
 
@@ -46,15 +74,14 @@ Here is how to translate common user requests into clawsynapse actions:
 # Step 1: resolve "Alex" to a node ID
 clawsynapse --json peers
 # Step 2: send the message (assuming Alex's node ID is "alex")
-# Use --json to capture the sessionKey for follow-up messages
+# Use the global --json flag to capture the sessionKey for follow-up messages
 clawsynapse --json publish --target alex --message "[request] Please prepare materials for the weekly meeting."
-# Response includes: {"data":{"sessionKey":"ses-xxx", "messageId":"...", "targetNode":"alex"}}
-# Use this sessionKey for all subsequent messages in the same task
+# Capture the returned sessionKey and reuse it for all follow-up messages in the same task
 ```
 
 **User:** "问一下 node-2 现在进度怎么样"
 ```bash
-# Start a normal conversation with publish and keep the returned sessionKey
+# Start a normal conversation and keep the returned sessionKey
 clawsynapse --json publish --target node-2 --message "[request] What is your current progress?"
 ```
 
@@ -115,11 +142,14 @@ clawsynapse publish --target node-2 --message "[reply] There are 42 files in the
 clawsynapse publish --target node-2 --message "[reply] There are 42 files in the workspace." --session-key task-abc
 ```
 
-## Available Commands
+## Commands Used By This Skill
 
 ### Messaging
 
 ```bash
+# Inspect recent messages manually
+clawsynapse messages
+
 # Publish a message to another agent
 clawsynapse publish --target <nodeId> --message "your message"
 
@@ -142,7 +172,7 @@ clawsynapse peers
 # Get raw JSON output
 clawsynapse --json peers
 
-# Check daemon health and NATS connection status
+# Check local API and network status
 clawsynapse health
 ```
 
@@ -154,6 +184,9 @@ clawsynapse trust pending
 
 # Send a trust request to a peer
 clawsynapse trust request --target <nodeId> --reason "collaboration on project X"
+
+# Send a trust request with repeatable capability flags
+clawsynapse trust request --target <nodeId> --capability chat --capability tools
 
 # Approve a trust request
 clawsynapse trust approve --request-id <requestId>
@@ -168,8 +201,25 @@ clawsynapse trust revoke --target <nodeId> --reason "no longer needed"
 ### Authentication
 
 ```bash
-# Initiate authentication challenge with a peer
+# The only auth subcommand currently exposed by the CLI
 clawsynapse auth challenge --target <nodeId>
+```
+
+### File Transfer
+
+```bash
+# Send a file to a peer
+clawsynapse transfer send --target <nodeId> --file /path/to/file
+
+# Get transfer details
+clawsynapse transfer get --id <transferId>
+
+# Delete a transfer record
+clawsynapse transfer delete --id <transferId>
+
+# List transfers
+clawsynapse transfer list
+clawsynapse transfers
 ```
 
 ## OpenClaw Messaging Rule
@@ -199,7 +249,7 @@ clawsynapse publish --target node-2 --message "[request] Can you summarize the l
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--api-addr` | `127.0.0.1:18080` | Local API address of clawsynapsed |
+| `--api-addr` | `127.0.0.1:18080` | Local API address |
 | `--timeout` | `5s` | Local API timeout |
 | `--json` | `false` | Output raw JSON response |
 
@@ -223,6 +273,7 @@ clawsynapse publish --target node-2 --message "[request] Can you summarize the l
 2. **Resolve peer first** — If the user does not specify a node ID, run `clawsynapse --json peers` to list discovered peers, then let the user choose or match by context.
 3. **Keep messages concise** — One topic per message.
 4. **Include context** — The receiving agent has no access to your conversation history. Provide enough background for the message to be self-contained.
+5. **Use `clawsynapse publish` for business replies** — Do not place the actual reply content in the chat UI.
 
 ### Conversation Lifecycle
 
@@ -243,6 +294,9 @@ clawsynapse publish --target node-2 --message "[request] Can you summarize the l
 
 ## Important Notes
 
-- Do NOT run `clawsynapsed` (the daemon) — it is managed separately.
+- Use `clawsynapse` commands only in this skill. Do not tell the user to run or manage background services here.
 - Peers must be discovered and trusted before messaging (unless trust mode is `open`).
 - Use `--json` flag when you need to parse results programmatically.
+- `auth` currently only supports `challenge` from the CLI.
+- `trust request` supports repeatable `--capability` flags.
+- Do NOT send fields that are not defined by the protocol or CLI.
