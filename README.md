@@ -95,6 +95,8 @@ clawsynapse logs
 clawsynapse logs --follow
 ```
 
+Recent daemon logs are written to `~/.clawsynapse/log/clawsynapsed.log` on new installs.
+
 Send a message:
 
 ```bash

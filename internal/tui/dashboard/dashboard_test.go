@@ -12,8 +12,10 @@ import (
 )
 
 type stubDashboardClient struct {
-	results map[string]types.APIResult
-	err     error
+	results   map[string]types.APIResult
+	err       error
+	putResult types.APIResult
+	putErr    error
 }
 
 func (s stubDashboardClient) Get(_ context.Context, endpoint string) (types.APIResult, error) {
@@ -21,6 +23,10 @@ func (s stubDashboardClient) Get(_ context.Context, endpoint string) (types.APIR
 		return types.APIResult{}, s.err
 	}
 	return s.results[endpoint], nil
+}
+
+func (s stubDashboardClient) Put(_ context.Context, _ string, _ any) (types.APIResult, error) {
+	return s.putResult, s.putErr
 }
 
 type stubLogProvider struct {
@@ -38,7 +44,7 @@ func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 			"/v1/health": {
 				OK: true,
 				Data: map[string]any{
-					"peersCount": 2,
+					"peersCount": 1,
 					"nats": map[string]any{
 						"connected": true,
 						"status":    "CONNECTED",
@@ -74,6 +80,17 @@ func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 					},
 				},
 			},
+			"/v1/config": {
+				OK: true,
+				Data: map[string]any{
+					"config": map[string]any{
+						"trustMode":   "tofu",
+						"logLevel":    "info",
+						"logFormat":   "json",
+						"natsServers": []any{"nats://127.0.0.1:4222"},
+					},
+				},
+			},
 		},
 	}
 
@@ -81,8 +98,8 @@ func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Health.PeersCount != 2 {
-		t.Fatalf("expected peers count 2, got %d", snapshot.Health.PeersCount)
+	if snapshot.Health.PeersCount != 1 {
+		t.Fatalf("expected peers count 1, got %d", snapshot.Health.PeersCount)
 	}
 	if !snapshot.Health.NATS.Connected {
 		t.Fatal("expected nats connected")
@@ -95,6 +112,12 @@ func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 	}
 	if snapshot.Logs != "line-a\nline-b" {
 		t.Fatalf("unexpected logs: %q", snapshot.Logs)
+	}
+	if snapshot.ConfigData == nil {
+		t.Fatal("expected config data to be loaded")
+	}
+	if snapshot.ConfigData["trustMode"] != "tofu" {
+		t.Fatalf("expected trustMode=tofu, got %v", snapshot.ConfigData["trustMode"])
 	}
 }
 
@@ -262,6 +285,91 @@ func TestRenderPanelKeepsLayoutForMultilineContent(t *testing.T) {
 		if !strings.HasPrefix(plain, boxV) || !strings.HasSuffix(plain, boxV) {
 			t.Fatalf("content line %d lost panel border: %q", i+1, plain)
 		}
+	}
+}
+
+func TestConfigViewRendersGroupsAndFields(t *testing.T) {
+	m := model{
+		width:     120,
+		height:    32,
+		activeTab: 4,
+		cfgState: configEditState{
+			fields: initConfigFields(),
+		},
+	}
+	m.recalcLayout()
+
+	view := m.configView(m.width, m.height)
+	for _, needle := range []string{"Network", "Security", "Logging", "Trust Mode", "Log Level", "Field Detail"} {
+		if !strings.Contains(view, needle) {
+			t.Fatalf("expected config view to contain %q", needle)
+		}
+	}
+}
+
+func TestSyncConfigFieldsPopulatesValues(t *testing.T) {
+	m := model{
+		cfgState: configEditState{
+			fields: initConfigFields(),
+		},
+	}
+
+	data := map[string]any{
+		"trustMode":    "explicit",
+		"logLevel":     "debug",
+		"logAddSource": true,
+		"natsServers":  []any{"nats://a:4222", "nats://b:4222"},
+	}
+	m.syncConfigFields(data)
+
+	check := map[string]string{
+		"trustMode":    "explicit",
+		"logLevel":     "debug",
+		"logAddSource": "true",
+		"natsServers":  "nats://a:4222,nats://b:4222",
+	}
+	for _, f := range m.cfgState.fields {
+		if expected, ok := check[f.Key]; ok {
+			if f.Value != expected {
+				t.Fatalf("field %s: expected %q, got %q", f.Key, expected, f.Value)
+			}
+		}
+	}
+}
+
+func TestSyncConfigFieldsSkipsDuringEdit(t *testing.T) {
+	m := model{
+		cfgState: configEditState{
+			fields:  initConfigFields(),
+			editing: true,
+		},
+	}
+
+	data := map[string]any{"trustMode": "explicit"}
+	m.syncConfigFields(data)
+
+	for _, f := range m.cfgState.fields {
+		if f.Key == "trustMode" && f.Value == "explicit" {
+			t.Fatal("syncConfigFields should skip during editing")
+		}
+	}
+}
+
+func TestConfigViewShowsUnsavedIndicator(t *testing.T) {
+	m := model{
+		width:     120,
+		height:    32,
+		activeTab: 4,
+		cfgState: configEditState{
+			fields: initConfigFields(),
+			dirty:  true,
+		},
+	}
+	m.recalcLayout()
+
+	view := m.configView(m.width, m.height)
+	if !strings.Contains(view, "Unsaved") {
+		t.Fatal("expected unsaved changes indicator")
 	}
 }
 

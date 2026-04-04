@@ -7,9 +7,9 @@ import (
 )
 
 func runDashboard(args []string, stdout, stderr io.Writer) error {
-	logSource := "journalctl -u clawsynapsed.service"
+	logSource := "~/.clawsynapse/log/clawsynapsed.log"
 	if serviceGOOS == "darwin" {
-		logSource = "~/.clawsynapse/log/*.log"
+		logSource = "~/.clawsynapse/log/clawsynapsed.log"
 	}
 
 	return dashboard.Run(args, stdout, stderr, dashboard.Options{

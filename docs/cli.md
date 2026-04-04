@@ -147,8 +147,8 @@ go run ./cmd/clawsynapse logs --follow
 
 平台行为：
 
-- Linux: 读取 `journalctl -u clawsynapsed.service`
-- macOS: 读取 `~/.clawsynapse/log/clawsynapsed.stdout.log` 和 `clawsynapsed.stderr.log`
+- Linux: 优先读取 `~/.clawsynapse/log/clawsynapsed.log`，不存在时回退到 `journalctl -u clawsynapsed.service`
+- macOS: 优先读取 `~/.clawsynapse/log/clawsynapsed.log`，兼容回退到旧的 `clawsynapsed.stdout.log` 和 `clawsynapsed.stderr.log`
 
 ### Health
 

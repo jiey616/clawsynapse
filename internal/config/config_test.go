@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,7 +70,7 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\nLOG_FILE_PATH=./runtime/clawsynapsed.log\nLOG_ROTATE_MAX_SIZE_MB=64\nLOG_ROTATE_MAX_BACKUPS=5\nLOG_ROTATE_MAX_AGE_DAYS=14\nLOG_ROTATE_COMPRESS=true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,6 +107,24 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 	}
 	if !cfg.LogAddSource {
 		t.Fatal("expected dotenv log add source to be true")
+	}
+	if !filepath.IsAbs(cfg.LogFilePath) {
+		t.Fatalf("expected dotenv log file path to be absolute, got %q", cfg.LogFilePath)
+	}
+	if !strings.HasSuffix(cfg.LogFilePath, filepath.Join("runtime", "clawsynapsed.log")) {
+		t.Fatalf("expected dotenv log file path to end with runtime/clawsynapsed.log, got %q", cfg.LogFilePath)
+	}
+	if cfg.LogRotateMaxSizeMB != 64 {
+		t.Fatalf("expected dotenv log rotate size 64, got %d", cfg.LogRotateMaxSizeMB)
+	}
+	if cfg.LogRotateMaxBackups != 5 {
+		t.Fatalf("expected dotenv log rotate backups 5, got %d", cfg.LogRotateMaxBackups)
+	}
+	if cfg.LogRotateMaxAgeDays != 14 {
+		t.Fatalf("expected dotenv log rotate age 14, got %d", cfg.LogRotateMaxAgeDays)
+	}
+	if !cfg.LogRotateCompress {
+		t.Fatal("expected dotenv log rotate compress to be true")
 	}
 	if cfg.AgentAdapter != "openclaw" {
 		t.Fatalf("expected dotenv agent adapter openclaw, got %q", cfg.AgentAdapter)
@@ -150,8 +169,136 @@ func clearConfigEnv(t *testing.T) {
 		"LOG_LEVEL",
 		"LOG_FORMAT",
 		"LOG_ADD_SOURCE",
+		"LOG_FILE_PATH",
+		"LOG_ROTATE_MAX_SIZE_MB",
+		"LOG_ROTATE_MAX_BACKUPS",
+		"LOG_ROTATE_MAX_AGE_DAYS",
+		"LOG_ROTATE_COMPRESS",
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestValidateAcceptsValidConfig(t *testing.T) {
+	cfg := Config{
+		NATSServers:         []string{"nats://127.0.0.1:4222"},
+		TrustMode:           "tofu",
+		AgentAdapter:        "default",
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogRotateMaxSizeMB:  10,
+		LogRotateMaxBackups: 3,
+		LogRotateMaxAgeDays: 7,
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("expected valid config, got error: %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidTrustMode(t *testing.T) {
+	cfg := Config{
+		NATSServers:         []string{"nats://127.0.0.1:4222"},
+		TrustMode:           "invalid",
+		AgentAdapter:        "default",
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogRotateMaxSizeMB:  10,
+		LogRotateMaxBackups: 3,
+		LogRotateMaxAgeDays: 7,
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid trust mode")
+	}
+}
+
+func TestValidateRejectsInvalidAdapter(t *testing.T) {
+	cfg := Config{
+		NATSServers:         []string{"nats://127.0.0.1:4222"},
+		TrustMode:           "tofu",
+		AgentAdapter:        "unknown",
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogRotateMaxSizeMB:  10,
+		LogRotateMaxBackups: 3,
+		LogRotateMaxAgeDays: 7,
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid adapter")
+	}
+}
+
+func TestValidateRejectsEmptyNATS(t *testing.T) {
+	cfg := Config{
+		TrustMode:           "tofu",
+		AgentAdapter:        "default",
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogRotateMaxSizeMB:  10,
+		LogRotateMaxBackups: 3,
+		LogRotateMaxAgeDays: 7,
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for empty NATS servers")
+	}
+}
+
+func TestSaveToFileAndReadBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := Config{
+		NATSServers:         []string{"nats://10.0.0.1:4222", "nats://10.0.0.2:4222"},
+		LocalAPIAddr:        "127.0.0.1:19090",
+		TrustMode:           "explicit",
+		AgentAdapter:        "openclaw",
+		LogLevel:            "debug",
+		LogFormat:           "text",
+		LogFilePath:         filepath.Join(dir, "clawsynapsed.log"),
+		LogRotateMaxSizeMB:  64,
+		LogRotateMaxBackups: 5,
+		LogRotateMaxAgeDays: 14,
+		LogRotateCompress:   true,
+		HeartbeatInterval:   "20s",
+		AnnounceTTL:         "45s",
+		TransferTTL:         "12h",
+		LogAddSource:        true,
+	}
+
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	loaded, err := loadConfigValues(path, true)
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+
+	if len(loaded.NATSServers) != 2 || loaded.NATSServers[0] != "nats://10.0.0.1:4222" {
+		t.Fatalf("unexpected nats servers: %#v", loaded.NATSServers)
+	}
+	if loaded.TrustMode != "explicit" {
+		t.Fatalf("expected trust mode explicit, got %q", loaded.TrustMode)
+	}
+	if loaded.LogLevel != "debug" {
+		t.Fatalf("expected log level debug, got %q", loaded.LogLevel)
+	}
+	if !loaded.LogAddSource {
+		t.Fatal("expected log add source true")
+	}
+	if loaded.LogFilePath != filepath.Join(dir, "clawsynapsed.log") {
+		t.Fatalf("expected log file path to round trip, got %q", loaded.LogFilePath)
+	}
+	if loaded.LogRotateMaxSizeMB != 64 {
+		t.Fatalf("expected rotate size 64, got %d", loaded.LogRotateMaxSizeMB)
+	}
+	if loaded.LogRotateMaxBackups != 5 {
+		t.Fatalf("expected rotate backups 5, got %d", loaded.LogRotateMaxBackups)
+	}
+	if loaded.LogRotateMaxAgeDays != 14 {
+		t.Fatalf("expected rotate age 14, got %d", loaded.LogRotateMaxAgeDays)
+	}
+	if !loaded.LogRotateCompress {
+		t.Fatal("expected rotate compress true")
 	}
 }
 

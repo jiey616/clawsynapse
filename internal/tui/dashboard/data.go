@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"clawsynapse/internal/api"
+	appconfig "clawsynapse/internal/config"
 )
 
 func Run(args []string, stdout, stderr io.Writer, opts Options) error {
@@ -35,6 +36,12 @@ func Run(args []string, stdout, stderr io.Writer, opts Options) error {
 		logLines = dashboardDefaultLogLines
 	}
 
+	fields := initConfigFields()
+	localCfg, cfgPath, cfgErr := loadLocalConfig()
+	if cfgErr == nil {
+		populateFieldsFromConfig(fields, localCfg)
+	}
+
 	m := model{
 		client:         client,
 		logs:           opts.Logs,
@@ -45,6 +52,7 @@ func Run(args []string, stdout, stderr io.Writer, opts Options) error {
 		logLines:       logLines,
 		loading:        true,
 		logsFollowTail: true,
+		cfgState:       configEditState{fields: fields, configPath: cfgPath},
 	}
 
 	p := tea.NewProgram(m)
@@ -116,6 +124,15 @@ func loadSnapshot(ctx context.Context, client Client, logs LogProvider, logLines
 			snap.Logs = "log error: " + err.Error()
 		} else {
 			snap.Logs = logText
+		}
+	}
+
+	configResult, err := client.Get(ctx, "/v1/config")
+	if err == nil {
+		if cfgData, ok := configResult.Data["config"]; ok {
+			if m, ok := cfgData.(map[string]any); ok {
+				snap.ConfigData = m
+			}
 		}
 	}
 
@@ -203,6 +220,110 @@ func parseLogEntry(line string) parsedLogEntry {
 		entry.Extra = append(entry.Extra, fmt.Sprintf("%s=%v", k, obj[k]))
 	}
 	return entry
+}
+
+func loadLocalConfig() (appconfig.Config, string, error) {
+	cfg, err := appconfig.LoadFromOS(nil)
+	if err != nil {
+		return appconfig.Config{}, "", err
+	}
+	return cfg, cfg.ConfigPath, nil
+}
+
+func populateFieldsFromConfig(fields []configField, cfg appconfig.Config) {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return
+	}
+	for i := range fields {
+		f := &fields[i]
+		v, ok := data[f.Key]
+		if !ok {
+			continue
+		}
+		switch val := v.(type) {
+		case string:
+			f.Value = val
+		case bool:
+			if val {
+				f.Value = "true"
+			} else {
+				f.Value = "false"
+			}
+		case float64:
+			f.Value = fmt.Sprintf("%.0f", val)
+		case []any:
+			parts := make([]string, 0, len(val))
+			for _, item := range val {
+				parts = append(parts, fmt.Sprintf("%v", item))
+			}
+			f.Value = strings.Join(parts, ",")
+		default:
+			f.Value = fmt.Sprintf("%v", val)
+		}
+	}
+}
+
+func initConfigFields() []configField {
+	return []configField{
+		{Label: "NATS Servers", Key: "natsServers", Group: "Network", Kind: cfkStringSlice},
+		{Label: "Local API Addr", Key: "localApiAddr", Group: "Network", Kind: cfkText},
+		{Label: "Heartbeat Interval", Key: "heartbeatInterval", Group: "Network", Kind: cfkText},
+		{Label: "Announce TTL", Key: "announceTtl", Group: "Network", Kind: cfkText},
+		{Label: "Trust Mode", Key: "trustMode", Group: "Security", Kind: cfkEnum, Enums: []string{"open", "tofu", "explicit"}},
+		{Label: "Agent Adapter", Key: "agentAdapter", Group: "Agent", Kind: cfkEnum, Enums: []string{"default", "openclaw", "opencode", "webhook"}},
+		{Label: "Webhook URL", Key: "webhookUrl", Group: "Agent", Kind: cfkText},
+		{Label: "Deliverable Prefixes", Key: "deliverablePrefixes", Group: "Agent", Kind: cfkStringSlice},
+		{Label: "Data Dir", Key: "dataDir", Group: "Storage", Kind: cfkText},
+		{Label: "Identity Key Path", Key: "identityKeyPath", Group: "Storage", Kind: cfkText},
+		{Label: "Identity Pub Path", Key: "identityPubPath", Group: "Storage", Kind: cfkText},
+		{Label: "Transfer Dir", Key: "transferDir", Group: "Transfer", Kind: cfkText},
+		{Label: "Transfer Max Size", Key: "transferMaxFileSize", Group: "Transfer", Kind: cfkText},
+		{Label: "Transfer TTL", Key: "transferTtl", Group: "Transfer", Kind: cfkText},
+		{Label: "Log Level", Key: "logLevel", Group: "Logging", Kind: cfkEnum, Enums: []string{"debug", "info", "warn", "error"}},
+		{Label: "Log Format", Key: "logFormat", Group: "Logging", Kind: cfkEnum, Enums: []string{"json", "text"}},
+		{Label: "Log Add Source", Key: "logAddSource", Group: "Logging", Kind: cfkBool},
+	}
+}
+
+func (m *model) syncConfigFields(data map[string]any) {
+	if data == nil || m.cfgState.editing {
+		return
+	}
+	for i := range m.cfgState.fields {
+		f := &m.cfgState.fields[i]
+		if f.Changed {
+			continue
+		}
+		v, ok := data[f.Key]
+		if !ok {
+			continue
+		}
+		switch val := v.(type) {
+		case string:
+			f.Value = val
+		case bool:
+			if val {
+				f.Value = "true"
+			} else {
+				f.Value = "false"
+			}
+		case float64:
+			f.Value = fmt.Sprintf("%.0f", val)
+		case []any:
+			parts := make([]string, 0, len(val))
+			for _, item := range val {
+				parts = append(parts, fmt.Sprintf("%v", item))
+			}
+			f.Value = strings.Join(parts, ",")
+		default:
+			f.Value = fmt.Sprintf("%v", val)
+		}
+	}
 }
 
 func logLevelTag(level string) string {

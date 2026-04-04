@@ -22,6 +22,11 @@ type fileConfig struct {
 	TrustMode           string   `yaml:"trustMode"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	WebhookURL          string   `yaml:"webhookUrl"`
+	LogFilePath         string   `yaml:"logFilePath"`
+	LogRotateMaxSizeMB  *int     `yaml:"logRotateMaxSizeMb"`
+	LogRotateMaxBackups *int     `yaml:"logRotateMaxBackups"`
+	LogRotateMaxAgeDays *int     `yaml:"logRotateMaxAgeDays"`
+	LogRotateCompress   *bool    `yaml:"logRotateCompress"`
 	DeliverablePrefixes []string `yaml:"deliverablePrefixes"`
 	TransferDir         string   `yaml:"transferDir"`
 	TransferMaxFileSize *int64   `yaml:"transferMaxFileSize"`
@@ -29,6 +34,35 @@ type fileConfig struct {
 	LogLevel            string   `yaml:"logLevel"`
 	LogFormat           string   `yaml:"logFormat"`
 	LogAddSource        *bool    `yaml:"logAddSource"`
+}
+
+func toFileConfig(cfg Config) fileConfig {
+	las := cfg.LogAddSource
+	mfs := cfg.TransferMaxFileSize
+	return fileConfig{
+		NATSServers:         cfg.NATSServers,
+		LocalAPIAddr:        cfg.LocalAPIAddr,
+		DataDir:             cfg.DataDir,
+		IdentityKeyPath:     cfg.IdentityKeyPath,
+		IdentityPubPath:     cfg.IdentityPubPath,
+		HeartbeatInterval:   cfg.HeartbeatInterval,
+		AnnounceTTL:         cfg.AnnounceTTL,
+		TrustMode:           cfg.TrustMode,
+		AgentAdapter:        cfg.AgentAdapter,
+		WebhookURL:          cfg.WebhookURL,
+		LogFilePath:         cfg.LogFilePath,
+		LogRotateMaxSizeMB:  &cfg.LogRotateMaxSizeMB,
+		LogRotateMaxBackups: &cfg.LogRotateMaxBackups,
+		LogRotateMaxAgeDays: &cfg.LogRotateMaxAgeDays,
+		LogRotateCompress:   &cfg.LogRotateCompress,
+		DeliverablePrefixes: cfg.DeliverablePrefixes,
+		TransferDir:         cfg.TransferDir,
+		TransferMaxFileSize: &mfs,
+		TransferTTL:         cfg.TransferTTL,
+		LogLevel:            cfg.LogLevel,
+		LogFormat:           cfg.LogFormat,
+		LogAddSource:        &las,
+	}
 }
 
 func loadConfigValues(path string, required bool) (configValues, error) {
@@ -59,10 +93,23 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		TrustMode:           strings.TrimSpace(cfg.TrustMode),
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
 		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
+		LogFilePath:         strings.TrimSpace(cfg.LogFilePath),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
 		TransferDir:         strings.TrimSpace(cfg.TransferDir),
 		LogLevel:            strings.TrimSpace(cfg.LogLevel),
 		LogFormat:           strings.TrimSpace(cfg.LogFormat),
+	}
+	if cfg.LogRotateMaxSizeMB != nil {
+		values.LogRotateMaxSizeMB = *cfg.LogRotateMaxSizeMB
+	}
+	if cfg.LogRotateMaxBackups != nil {
+		values.LogRotateMaxBackups = *cfg.LogRotateMaxBackups
+	}
+	if cfg.LogRotateMaxAgeDays != nil {
+		values.LogRotateMaxAgeDays = *cfg.LogRotateMaxAgeDays
+	}
+	if cfg.LogRotateCompress != nil {
+		values.LogRotateCompress = *cfg.LogRotateCompress
 	}
 	if cfg.LogAddSource != nil {
 		values.LogAddSource = *cfg.LogAddSource
@@ -143,6 +190,11 @@ func loadValuesFromMap(values map[string]string) configValues {
 		TrustMode:           strings.TrimSpace(values["TRUST_MODE"]),
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
 		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
+		LogFilePath:         strings.TrimSpace(values["LOG_FILE_PATH"]),
+		LogRotateMaxSizeMB:  int(parseIntValue(values["LOG_ROTATE_MAX_SIZE_MB"])),
+		LogRotateMaxBackups: int(parseIntValue(values["LOG_ROTATE_MAX_BACKUPS"])),
+		LogRotateMaxAgeDays: int(parseIntValue(values["LOG_ROTATE_MAX_AGE_DAYS"])),
+		LogRotateCompress:   parseBoolValue(values["LOG_ROTATE_COMPRESS"]),
 		DeliverablePrefixes: splitCSV(values["DELIVERABLE_PREFIXES"]),
 		TransferDir:         strings.TrimSpace(values["TRANSFER_DIR"]),
 		TransferMaxFileSize: parseIntValue(values["TRANSFER_MAX_FILE_SIZE"]),

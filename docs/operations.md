@@ -215,10 +215,12 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 ```bash
 # Linux
 sudo systemctl status clawsynapsed.service
-sudo journalctl -u clawsynapsed.service -f
+tail -f ~/.clawsynapse/log/clawsynapsed.log
+sudo journalctl -u clawsynapsed.service -f  # 兼容旧安装
 
 # macOS
 launchctl print gui/$(id -u)/io.github.yuanjun5681.clawsynapse.clawsynapsed
+tail -f ~/.clawsynapse/log/clawsynapsed.log
 ```
 
 ### Release 自动化

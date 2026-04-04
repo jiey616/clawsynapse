@@ -42,16 +42,27 @@ func runService(args []string, stdout, stderr io.Writer) error {
 func runServiceWithRunner(args []string, stdout, stderr io.Writer, runner serviceRunner) error {
 	fs := flag.NewFlagSet("service", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		printServiceHelp(stderr)
+	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return flag.ErrHelp
+		}
 		return err
 	}
 
 	rest := fs.Args()
 	if len(rest) == 0 {
-		return errors.New("missing service action: status|start|stop|restart")
+		printServiceHelp(stderr)
+		return flag.ErrHelp
 	}
 
 	action := strings.ToLower(strings.TrimSpace(rest[0]))
+	if action == "help" || action == "-h" {
+		printServiceHelp(stderr)
+		return flag.ErrHelp
+	}
 	if action != "status" && action != "start" && action != "stop" && action != "restart" {
 		return fmt.Errorf("unknown service action: %s", rest[0])
 	}
@@ -244,4 +255,18 @@ func resolveLaunchdDomain(ctx context.Context, runner serviceRunner) (string, er
 		return guiDomain, nil
 	}
 	return "user/" + uid, nil
+}
+
+func printServiceHelp(stderr io.Writer) {
+	fmt.Fprintln(stderr, "usage: clawsynapse service <action>")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Actions:")
+	fmt.Fprintln(stderr, "  status    show daemon service status")
+	fmt.Fprintln(stderr, "  start     start the daemon service")
+	fmt.Fprintln(stderr, "  stop      stop the daemon service")
+	fmt.Fprintln(stderr, "  restart   restart the daemon service")
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "Examples:")
+	fmt.Fprintln(stderr, "  clawsynapse service status")
+	fmt.Fprintln(stderr, "  clawsynapse service restart")
 }

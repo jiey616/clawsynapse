@@ -50,8 +50,14 @@ func (s stubLogProvider) ReadLogs(_ context.Context, _ int) (string, error) {
 
 func TestDefaultLogProviderLinuxUsesJournalctl(t *testing.T) {
 	prevGOOS := serviceGOOS
+	prevHome := serviceUserHomeDir
 	serviceGOOS = "linux"
-	defer func() { serviceGOOS = prevGOOS }()
+	dir := t.TempDir()
+	serviceUserHomeDir = func() (string, error) { return dir, nil }
+	defer func() {
+		serviceGOOS = prevGOOS
+		serviceUserHomeDir = prevHome
+	}()
 
 	runner := &stubLogRunner{
 		responses: map[string]stubServiceResult{
@@ -74,6 +80,35 @@ func TestDefaultLogProviderLinuxUsesJournalctl(t *testing.T) {
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("unexpected calls: %#v", runner.calls)
+	}
+}
+
+func TestDefaultLogProviderLinuxPrefersCombinedLogFile(t *testing.T) {
+	prevGOOS := serviceGOOS
+	prevHome := serviceUserHomeDir
+	serviceGOOS = "linux"
+
+	dir := t.TempDir()
+	serviceUserHomeDir = func() (string, error) { return dir, nil }
+	defer func() {
+		serviceGOOS = prevGOOS
+		serviceUserHomeDir = prevHome
+	}()
+
+	logDir := filepath.Join(dir, ".clawsynapse", "log")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "clawsynapsed.log"), []byte("a\nb\nc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := defaultLogProvider{runner: &stubLogRunner{}}.ReadLogs(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "b\nc" {
+		t.Fatalf("unexpected log text: %q", text)
 	}
 }
 
@@ -110,6 +145,38 @@ func TestDefaultLogProviderDarwinReadsTailFromFiles(t *testing.T) {
 	}
 }
 
+func TestDefaultLogProviderDarwinPrefersCombinedLogFile(t *testing.T) {
+	prevGOOS := serviceGOOS
+	prevHome := serviceUserHomeDir
+	serviceGOOS = "darwin"
+
+	dir := t.TempDir()
+	serviceUserHomeDir = func() (string, error) { return dir, nil }
+	defer func() {
+		serviceGOOS = prevGOOS
+		serviceUserHomeDir = prevHome
+	}()
+
+	logDir := filepath.Join(dir, ".clawsynapse", "log")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "clawsynapsed.log"), []byte("a\nb\nc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "clawsynapsed.stdout.log"), []byte("old stdout\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := defaultLogProvider{}.ReadLogs(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "b\nc" {
+		t.Fatalf("unexpected log text: %q", text)
+	}
+}
+
 func TestRunLogsWritesProviderOutput(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -135,8 +202,14 @@ func TestRunLogsRejectsInvalidLines(t *testing.T) {
 
 func TestDefaultLogProviderLinuxFallsBackToSudoNonInteractive(t *testing.T) {
 	prevGOOS := serviceGOOS
+	prevHome := serviceUserHomeDir
 	serviceGOOS = "linux"
-	defer func() { serviceGOOS = prevGOOS }()
+	dir := t.TempDir()
+	serviceUserHomeDir = func() (string, error) { return dir, nil }
+	defer func() {
+		serviceGOOS = prevGOOS
+		serviceUserHomeDir = prevHome
+	}()
 
 	runner := &stubLogRunner{
 		responses: map[string]stubServiceResult{

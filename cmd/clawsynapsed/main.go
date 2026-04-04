@@ -37,11 +37,23 @@ func main() {
 		return
 	}
 
-	log := logging.New(logging.Options{
+	log, err := logging.New(logging.Options{
 		Level:     cfg.LogLevel,
 		Format:    cfg.LogFormat,
 		AddSource: cfg.LogAddSource,
-	}).With(
+		FilePath:  cfg.LogFilePath,
+		Rotate: logging.RotateOptions{
+			MaxSizeMB:  cfg.LogRotateMaxSizeMB,
+			MaxBackups: cfg.LogRotateMaxBackups,
+			MaxAgeDays: cfg.LogRotateMaxAgeDays,
+			Compress:   cfg.LogRotateCompress,
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logger error: %v\n", err)
+		os.Exit(1)
+	}
+	log = log.With(
 		slog.String("service", "clawsynapsed"),
 	)
 

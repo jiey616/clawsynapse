@@ -3,11 +3,14 @@ package config
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -19,6 +22,9 @@ const (
 	defaultAgentAdapter        = "default"
 	defaultLogLevel            = "info"
 	defaultLogFormat           = "json"
+	defaultLogRotateMaxSizeMB  = 10
+	defaultLogRotateMaxBackups = 3
+	defaultLogRotateMaxAgeDays = 7
 	defaultDeliverablePrefixes = "chat,task"
 	defaultTransferMaxFileSize = 104857600 // 100MB
 	defaultTransferTTL         = "24h"
@@ -37,12 +43,75 @@ type Config struct {
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
+	LogFilePath         string   `json:"logFilePath"`
+	LogRotateMaxSizeMB  int      `json:"logRotateMaxSizeMb"`
+	LogRotateMaxBackups int      `json:"logRotateMaxBackups"`
+	LogRotateMaxAgeDays int      `json:"logRotateMaxAgeDays"`
+	LogRotateCompress   bool     `json:"logRotateCompress"`
 	DeliverablePrefixes []string `json:"deliverablePrefixes"`
 	TransferDir         string   `json:"transferDir"`
 	TransferMaxFileSize int64    `json:"transferMaxFileSize"`
 	TransferTTL         string   `json:"transferTtl"`
 	LogAddSource        bool     `json:"logAddSource"`
 	CheckConfig         bool     `json:"checkConfig"`
+	ConfigPath          string   `json:"-"`
+}
+
+func Validate(cfg Config) error {
+	if len(cfg.NATSServers) == 0 {
+		return errors.New("nats servers is empty")
+	}
+	mode := strings.ToLower(strings.TrimSpace(cfg.TrustMode))
+	if mode != "open" && mode != "tofu" && mode != "explicit" {
+		return errors.New("trust mode must be one of: open|tofu|explicit")
+	}
+	adapterName := strings.ToLower(strings.TrimSpace(cfg.AgentAdapter))
+	if adapterName == "" {
+		adapterName = defaultAgentAdapter
+	}
+	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "webhook" {
+		return errors.New("agent adapter must be one of: default|openclaw|opencode|webhook")
+	}
+	if adapterName == "webhook" && strings.TrimSpace(cfg.WebhookURL) == "" {
+		return errors.New("webhook url is required when agent adapter is webhook")
+	}
+	level := strings.ToLower(strings.TrimSpace(cfg.LogLevel))
+	if level != "debug" && level != "info" && level != "warn" && level != "error" {
+		return errors.New("log level must be one of: debug|info|warn|error")
+	}
+	format := strings.ToLower(strings.TrimSpace(cfg.LogFormat))
+	if format != "json" && format != "text" {
+		return errors.New("log format must be one of: json|text")
+	}
+	if strings.TrimSpace(cfg.LogFilePath) != "" {
+		if cfg.LogRotateMaxSizeMB <= 0 {
+			return errors.New("log rotate max size mb must be greater than 0")
+		}
+		if cfg.LogRotateMaxBackups < 0 {
+			return errors.New("log rotate max backups must be greater than or equal to 0")
+		}
+		if cfg.LogRotateMaxAgeDays < 0 {
+			return errors.New("log rotate max age days must be greater than or equal to 0")
+		}
+	}
+	return nil
+}
+
+func SaveToFile(path string, cfg Config) error {
+	fc := toFileConfig(cfg)
+	data, err := yaml.Marshal(fc)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename config: %w", err)
+	}
+	return nil
 }
 
 type runtimeConfig struct {
@@ -56,6 +125,11 @@ type runtimeConfig struct {
 	TrustMode           string
 	AgentAdapter        string
 	WebhookURL          string
+	LogFilePath         string
+	LogRotateMaxSizeMB  int
+	LogRotateMaxBackups int
+	LogRotateMaxAgeDays int
+	LogRotateCompress   bool
 	DeliverablePrefixes []string
 	TransferDir         string
 	TransferMaxFileSize int64
@@ -77,6 +151,11 @@ type configValues struct {
 	TrustMode           string
 	AgentAdapter        string
 	WebhookURL          string
+	LogFilePath         string
+	LogRotateMaxSizeMB  int
+	LogRotateMaxBackups int
+	LogRotateMaxAgeDays int
+	LogRotateCompress   bool
 	DeliverablePrefixes []string
 	TransferDir         string
 	TransferMaxFileSize int64
@@ -101,6 +180,11 @@ func (c Config) Runtime() runtimeConfig {
 		TrustMode:           c.TrustMode,
 		AgentAdapter:        c.AgentAdapter,
 		WebhookURL:          c.WebhookURL,
+		LogFilePath:         c.LogFilePath,
+		LogRotateMaxSizeMB:  c.LogRotateMaxSizeMB,
+		LogRotateMaxBackups: c.LogRotateMaxBackups,
+		LogRotateMaxAgeDays: c.LogRotateMaxAgeDays,
+		LogRotateCompress:   c.LogRotateCompress,
 		DeliverablePrefixes: c.DeliverablePrefixes,
 		TransferDir:         c.TransferDir,
 		TransferMaxFileSize: c.TransferMaxFileSize,
@@ -148,6 +232,11 @@ func LoadFromOS(args []string) (Config, error) {
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
+		logFilePath         = fs.String("log-file-path", merged.LogFilePath, "log file path with rotation enabled when set")
+		logRotateMaxSizeMB  = fs.Int("log-rotate-max-size-mb", merged.LogRotateMaxSizeMB, "max size in MB before rotating the log file")
+		logRotateMaxBackups = fs.Int("log-rotate-max-backups", merged.LogRotateMaxBackups, "max number of old rotated log files to retain")
+		logRotateMaxAgeDays = fs.Int("log-rotate-max-age-days", merged.LogRotateMaxAgeDays, "max age in days for old rotated log files")
+		logRotateCompress   = fs.Bool("log-rotate-compress", merged.LogRotateCompress, "compress rotated log files")
 		deliverablePrefixes = fs.String("deliverable-prefixes", strings.Join(merged.DeliverablePrefixes, ","), "comma separated message type prefixes that are deliverable to agent handlers")
 		transferDir         = fs.String("transfer-dir", merged.TransferDir, "directory for received transfer files")
 		transferMaxFileSize = fs.Int64("transfer-max-file-size", merged.TransferMaxFileSize, "max file size for transfer in bytes")
@@ -190,6 +279,21 @@ func LoadFromOS(args []string) (Config, error) {
 	if format != "json" && format != "text" {
 		return Config{}, errors.New("log format must be one of: json|text")
 	}
+	resolvedLogFilePath, err := expandPath(*logFilePath)
+	if err != nil {
+		return Config{}, err
+	}
+	if strings.TrimSpace(resolvedLogFilePath) != "" {
+		if *logRotateMaxSizeMB <= 0 {
+			return Config{}, errors.New("log rotate max size mb must be greater than 0")
+		}
+		if *logRotateMaxBackups < 0 {
+			return Config{}, errors.New("log rotate max backups must be greater than or equal to 0")
+		}
+		if *logRotateMaxAgeDays < 0 {
+			return Config{}, errors.New("log rotate max age days must be greater than or equal to 0")
+		}
+	}
 
 	resolvedDataDir, err := expandPath(*dataDir)
 	if err != nil {
@@ -219,6 +323,11 @@ func LoadFromOS(args []string) (Config, error) {
 		TrustMode:           mode,
 		AgentAdapter:        adapterName,
 		WebhookURL:          webhookURL,
+		LogFilePath:         resolvedLogFilePath,
+		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
+		LogRotateMaxBackups: *logRotateMaxBackups,
+		LogRotateMaxAgeDays: *logRotateMaxAgeDays,
+		LogRotateCompress:   *logRotateCompress,
 		DeliverablePrefixes: splitCSV(*deliverablePrefixes),
 		TransferDir:         resolvedTransferDir,
 		TransferMaxFileSize: *transferMaxFileSize,
@@ -227,6 +336,7 @@ func LoadFromOS(args []string) (Config, error) {
 		LogFormat:           format,
 		LogAddSource:        *logAddSource,
 		CheckConfig:         *checkConfig,
+		ConfigPath:          configPath,
 	}, nil
 }
 
@@ -242,6 +352,9 @@ func defaultConfigValues(defaultDataDir string) configValues {
 		AnnounceTTL:         defaultAnnounceTTL,
 		TrustMode:           defaultTrustMode,
 		AgentAdapter:        defaultAgentAdapter,
+		LogRotateMaxSizeMB:  defaultLogRotateMaxSizeMB,
+		LogRotateMaxBackups: defaultLogRotateMaxBackups,
+		LogRotateMaxAgeDays: defaultLogRotateMaxAgeDays,
 		DeliverablePrefixes: splitCSV(defaultDeliverablePrefixes),
 		TransferDir:         filepath.Join(defaultDataDir, "transfers"),
 		TransferMaxFileSize: defaultTransferMaxFileSize,
@@ -281,6 +394,21 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)
+	}
+	if strings.TrimSpace(override.LogFilePath) != "" {
+		base.LogFilePath = strings.TrimSpace(override.LogFilePath)
+	}
+	if override.LogRotateMaxSizeMB > 0 {
+		base.LogRotateMaxSizeMB = override.LogRotateMaxSizeMB
+	}
+	if override.LogRotateMaxBackups > 0 {
+		base.LogRotateMaxBackups = override.LogRotateMaxBackups
+	}
+	if override.LogRotateMaxAgeDays > 0 {
+		base.LogRotateMaxAgeDays = override.LogRotateMaxAgeDays
+	}
+	if override.LogRotateCompress {
+		base.LogRotateCompress = true
 	}
 	if len(override.DeliverablePrefixes) > 0 {
 		base.DeliverablePrefixes = append([]string(nil), override.DeliverablePrefixes...)

@@ -14,3 +14,8 @@ deliverablePrefixes:
 transferDir: ~/.clawsynapse/transfers
 transferMaxFileSize: 104857600
 transferTtl: 24h
+logFilePath: ~/.clawsynapse/log/clawsynapsed.log
+logRotateMaxSizeMb: 10
+logRotateMaxBackups: 3
+logRotateMaxAgeDays: 7
+logRotateCompress: false
