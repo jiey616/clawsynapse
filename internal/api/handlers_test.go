@@ -35,6 +35,7 @@ func TestHandleHealthIncludesAdapterStatus(t *testing.T) {
 		peers:       peers,
 		adapter:     stubAgentAdapter{status: &adapter.AgentStatus{Healthy: true}},
 		adapterName: "openclaw",
+		version:     "v0.3.2",
 		self: SelfInfo{
 			NodeID:              "n1-localnodeid0000000000000000000000",
 			DID:                 "did:key:z6MkexampleLocalDid",
@@ -69,6 +70,9 @@ func TestHandleHealthIncludesAdapterStatus(t *testing.T) {
 	}
 	if selfData["did"] != "did:key:z6MkexampleLocalDid" {
 		t.Fatalf("expected self did, got %#v", selfData["did"])
+	}
+	if selfData["version"] != "v0.3.2" {
+		t.Fatalf("expected self version, got %#v", selfData["version"])
 	}
 	if selfData["identityFingerprint"] != "sha256:1234abcd5678ef90" {
 		t.Fatalf("expected self identityFingerprint, got %#v", selfData["identityFingerprint"])
@@ -136,6 +140,7 @@ func TestHandleHealthIncludesAdapterError(t *testing.T) {
 		peers:       discovery.NewRegistry(),
 		adapter:     stubAgentAdapter{status: &adapter.AgentStatus{Healthy: false}, err: errors.New("openclaw unavailable")},
 		adapterName: "openclaw",
+		version:     "v0.3.2",
 		self: SelfInfo{
 			NodeID:              "n1-localnodeid0000000000000000000000",
 			DID:                 "did:key:z6MkexampleLocalDid",

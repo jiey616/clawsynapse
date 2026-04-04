@@ -37,7 +37,7 @@ type App struct {
 	identity  *identity.Identity
 }
 
-func New(cfg config.Config) (*App, error) {
+func New(cfg config.Config, version string) (*App, error) {
 	fs := store.NewFSStore(cfg.DataDir)
 	if err := fs.EnsureLayout(); err != nil {
 		return nil, fmt.Errorf("init fs store: %w", err)
@@ -149,7 +149,7 @@ func New(cfg config.Config) (*App, error) {
 		DID:                 nodeDID,
 		IdentityFingerprint: identity.Fingerprint(id.PublicKey),
 		TrustMode:           cfg.TrustMode,
-	}, cfg)
+	}, version, cfg)
 
 	return &App{
 		log:       log,

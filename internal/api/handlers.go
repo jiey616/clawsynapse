@@ -152,6 +152,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"self": map[string]any{
 				"nodeId":              s.self.NodeID,
 				"did":                 s.self.DID,
+				"version":             s.version,
 				"identityFingerprint": s.self.IdentityFingerprint,
 				"trustMode":           s.self.TrustMode,
 			},
