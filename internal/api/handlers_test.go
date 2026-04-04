@@ -27,8 +27,12 @@ func (s stubAgentAdapter) GetStatus(_ context.Context) (*adapter.AgentStatus, er
 }
 
 func TestHandleHealthIncludesAdapterStatus(t *testing.T) {
+	peers := discovery.NewRegistry()
+	peers.Upsert(types.Peer{NodeID: "n1-localnodeid0000000000000000000000"})
+	peers.Upsert(types.Peer{NodeID: "n1-remotepeer0000000000000000000000"})
+
 	srv := &Server{
-		peers:       discovery.NewRegistry(),
+		peers:       peers,
 		adapter:     stubAgentAdapter{status: &adapter.AgentStatus{Healthy: true}},
 		adapterName: "openclaw",
 		self: SelfInfo{
@@ -72,6 +76,9 @@ func TestHandleHealthIncludesAdapterStatus(t *testing.T) {
 	if selfData["trustMode"] != "tofu" {
 		t.Fatalf("expected self trustMode tofu, got %#v", selfData["trustMode"])
 	}
+	if result.Data["peersCount"] != float64(1) {
+		t.Fatalf("expected peersCount 1, got %#v", result.Data["peersCount"])
+	}
 	if adapterData["name"] != "openclaw" {
 		t.Fatalf("expected adapter name openclaw, got %#v", adapterData["name"])
 	}
@@ -80,6 +87,47 @@ func TestHandleHealthIncludesAdapterStatus(t *testing.T) {
 	}
 	if _, exists := adapterData["error"]; exists {
 		t.Fatalf("expected no adapter error, got %#v", adapterData["error"])
+	}
+}
+
+func TestHandlePeersExcludesSelfNode(t *testing.T) {
+	peers := discovery.NewRegistry()
+	peers.Upsert(types.Peer{NodeID: "n1-localnodeid0000000000000000000000"})
+	peers.Upsert(types.Peer{NodeID: "n1-remotepeer0000000000000000000000", AuthStatus: types.AuthAuthenticated, TrustStatus: types.TrustTrusted})
+
+	srv := &Server{
+		peers: peers,
+		self: SelfInfo{
+			NodeID: "n1-localnodeid0000000000000000000000",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers", nil)
+	rec := httptest.NewRecorder()
+	srv.handlePeers(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var result types.APIResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	items, ok := result.Data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected items slice, got %#v", result.Data["items"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 peer, got %#v", result.Data["items"])
+	}
+	peer, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected peer item map, got %#v", items[0])
+	}
+	if peer["nodeId"] != "n1-remotepeer0000000000000000000000" {
+		t.Fatalf("expected remote peer only, got %#v", peer["nodeId"])
 	}
 }
 

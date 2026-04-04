@@ -44,7 +44,7 @@ func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 			"/v1/health": {
 				OK: true,
 				Data: map[string]any{
-					"peersCount": 2,
+					"peersCount": 1,
 					"nats": map[string]any{
 						"connected": true,
 						"status":    "CONNECTED",
@@ -98,8 +98,8 @@ func TestLoadSnapshotDecodesHealthPeersAndMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Health.PeersCount != 2 {
-		t.Fatalf("expected peers count 2, got %d", snapshot.Health.PeersCount)
+	if snapshot.Health.PeersCount != 1 {
+		t.Fatalf("expected peers count 1, got %d", snapshot.Health.PeersCount)
 	}
 	if !snapshot.Health.NATS.Connected {
 		t.Fatal("expected nats connected")

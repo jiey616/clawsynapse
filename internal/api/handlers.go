@@ -45,10 +45,22 @@ func (s *Server) handlePeers(w http.ResponseWriter, _ *http.Request) {
 		Code:    "peers.ok",
 		Message: "peers fetched",
 		Data: map[string]any{
-			"items": s.peers.List(),
+			"items": s.listRemotePeers(),
 		},
 		TS: time.Now().UnixMilli(),
 	})
+}
+
+func (s *Server) listRemotePeers() []types.Peer {
+	peers := s.peers.List()
+	out := make([]types.Peer, 0, len(peers))
+	for _, peer := range peers {
+		if peer.NodeID == s.self.NodeID {
+			continue
+		}
+		out = append(out, peer)
+	}
+	return out
 }
 
 func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +155,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 				"identityFingerprint": s.self.IdentityFingerprint,
 				"trustMode":           s.self.TrustMode,
 			},
-			"peersCount": len(s.peers.List()),
+			"peersCount": len(s.listRemotePeers()),
 			"nats":       natsStatus,
 			"adapter":    adapterStatus,
 		},
