@@ -231,6 +231,8 @@ POST /v1/publish
 
 普通输出会单独显示 `targetNode`、`messageId` 和 `sessionKey`；如果需要完整结构，使用 `--json`。
 
+可选地通过 `--agent <id>` 指定目标节点本地智能体 ID；当接收端使用支持该参数的 adapter（如 `openclaw`）时，会覆盖默认路由 bindings。
+
 ### Auth Challenge
 
 对目标节点发起 challenge：

@@ -15,7 +15,10 @@
       "Bash(gh api:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:opencode.ai)",
-      "WebFetch(domain:developers.openai.com)"
+      "WebFetch(domain:developers.openai.com)",
+      "Bash(codex --help)",
+      "Bash(codex resume:*)",
+      "Bash(codex exec:*)"
     ]
   }
 }

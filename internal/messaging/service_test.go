@@ -45,6 +45,9 @@ func TestPublishRejectsUntrustedPeer(t *testing.T) {
 func TestAdapterMessageHandlerUsesAgentAdapter(t *testing.T) {
 	handler := NewAdapterMessageHandler(stubAgentAdapter{
 		deliver: func(_ context.Context, req adapter.DeliverMessageRequest) (*adapter.DeliverMessageResult, error) {
+			if req.AgentID != "agent-42" {
+				t.Fatalf("adapter agentId = %q, want agent-42", req.AgentID)
+			}
 			if req.From != "node-alpha" {
 				t.Fatalf("adapter from = %q, want node-alpha", req.From)
 			}
@@ -59,6 +62,7 @@ func TestAdapterMessageHandlerUsesAgentAdapter(t *testing.T) {
 	}, time.Second)
 
 	result, err := handler.HandleMessage(IncomingMessage{
+		AgentID: "agent-42",
 		From:    "node-alpha",
 		Message: "hello",
 		Metadata: map[string]any{
@@ -140,6 +144,38 @@ func TestMaybeDeliverForwardsDeliverableTypes(t *testing.T) {
 		if !got {
 			t.Fatalf("message %q was not delivered", msg)
 		}
+	}
+}
+
+func TestMaybeDeliverForwardsAgentID(t *testing.T) {
+	peers := discovery.NewRegistry()
+	base := t.TempDir()
+	id, err := identity.LoadOrCreate(base+"/identity.key", base+"/identity.pub")
+	if err != nil {
+		t.Fatalf("identity init failed: %v", err)
+	}
+
+	delivered := make(chan IncomingMessage, 1)
+	svc := NewService(slog.Default(), peers, nil, "node-alpha", id, "open", nil)
+	svc.SetMessageHandler(MessageHandlerFunc(func(msg IncomingMessage) (HandlerResult, error) {
+		delivered <- msg
+		return HandlerResult{Reply: "ok"}, nil
+	}))
+
+	svc.maybeDeliver(protocol.MessageEnvelope{
+		Type:    "chat.message",
+		AgentID: "agent-42",
+		From:    "node-beta",
+		Content: "hello",
+	})
+
+	select {
+	case msg := <-delivered:
+		if msg.AgentID != "agent-42" {
+			t.Fatalf("AgentID = %q, want agent-42", msg.AgentID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected message delivery")
 	}
 }
 

@@ -181,6 +181,12 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 			Logger:       log.With(slog.String("component", "adapter"), slog.String("adapter", "opencode")),
 			SessionStore: fs,
 		})
+	case "codex":
+		return adapter.NewCodexAdapter(adapter.CodexConfig{
+			NodeID:       nodeID,
+			Logger:       log.With(slog.String("component", "adapter"), slog.String("adapter", "codex")),
+			SessionStore: fs,
+		})
 	case "webhook":
 		return adapter.NewWebhookAdapter(adapter.WebhookConfig{
 			NodeID: nodeID,

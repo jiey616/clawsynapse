@@ -27,6 +27,7 @@ type AgentAdapter interface {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `Type` | string | 消息类型（如 `chat.message`, `task.assign`） |
+| `AgentID` | string | 可选的目标智能体 ID，用于覆盖接收端本地路由 bindings |
 | `SessionKey` | string | 会话标识，用于关联上下文 |
 | `Message` | string | 消息正文 |
 | `From` | string | 发送方节点 ID |
@@ -69,6 +70,8 @@ type AgentAdapter interface {
 | `fileSize` | int64 | 文件大小（字节） |
 | `localPath` | string | 本地文件路径 |
 | `mimeType` | string | 文件 MIME 类型 |
+
+`AgentID` 用于显式指定接收端本地 Agent，适配器可将其映射为底层路由参数；对 OpenClaw Adapter 会转换为 `--agent <id>`。
 
 `Metadata` 字段为发送方附带的业务扩展元数据（如 `taskId`、`todoId`），与 `POST /v1/publish` 中 `metadata` 的语义一致。
 
@@ -119,6 +122,8 @@ Webhook Adapter 收到的 JSON 示例：
 ```
 
 header 中包含 `type`、`from`、`to`、`session` 以及 metadata 中的键值对。
+
+如果 `AgentID` 非空，OpenClaw Adapter 会额外附加 `--agent <id>`，用于覆盖 OpenClaw 的默认 bindings 路由。
 
 ### 会话映射
 

@@ -40,6 +40,9 @@ func (a *OpenClawAdapter) DeliverMessage(ctx context.Context, req DeliverMessage
 		"--json",
 		"--session-id", sessionID,
 	}
+	if agentID := strings.TrimSpace(req.AgentID); agentID != "" {
+		args = append(args, "--agent", agentID)
+	}
 	a.logCommand(args)
 
 	out, err := a.execCmd(ctx, args...)

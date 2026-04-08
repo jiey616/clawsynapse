@@ -41,6 +41,7 @@ func TestWebhookDeliverMessageSuccess(t *testing.T) {
 
 	result, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
 		Type:       "chat",
+		AgentID:    "agent-42",
 		From:       "peer-a",
 		SessionKey: "sess-1",
 		Message:    "hello world",
@@ -70,6 +71,9 @@ func TestWebhookDeliverMessageSuccess(t *testing.T) {
 	}
 	if received.Type != "chat" {
 		t.Fatalf("expected type chat, got %s", received.Type)
+	}
+	if received.AgentID != "agent-42" {
+		t.Fatalf("expected agentId agent-42, got %s", received.AgentID)
 	}
 	if received.SessionKey != "sess-1" {
 		t.Fatalf("expected sessionKey sess-1, got %s", received.SessionKey)

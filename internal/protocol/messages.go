@@ -110,6 +110,7 @@ type TransferAvailable struct {
 type MessageEnvelope struct {
 	ID              string         `json:"id"`
 	Type            string         `json:"type"`
+	AgentID         string         `json:"agentId,omitempty"`
 	From            string         `json:"from"`
 	To              string         `json:"to,omitempty"`
 	Content         string         `json:"content,omitempty"`
