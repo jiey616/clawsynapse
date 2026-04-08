@@ -12,6 +12,7 @@ import (
 type IncomingMessage struct {
 	MessageID  string
 	Type       string
+	AgentID    string
 	From       string
 	To         string
 	Message    string
@@ -64,6 +65,7 @@ func (h *AdapterMessageHandler) HandleMessage(msg IncomingMessage) (HandlerResul
 
 	result, err := h.adapter.DeliverMessage(ctx, adapter.DeliverMessageRequest{
 		Type:       msg.Type,
+		AgentID:    msg.AgentID,
 		SessionKey: msg.SessionKey,
 		Message:    msg.Message,
 		From:       msg.From,

@@ -126,6 +126,44 @@ func TestRunTransferSendIncludesMetadata(t *testing.T) {
 	}
 }
 
+func TestRunPublishPostsExpectedPayloadIncludingAgentID(t *testing.T) {
+	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "msg.published"}}
+	_, err := runPublish(context.Background(), client, []string{
+		"--target", "node-beta",
+		"--type", "chat.message",
+		"--agent", "agent-42",
+		"--message", "hello",
+		"--session-key", "sess-1",
+		"--metadata", "priority=high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.method != "POST" {
+		t.Fatalf("expected POST, got %s", client.method)
+	}
+	if client.endpoint != "/v1/publish" {
+		t.Fatalf("unexpected endpoint %s", client.endpoint)
+	}
+	body, _ := client.payload.(map[string]any)
+	if body["targetNode"] != "node-beta" {
+		t.Fatalf("unexpected targetNode %#v", body["targetNode"])
+	}
+	if body["type"] != "chat.message" {
+		t.Fatalf("unexpected type %#v", body["type"])
+	}
+	if body["agentId"] != "agent-42" {
+		t.Fatalf("unexpected agentId %#v", body["agentId"])
+	}
+	if body["sessionKey"] != "sess-1" {
+		t.Fatalf("unexpected sessionKey %#v", body["sessionKey"])
+	}
+	md, _ := body["metadata"].(map[string]any)
+	if md["priority"] != "high" {
+		t.Fatalf("unexpected metadata %#v", body["metadata"])
+	}
+}
+
 func TestRunTransferSendOmitsEmptyMetadata(t *testing.T) {
 	client := &stubAPIClient{result: types.APIResult{OK: true, Code: "transfer.sent"}}
 	_, err := runTransfer(context.Background(), client, []string{

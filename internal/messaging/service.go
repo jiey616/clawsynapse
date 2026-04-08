@@ -26,6 +26,7 @@ const contentPreviewLimit = 160
 type PublishRequest struct {
 	TargetNode string
 	Type       string
+	AgentID    string
 	Message    string
 	SessionKey string
 	Metadata   map[string]any
@@ -116,6 +117,7 @@ func (s *Service) Publish(req PublishRequest) (PublishResult, error) {
 	env := protocol.MessageEnvelope{
 		ID:              randID(),
 		Type:            msgType,
+		AgentID:         strings.TrimSpace(req.AgentID),
 		From:            s.nodeID,
 		To:              req.TargetNode,
 		Content:         req.Message,
@@ -251,6 +253,7 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 		_, err := handler.HandleMessage(IncomingMessage{
 			MessageID:  env.ID,
 			Type:       env.Type,
+			AgentID:    env.AgentID,
 			From:       env.From,
 			To:         env.To,
 			Message:    env.Content,

@@ -209,6 +209,7 @@ title: "ClawSynapse API Reference"
 {
   "targetNode": "n1-11223344556677889900aabbccddeeff",
   "type": "chat.message",
+  "agentId": "agent-42",
   "message": "请汇总最新报告",
   "sessionKey": "nats:n1-localnodeid:n1-11223344556677889900aabbccddeeff",
   "metadata": { "priority": "high" }
@@ -219,6 +220,7 @@ title: "ClawSynapse API Reference"
 |------|------|------|------|
 | `targetNode` | string | 是 | 目标节点 ID，由对端 DID 自动派生 |
 | `type` | string | 否 | 消息类型（如 `chat.message`, `task.assign`） |
+| `agentId` | string | 否 | 目标节点本地智能体 ID；若 adapter 支持，可覆盖默认路由 bindings |
 | `message` | string | 是 | 消息正文 |
 | `sessionKey` | string | 否 | 会话标识，用于关联上下文 |
 | `metadata` | object | 否 | 附加元数据 |
@@ -292,6 +294,7 @@ title: "ClawSynapse API Reference"
 |------|------|------|
 | `id` | string | 消息唯一 ID |
 | `type` | string | 消息类型 |
+| `agentId` | string | 目标节点本地智能体 ID，可能为空 |
 | `from` | string | 发送方节点 ID |
 | `to` | string | 接收方节点 ID |
 | `content` | string | 消息正文 |

@@ -452,6 +452,7 @@ sig_input = messageType + "\n" + subject + "\n" + from + "\n" + to + "\n" + ts +
 type Envelope struct {
     ID              string         `json:"id"`
     Type            string         `json:"type"`
+    AgentID         string         `json:"agentId,omitempty"`
     From            string         `json:"from"`
     To              string         `json:"to,omitempty"`
     Content         string         `json:"content,omitempty"`
@@ -484,6 +485,7 @@ type Envelope struct {
 |------|------|------|
 | `id` | 是 | 消息唯一标识，用于去重 |
 | `type` | 是 | 消息类型 |
+| `agentId` | 否 | 目标节点本地智能体 ID，用于 adapter 覆盖默认路由 |
 | `from` | 是 | 发送方节点 ID |
 | `to` | 否 | 目标节点 ID |
 | `content` | 否 | 文本或序列化正文 |

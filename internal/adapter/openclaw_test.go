@@ -50,7 +50,7 @@ func TestOpenClawAdapterDeliverMessage(t *testing.T) {
 	}
 
 	adapter.execCmd = func(_ context.Context, args ...string) ([]byte, error) {
-		// args: agent --message <msg> --json --session-id <id>
+		// args: agent --message <msg> --json --session-id <id> [--agent <id>]
 		if len(args) < 6 || args[0] != "agent" {
 			t.Fatalf("unexpected args: %v", args)
 		}
@@ -60,6 +60,9 @@ func TestOpenClawAdapterDeliverMessage(t *testing.T) {
 		}
 		if args[4] != "--session-id" || args[5] != "session-1" {
 			t.Fatalf("session-id args = %v, want [--session-id session-1]", args[4:])
+		}
+		if len(args) != 8 || args[6] != "--agent" || args[7] != "agent-42" {
+			t.Fatalf("agent args = %v, want [--agent agent-42]", args[6:])
 		}
 
 		return []byte(`{
@@ -76,6 +79,7 @@ func TestOpenClawAdapterDeliverMessage(t *testing.T) {
 	defer cancel()
 
 	result, err := adapter.DeliverMessage(ctx, DeliverMessageRequest{
+		AgentID:    "agent-42",
 		SessionKey: "session-1",
 		Message:    "hello",
 		From:       "node-beta",
@@ -116,6 +120,26 @@ func TestOpenClawAdapterDeliverMessageError(t *testing.T) {
 	}
 	if result.Error != "agent not found" {
 		t.Fatalf("error = %q, want agent not found", result.Error)
+	}
+}
+
+func TestOpenClawAdapterDeliverMessageOmitsEmptyAgentFlag(t *testing.T) {
+	adapter, err := NewOpenClawAdapter(OpenClawConfig{})
+	if err != nil {
+		t.Fatalf("NewOpenClawAdapter failed: %v", err)
+	}
+
+	adapter.execCmd = func(_ context.Context, args ...string) ([]byte, error) {
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--agent" {
+				t.Fatalf("unexpected --agent flag in args: %v", args)
+			}
+		}
+		return []byte(`{"runId":"run-1","status":"ok","result":{"payloads":[{"text":"done"}]}}`), nil
+	}
+
+	if _, err := adapter.DeliverMessage(context.Background(), DeliverMessageRequest{Message: "hi"}); err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
 	}
 }
 

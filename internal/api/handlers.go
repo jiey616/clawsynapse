@@ -34,6 +34,7 @@ type trustRevokeReq struct {
 type publishReq struct {
 	TargetNode string         `json:"targetNode"`
 	Type       string         `json:"type,omitempty"`
+	AgentID    string         `json:"agentId,omitempty"`
 	Message    string         `json:"message"`
 	SessionKey string         `json:"sessionKey,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
@@ -280,6 +281,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	result, err := s.messaging.Publish(messaging.PublishRequest{
 		TargetNode: req.TargetNode,
 		Type:       req.Type,
+		AgentID:    req.AgentID,
 		Message:    req.Message,
 		SessionKey: req.SessionKey,
 		Metadata:   req.Metadata,

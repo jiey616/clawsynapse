@@ -168,6 +168,7 @@ func runPublish(ctx context.Context, client localAPIClient, args []string) (type
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	target := fs.String("target", "", "target node id")
 	msgType := fs.String("type", "", "message type (e.g. chat.message, task.assign)")
+	agentID := fs.String("agent", "", "target agent id override")
 	message := fs.String("message", "", "message content")
 	sessionKey := fs.String("session-key", "", "session key")
 	var metadataFlags stringList
@@ -194,6 +195,9 @@ func runPublish(ctx context.Context, client localAPIClient, args []string) (type
 	if *msgType != "" {
 		body["type"] = *msgType
 	}
+	if strings.TrimSpace(*agentID) != "" {
+		body["agentId"] = *agentID
+	}
 	return client.Post(ctx, "/v1/publish", body)
 }
 
@@ -205,6 +209,7 @@ func printPublishHelp(stderr *os.File) {
 	fs.SetOutput(stderr)
 	fs.String("target", "", "target node id")
 	fs.String("type", "", "message type (e.g. chat.message, task.assign)")
+	fs.String("agent", "", "target agent id override")
 	fs.String("message", "", "message content")
 	fs.String("session-key", "", "session key")
 	fs.Var(&stringList{}, "metadata", "metadata key=value; repeatable")

@@ -38,6 +38,7 @@ func NewWebhookAdapter(cfg WebhookConfig) (*WebhookAdapter, error) {
 type webhookPayload struct {
 	NodeID     string         `json:"nodeId"`
 	Type       string         `json:"type"`
+	AgentID    string         `json:"agentId,omitempty"`
 	From       string         `json:"from"`
 	SessionKey string         `json:"sessionKey,omitempty"`
 	Message    string         `json:"message"`
@@ -48,6 +49,7 @@ func (a *WebhookAdapter) DeliverMessage(ctx context.Context, req DeliverMessageR
 	payload := webhookPayload{
 		NodeID:     a.nodeID,
 		Type:       req.Type,
+		AgentID:    req.AgentID,
 		From:       req.From,
 		SessionKey: req.SessionKey,
 		Message:    req.Message,
