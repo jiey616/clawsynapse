@@ -213,6 +213,21 @@ func TestParseOpenCodeResultTextField(t *testing.T) {
 	}
 }
 
+func TestParseOpenCodeResultDecodesEscapedNewlines(t *testing.T) {
+	data := []byte(`{"type":"result","content":"line1\nline2","sessionID":"ses_3"}`)
+
+	result, err := parseOpenCodeResult(data)
+	if err != nil {
+		t.Fatalf("parseOpenCodeResult failed: %v", err)
+	}
+	if result.Reply != "line1\nline2" {
+		t.Fatalf("reply = %q, want decoded multiline text", result.Reply)
+	}
+	if result.SessionID != "ses_3" {
+		t.Fatalf("sessionID = %q, want ses_3", result.SessionID)
+	}
+}
+
 func TestParseOpenCodeResultPlainText(t *testing.T) {
 	data := []byte("This is plain text output\n")
 

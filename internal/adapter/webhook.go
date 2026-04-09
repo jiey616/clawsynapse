@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 type WebhookConfig struct {
@@ -43,6 +44,16 @@ type webhookPayload struct {
 	SessionKey string         `json:"sessionKey,omitempty"`
 	Message    string         `json:"message"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+type webhookResponse struct {
+	Reply     string `json:"reply"`
+	Message   string `json:"message"`
+	RunID     string `json:"runId"`
+	SessionID string `json:"sessionId"`
+	Error     string `json:"error"`
+	Accepted  *bool  `json:"accepted"`
+	Success   *bool  `json:"success"`
 }
 
 func (a *WebhookAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRequest) (*DeliverMessageResult, error) {
@@ -84,17 +95,76 @@ func (a *WebhookAdapter) DeliverMessage(ctx context.Context, req DeliverMessageR
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return &DeliverMessageResult{
-			Success:  true,
-			Accepted: true,
-			Reply:    string(respBody),
-		}, nil
+		return parseWebhookSuccess(respBody), nil
 	}
 
 	return &DeliverMessageResult{
 		Success: false,
 		Error:   fmt.Sprintf("webhook returned status %d: %s", resp.StatusCode, string(respBody)),
 	}, nil
+}
+
+func parseWebhookSuccess(body []byte) *DeliverMessageResult {
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return &DeliverMessageResult{
+			Success:  true,
+			Accepted: true,
+		}
+	}
+
+	var reply string
+	if err := json.Unmarshal(body, &reply); err == nil {
+		return &DeliverMessageResult{
+			Success:  true,
+			Accepted: true,
+			Reply:    reply,
+		}
+	}
+
+	var resp webhookResponse
+	if err := json.Unmarshal(body, &resp); err == nil && hasStructuredWebhookReply(resp) {
+		result := &DeliverMessageResult{
+			Success:   true,
+			Accepted:  true,
+			RunID:     strings.TrimSpace(resp.RunID),
+			SessionID: strings.TrimSpace(resp.SessionID),
+			Reply:     firstStructuredWebhookText(resp.Reply, resp.Message),
+			Error:     strings.TrimSpace(resp.Error),
+		}
+		if resp.Success != nil {
+			result.Success = *resp.Success
+		}
+		if resp.Accepted != nil {
+			result.Accepted = *resp.Accepted
+		}
+		return result
+	}
+
+	return &DeliverMessageResult{
+		Success:  true,
+		Accepted: true,
+		Reply:    text,
+	}
+}
+
+func hasStructuredWebhookReply(resp webhookResponse) bool {
+	return strings.TrimSpace(resp.Reply) != "" ||
+		strings.TrimSpace(resp.Message) != "" ||
+		strings.TrimSpace(resp.RunID) != "" ||
+		strings.TrimSpace(resp.SessionID) != "" ||
+		strings.TrimSpace(resp.Error) != "" ||
+		resp.Accepted != nil ||
+		resp.Success != nil
+}
+
+func firstStructuredWebhookText(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (a *WebhookAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
