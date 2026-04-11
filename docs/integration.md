@@ -243,8 +243,23 @@ webhookUrl: https://example.com/hooks/clawsynapse
 
 ### 响应约定
 
-- **2xx**：视为投递成功，响应 body 作为 `Reply` 返回给发送方
+- **2xx**：视为投递成功
+- 若响应是纯文本，响应 body 原样作为 `Reply`
+- 若响应是 JSON 字符串，例如 `"done"`，会解码后作为 `Reply`
+- 若响应是 JSON 对象，优先读取 `reply`，其次读取 `message`
+- JSON 对象可选携带 `runId`、`sessionId`、`accepted`、`success`、`error`
 - **非 2xx**：视为投递失败，状态码和响应 body 记入错误信息
+
+推荐 Node webhook 直接返回结构化 JSON，例如：
+
+```json
+{
+  "reply": "line1\nline2",
+  "accepted": true
+}
+```
+
+只要业务端正常使用 JSON 解析，字符串中的 `\n` 会自动还原为真实换行；不要再对已经解析好的字符串做额外转义处理。
 
 ### 健康检查
 

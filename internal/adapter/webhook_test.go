@@ -80,6 +80,61 @@ func TestWebhookDeliverMessageSuccess(t *testing.T) {
 	}
 }
 
+func TestWebhookDeliverMessageRequestDecodesEscapedNewlines(t *testing.T) {
+	var received webhookPayload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	a, err := NewWebhookAdapter(WebhookConfig{NodeID: "node-1", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		From:    "peer-a",
+		Message: "line1\nline2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if received.Message != "line1\nline2" {
+		t.Fatalf("expected decoded newline message, got %q", received.Message)
+	}
+}
+
+func TestWebhookDeliverMessageJSONReplyDecodesEscapedNewlines(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"reply":"line1\nline2"}`))
+	}))
+	defer srv.Close()
+
+	a, err := NewWebhookAdapter(WebhookConfig{NodeID: "node-1", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		Message: "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Reply != "line1\nline2" {
+		t.Fatalf("reply = %q, want decoded multiline reply", result.Reply)
+	}
+}
+
 func TestWebhookDeliverMessageServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

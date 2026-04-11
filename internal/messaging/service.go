@@ -250,7 +250,7 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 	}
 
 	go func() {
-		_, err := handler.HandleMessage(IncomingMessage{
+		result, err := handler.HandleMessage(IncomingMessage{
 			MessageID:  env.ID,
 			Type:       env.Type,
 			AgentID:    env.AgentID,
@@ -268,6 +268,7 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 				logging.SessionKey(env.SessionKey),
 				logging.Error(err),
 			)
+			s.replyToSender(env, err.Error(), true)
 			return
 		}
 		s.log.Info("message delivered to agent",
@@ -276,7 +277,45 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 			logging.MessageID(env.ID),
 			logging.SessionKey(env.SessionKey),
 		)
+		if result.Reply != "" {
+			s.replyToSender(env, result.Reply, false)
+		}
 	}()
+}
+
+func (s *Service) replyToSender(orig protocol.MessageEnvelope, content string, isError bool) {
+	if orig.From == "" {
+		return
+	}
+	if strings.HasSuffix(orig.Type, ".response") || strings.HasSuffix(orig.Type, ".error") {
+		return
+	}
+	replyType := replyTypeFor(orig.Type, isError)
+	_, err := s.Publish(PublishRequest{
+		TargetNode: orig.From,
+		Type:       replyType,
+		SessionKey: orig.SessionKey,
+		Message:    content,
+	})
+	if err != nil {
+		s.log.Warn("send reply to sender failed",
+			logging.Event("message.reply.failed"),
+			logging.To(orig.From),
+			logging.MessageID(orig.ID),
+			logging.Error(err),
+		)
+	}
+}
+
+func replyTypeFor(msgType string, isError bool) string {
+	suffix := ".response"
+	if isError {
+		suffix = ".error"
+	}
+	if idx := strings.Index(msgType, "."); idx != -1 {
+		return msgType[:idx] + suffix
+	}
+	return "msg" + suffix
 }
 
 func (s *Service) messageHandler() MessageHandler {

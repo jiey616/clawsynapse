@@ -240,6 +240,19 @@ func TestParseCodexResultMultipleAgentMessagesTakesLast(t *testing.T) {
 	}
 }
 
+func TestParseCodexResultDecodesEscapedNewlines(t *testing.T) {
+	data := []byte(`{"type":"thread.started","thread_id":"t1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"line1\nline2"}}
+`)
+	result, err := parseCodexResult(data)
+	if err != nil {
+		t.Fatalf("parseCodexResult failed: %v", err)
+	}
+	if result.Reply != "line1\nline2" {
+		t.Fatalf("reply = %q, want decoded multiline text", result.Reply)
+	}
+}
+
 func TestParseCodexResultIgnoresNonAgentMessageItems(t *testing.T) {
 	data := []byte(`{"type":"thread.started","thread_id":"t1"}
 {"type":"item.completed","item":{"type":"reasoning","text":"thinking"}}

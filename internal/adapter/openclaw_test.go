@@ -181,6 +181,25 @@ func TestOpenClawAdapterGetStatus(t *testing.T) {
 	}
 }
 
+func TestParseOpenClawResultDecodesEscapedNewlines(t *testing.T) {
+	result, err := parseOpenClawResult([]byte(`{
+		"runId": "run-123",
+		"status": "ok",
+		"result": {
+			"payloads": [{"text": "line1\nline2"}]
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parseOpenClawResult failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("expected success")
+	}
+	if result.Reply != "line1\nline2" {
+		t.Fatalf("reply = %q, want decoded multiline text", result.Reply)
+	}
+}
+
 func TestFormatDeliverMessage(t *testing.T) {
 	got := formatDeliverMessage("node-1", DeliverMessageRequest{
 		From:    "node-2",
@@ -211,6 +230,17 @@ func TestFormatDeliverMessageWithSession(t *testing.T) {
 		SessionKey: "task-abc",
 	})
 	want := "[clawsynapse from=node-2 to=node-1 session=task-abc]\nhello world"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestFormatDeliverMessagePreservesMultilineBody(t *testing.T) {
+	got := formatDeliverMessage("node-1", DeliverMessageRequest{
+		From:    "node-2",
+		Message: "line1\nline2",
+	})
+	want := "[clawsynapse from=node-2 to=node-1]\nline1\nline2"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
