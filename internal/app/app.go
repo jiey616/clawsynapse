@@ -107,7 +107,11 @@ func New(cfg config.Config, version string) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)
 	}
-	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, 30*time.Second)
+	var handlerOpts []messaging.HandlerOption
+	if cfg.AgentAdapter == "webhook" {
+		handlerOpts = append(handlerOpts, messaging.WithFeedbackDelivery())
+	}
+	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, 30*time.Second, handlerOpts...)
 	messagingSvc.SetMessageHandler(adapterHandler)
 
 	transferSvc := transfer.NewService(
