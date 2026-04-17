@@ -221,6 +221,9 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("start messaging service: %w", err)
 	}
 	a.log.Info("messaging subscriptions ready")
+	if err := a.bus.FlushTimeout(3 * time.Second); err != nil {
+		a.log.Warn("nats not connected within timeout, transfer may be disabled", slog.String("error", err.Error()))
+	}
 	if err := a.transfer.Start(ctx); err != nil {
 		return fmt.Errorf("start transfer service: %w", err)
 	}

@@ -186,7 +186,7 @@ func (c *Client) JetStream() nats.JetStreamContext {
 func (c *Client) HasJetStream() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.js != nil
+	return c.js != nil && c.nc != nil && c.nc.IsConnected()
 }
 
 func (c *Client) Conn() *nats.Conn {
