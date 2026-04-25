@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -89,6 +90,10 @@ func (s *Service) Start(ctx context.Context) error {
 
 	_, err := s.ensureBucket(s.nodeID)
 	if err != nil {
+		if isJetStreamUnavailable(err) {
+			s.log.Warn("transfer service disabled: jetstream unavailable", slog.String("error", err.Error()))
+			return nil
+		}
 		return fmt.Errorf("ensure inbox bucket: %w", err)
 	}
 	s.log.Info("transfer inbox bucket ready", slog.String("bucket", bucketName(s.nodeID)))
@@ -479,4 +484,9 @@ func newTransferID() string {
 		return fmt.Sprintf("tf-%d", time.Now().UnixNano())
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func isJetStreamUnavailable(err error) bool {
+	return errors.Is(err, nats.ErrJetStreamNotEnabled) ||
+		errors.Is(err, nats.ErrNeeds262)
 }

@@ -964,6 +964,7 @@ func buildConfigFromFields(fields []configField) appconfig.Config {
 		HeartbeatInterval:   v("heartbeatInterval"),
 		AnnounceTTL:         v("announceTtl"),
 		TrustMode:           v("trustMode"),
+		TrustAutoApprove:    v("trustAutoApprove") == "true",
 		AgentAdapter:        v("agentAdapter"),
 		WebhookURL:          v("webhookUrl"),
 		DeliverablePrefixes: csv("deliverablePrefixes"),

@@ -22,30 +22,40 @@ import (
 )
 
 type Service struct {
-	mu       sync.Mutex
-	log      *slog.Logger
-	peers    *discovery.Registry
-	bus      *natsbus.Client
-	store    *store.FSStore
-	nodeID   string
-	identity *identity.Identity
-	state    store.TrustState
+	mu               sync.Mutex
+	log              *slog.Logger
+	peers            *discovery.Registry
+	bus              *natsbus.Client
+	store            *store.FSStore
+	nodeID           string
+	identity         *identity.Identity
+	trustAutoApprove bool
+	publishJSON      func(string, any) error
+	state            store.TrustState
 }
 
-func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, fs *store.FSStore, nodeID string, id *identity.Identity) (*Service, error) {
+func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, fs *store.FSStore, nodeID string, id *identity.Identity, trustAutoApprove bool) (*Service, error) {
 	st, err := fs.LoadTrustState()
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Service{
-		log:      log,
-		peers:    peers,
-		bus:      bus,
-		store:    fs,
-		nodeID:   nodeID,
-		identity: id,
-		state:    st,
+		log:              log,
+		peers:            peers,
+		bus:              bus,
+		store:            fs,
+		nodeID:           nodeID,
+		identity:         id,
+		trustAutoApprove: trustAutoApprove,
+		state:            st,
+	}
+	if bus != nil {
+		s.publishJSON = bus.PublishJSON
+	} else {
+		s.publishJSON = func(string, any) error {
+			return errors.New("nats client is closed")
+		}
 	}
 
 	s.syncPeerTrustStates()
@@ -101,7 +111,7 @@ func (s *Service) Request(_ context.Context, targetNode, reason string, capabili
 	}
 	req.Signature = s.signTrustRequest(req)
 
-	if err := s.bus.PublishJSON("clawsynapse.trust."+targetNode+".request", req); err != nil {
+	if err := s.publishJSON("clawsynapse.trust."+targetNode+".request", req); err != nil {
 		return "", err
 	}
 
@@ -155,7 +165,7 @@ func (s *Service) Revoke(targetNode, reason string) error {
 	}
 	rev.Signature = s.signTrustRevoke(rev)
 
-	if err := s.bus.PublishJSON("clawsynapse.trust."+targetNode+".revoke", rev); err != nil {
+	if err := s.publishJSON("clawsynapse.trust."+targetNode+".revoke", rev); err != nil {
 		return err
 	}
 
@@ -201,14 +211,34 @@ func (s *Service) handleTrustRequest(subject string, data []byte) {
 	}
 
 	now := time.Now().UnixMilli()
-	s.state.Pending = append(s.state.Pending, store.TrustPendingState{
+	pending := store.TrustPendingState{
 		RequestID:    req.RequestID,
 		From:         req.From,
 		To:           req.To,
 		Direction:    "inbound",
 		Reason:       req.Reason,
 		ReceivedAtMs: now,
-	})
+	}
+	s.state.Pending = append(s.state.Pending, pending)
+
+	if s.trustAutoApprove {
+		reason := "auto-approved trust request"
+		if err := s.applyTrustDecisionLocked(pending, "approve", reason, now); err != nil {
+			s.log.Warn("auto approve trust request failed", logging.Peer(req.From), logging.RequestID(req.RequestID), logging.Error(err))
+		} else {
+			if err := s.persistLocked(); err != nil {
+				s.log.Warn("persist auto approved trust failed", logging.Error(err))
+				return
+			}
+			s.log.Info("trust request auto approved",
+				logging.Event("trust.request.auto_approved"),
+				logging.Peer(req.From),
+				logging.RequestID(req.RequestID),
+			)
+			return
+		}
+	}
+
 	if err := s.persistLocked(); err != nil {
 		s.log.Warn("persist trust pending failed", logging.Error(err))
 		return
@@ -338,32 +368,8 @@ func (s *Service) respond(requestID, decision, reason string) error {
 	}
 
 	now := time.Now().UnixMilli()
-	resp := protocol.TrustResponse{
-		MessageID:   randID(),
-		MessageType: "trust.response",
-		From:        s.nodeID,
-		To:          pending.From,
-		RequestID:   requestID,
-		Decision:    decision,
-		Reason:      reason,
-		Ts:          now,
-	}
-	resp.Signature = s.signTrustResponse(resp)
-
-	if err := s.bus.PublishJSON("clawsynapse.trust."+pending.From+".response", resp); err != nil {
+	if err := s.applyTrustDecisionLocked(pending, decision, reason, now); err != nil {
 		return err
-	}
-
-	s.removePendingByRequestIDLocked(requestID)
-	if decision == "approve" {
-		s.upsertPeerStateLocked(&s.state.Trusted, pending.From, now, reason)
-		s.removeFromRejectedLocked(pending.From)
-		s.removeFromRevokedLocked(pending.From)
-		_ = s.peers.SetTrustStatus(pending.From, types.TrustTrusted)
-	} else {
-		s.upsertPeerStateLocked(&s.state.Rejected, pending.From, now, reason)
-		s.removeFromTrustedLocked(pending.From)
-		_ = s.peers.SetTrustStatus(pending.From, types.TrustRejected)
 	}
 	if err := s.persistLocked(); err != nil {
 		return err
@@ -374,6 +380,38 @@ func (s *Service) respond(requestID, decision, reason string) error {
 		logging.RequestID(requestID),
 		slog.String("decision", decision),
 	)
+	return nil
+}
+
+func (s *Service) applyTrustDecisionLocked(pending store.TrustPendingState, decision, reason string, now int64) error {
+	resp := protocol.TrustResponse{
+		MessageID:   randID(),
+		MessageType: "trust.response",
+		From:        s.nodeID,
+		To:          pending.From,
+		RequestID:   pending.RequestID,
+		Decision:    decision,
+		Reason:      reason,
+		Ts:          now,
+	}
+	resp.Signature = s.signTrustResponse(resp)
+
+	if err := s.publishJSON("clawsynapse.trust."+pending.From+".response", resp); err != nil {
+		return err
+	}
+
+	s.removePendingByRequestIDLocked(pending.RequestID)
+	if decision == "approve" {
+		s.upsertPeerStateLocked(&s.state.Trusted, pending.From, now, reason)
+		s.removeFromRejectedLocked(pending.From)
+		s.removeFromRevokedLocked(pending.From)
+		_ = s.peers.SetTrustStatus(pending.From, types.TrustTrusted)
+		return nil
+	}
+
+	s.upsertPeerStateLocked(&s.state.Rejected, pending.From, now, reason)
+	s.removeFromTrustedLocked(pending.From)
+	_ = s.peers.SetTrustStatus(pending.From, types.TrustRejected)
 	return nil
 }
 

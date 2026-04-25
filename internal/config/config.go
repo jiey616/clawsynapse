@@ -39,6 +39,7 @@ type Config struct {
 	HeartbeatInterval   string   `json:"heartbeatInterval"`
 	AnnounceTTL         string   `json:"announceTtl"`
 	TrustMode           string   `json:"trustMode"`
+	TrustAutoApprove    bool     `json:"trustAutoApprove"`
 	AgentAdapter        string   `json:"agentAdapter"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
@@ -123,6 +124,7 @@ type runtimeConfig struct {
 	Heartbeat           time.Duration
 	AnnounceTTL         time.Duration
 	TrustMode           string
+	TrustAutoApprove    bool
 	AgentAdapter        string
 	WebhookURL          string
 	LogFilePath         string
@@ -149,6 +151,8 @@ type configValues struct {
 	Heartbeat           time.Duration
 	AnnounceTTL         time.Duration
 	TrustMode           string
+	TrustAutoApprove    bool
+	TrustAutoApproveSet bool
 	AgentAdapter        string
 	WebhookURL          string
 	LogFilePath         string
@@ -178,6 +182,7 @@ func (c Config) Runtime() runtimeConfig {
 		Heartbeat:           h,
 		AnnounceTTL:         t,
 		TrustMode:           c.TrustMode,
+		TrustAutoApprove:    c.TrustAutoApprove,
 		AgentAdapter:        c.AgentAdapter,
 		WebhookURL:          c.WebhookURL,
 		LogFilePath:         c.LogFilePath,
@@ -228,6 +233,7 @@ func LoadFromOS(args []string) (Config, error) {
 		heartbeat           = fs.Duration("heartbeat", merged.Heartbeat, "announce heartbeat interval")
 		announceTTL         = fs.Duration("announce-ttl", merged.AnnounceTTL, "announce ttl")
 		trustMode           = fs.String("trust-mode", merged.TrustMode, "trust mode: open|tofu|explicit")
+		trustAutoApprove    = fs.Bool("trust-auto-approve", merged.TrustAutoApprove, "automatically approve valid inbound trust requests")
 		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|webhook")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
@@ -321,6 +327,7 @@ func LoadFromOS(args []string) (Config, error) {
 		HeartbeatInterval:   heartbeat.String(),
 		AnnounceTTL:         announceTTL.String(),
 		TrustMode:           mode,
+		TrustAutoApprove:    *trustAutoApprove,
 		AgentAdapter:        adapterName,
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
@@ -351,6 +358,8 @@ func defaultConfigValues(defaultDataDir string) configValues {
 		Heartbeat:           defaultHeartbeatInterval,
 		AnnounceTTL:         defaultAnnounceTTL,
 		TrustMode:           defaultTrustMode,
+		TrustAutoApprove:    false,
+		TrustAutoApproveSet: true,
 		AgentAdapter:        defaultAgentAdapter,
 		LogRotateMaxSizeMB:  defaultLogRotateMaxSizeMB,
 		LogRotateMaxBackups: defaultLogRotateMaxBackups,
@@ -388,6 +397,10 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.TrustMode) != "" {
 		base.TrustMode = strings.TrimSpace(override.TrustMode)
+	}
+	if override.TrustAutoApproveSet {
+		base.TrustAutoApprove = override.TrustAutoApprove
+		base.TrustAutoApproveSet = true
 	}
 	if strings.TrimSpace(override.AgentAdapter) != "" {
 		base.AgentAdapter = strings.TrimSpace(override.AgentAdapter)

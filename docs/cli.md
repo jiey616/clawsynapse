@@ -77,7 +77,8 @@ go run ./cmd/clawsynapse init
 go run ./cmd/clawsynapse init \
   --overwrite \
   --nats-servers nats://127.0.0.1:4222 \
-  --agent-adapter openclaw
+  --agent-adapter openclaw \
+  --trust-auto-approve=false
 ```
 
 常见用途：
@@ -90,6 +91,7 @@ go run ./cmd/clawsynapse init \
 
 - `nodeId` 不在配置中手工设置
 - daemon 会从本地 Ed25519 公钥自动派生 `did:key` 和 `nodeId`
+- `--trust-auto-approve=true` 会自动批准签名校验通过的 inbound trust request，仅建议在受控网络使用
 
 配置写入后，使用 service 子命令应用变更：
 

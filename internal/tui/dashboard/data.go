@@ -275,6 +275,7 @@ func initConfigFields() []configField {
 		{Label: "Heartbeat Interval", Key: "heartbeatInterval", Group: "Network", Kind: cfkText},
 		{Label: "Announce TTL", Key: "announceTtl", Group: "Network", Kind: cfkText},
 		{Label: "Trust Mode", Key: "trustMode", Group: "Security", Kind: cfkEnum, Enums: []string{"open", "tofu", "explicit"}},
+		{Label: "Trust Auto Approve", Key: "trustAutoApprove", Group: "Security", Kind: cfkBool},
 		{Label: "Agent Adapter", Key: "agentAdapter", Group: "Agent", Kind: cfkEnum, Enums: []string{"default", "openclaw", "opencode", "webhook"}},
 		{Label: "Webhook URL", Key: "webhookUrl", Group: "Agent", Kind: cfkText},
 		{Label: "Deliverable Prefixes", Key: "deliverablePrefixes", Group: "Agent", Kind: cfkStringSlice},

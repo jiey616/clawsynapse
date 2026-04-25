@@ -358,6 +358,19 @@ clawsynapse.trust.<targetNodeId>.revoke
 5. 若 approve，则双方状态进入 `trusted`
 6. 若 reject，则本地记录为 `rejected`，并向发起方返回拒绝原因
 
+当前实现提供一个有限的自动批准开关：
+
+```yaml
+trustAutoApprove: true
+```
+
+开启后，本节点收到任意签名校验通过的 inbound `trust.request` 都会立即返回
+`trust.response(approve)`，并将对端写入本地 `trusted`。发起方收到 approve
+响应后也会将本节点写入 `trusted`，从而形成自动互相信任。
+
+该模式适合受控网络内的自动组网。生产或跨网络部署应保持默认关闭，并继续由操作者执行
+approve / reject。
+
 ### mutual trust
 
 若 Node A 与 Node B 独立地都向对方发起 trust request，则可触发自动互认：

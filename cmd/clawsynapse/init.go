@@ -30,6 +30,7 @@ type initConfig struct {
 	NATSServers         string
 	LocalAPIAddr        string
 	TrustMode           string
+	TrustAutoApprove    bool
 	AgentAdapter        string
 	WebhookURL          string
 	DeliverablePrefixes string
@@ -107,6 +108,7 @@ func parseInitArgs(args []string, stderr io.Writer) (initConfig, error) {
 	fs.StringVar(&cfg.NATSServers, "nats-servers", cfg.NATSServers, "comma-separated NATS servers")
 	fs.StringVar(&cfg.LocalAPIAddr, "local-api-addr", cfg.LocalAPIAddr, "local API address")
 	fs.StringVar(&cfg.TrustMode, "trust-mode", cfg.TrustMode, "trust mode: open|tofu|explicit")
+	fs.BoolVar(&cfg.TrustAutoApprove, "trust-auto-approve", false, "automatically approve valid inbound trust requests")
 	fs.StringVar(&cfg.AgentAdapter, "agent-adapter", cfg.AgentAdapter, "agent adapter: default|openclaw|webhook")
 	fs.StringVar(&cfg.WebhookURL, "webhook-url", cfg.WebhookURL, "webhook URL when using webhook adapter")
 	fs.StringVar(&cfg.DeliverablePrefixes, "deliverable-prefixes", cfg.DeliverablePrefixes, "comma-separated deliverable prefixes")
@@ -319,6 +321,7 @@ func renderInitConfig(cfg initConfig) string {
 	}
 	fmt.Fprintf(&b, "localApiAddr: %s\n", cfg.LocalAPIAddr)
 	fmt.Fprintf(&b, "trustMode: %s\n", cfg.TrustMode)
+	fmt.Fprintf(&b, "trustAutoApprove: %t\n", cfg.TrustAutoApprove)
 	fmt.Fprintf(&b, "agentAdapter: %s\n", cfg.AgentAdapter)
 	if cfg.WebhookURL != "" {
 		fmt.Fprintf(&b, "webhookUrl: %s\n", cfg.WebhookURL)

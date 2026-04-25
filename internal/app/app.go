@@ -98,7 +98,7 @@ func New(cfg config.Config, version string) (*App, error) {
 	discoverySvc := discovery.NewService(log.With(slog.String("component", "discovery")), bus, peers, fs, nodeID, nodeDID, base64.RawURLEncoding.EncodeToString(id.PublicKey), hb, ttl, cfg.TrustMode)
 	authSvc := auth.NewService(log.With(slog.String("component", "auth")), peers, bus, nodeID, id, replay, cfg.TrustMode)
 	discoverySvc.SetAutoAuthenticator(authSvc.StartChallenge)
-	trustSvc, err := trust.NewService(log.With(slog.String("component", "trust")), peers, bus, fs, nodeID, id)
+	trustSvc, err := trust.NewService(log.With(slog.String("component", "trust")), peers, bus, fs, nodeID, id, cfg.TrustAutoApprove)
 	if err != nil {
 		return nil, fmt.Errorf("init trust service: %w", err)
 	}
@@ -221,6 +221,9 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("start messaging service: %w", err)
 	}
 	a.log.Info("messaging subscriptions ready")
+	if err := a.bus.FlushTimeout(3 * time.Second); err != nil {
+		a.log.Warn("nats not connected within timeout, transfer may be disabled", slog.String("error", err.Error()))
+	}
 	if err := a.transfer.Start(ctx); err != nil {
 		return fmt.Errorf("start transfer service: %w", err)
 	}

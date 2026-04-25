@@ -20,7 +20,7 @@ func TestLoadFromOSReadsHomeConfig(t *testing.T) {
 	}
 
 	configPath := filepath.Join(configDir, "config.yaml")
-	content := []byte("natsServers:\n  - nats://10.0.0.1:4222\nlocalApiAddr: 127.0.0.1:19090\ntrustMode: explicit\nheartbeatInterval: 20s\nannounceTtl: 45s\n")
+	content := []byte("natsServers:\n  - nats://10.0.0.1:4222\nlocalApiAddr: 127.0.0.1:19090\ntrustMode: explicit\ntrustAutoApprove: true\nheartbeatInterval: 20s\nannounceTtl: 45s\n")
 	if err := os.WriteFile(configPath, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,9 @@ func TestLoadFromOSReadsHomeConfig(t *testing.T) {
 	}
 	if cfg.TrustMode != "explicit" {
 		t.Fatalf("expected trust mode explicit, got %q", cfg.TrustMode)
+	}
+	if !cfg.TrustAutoApprove {
+		t.Fatal("expected trust auto approve true")
 	}
 	if cfg.HeartbeatInterval != "20s" {
 		t.Fatalf("expected heartbeat 20s, got %q", cfg.HeartbeatInterval)
@@ -70,7 +73,7 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\nLOG_FILE_PATH=./runtime/clawsynapsed.log\nLOG_ROTATE_MAX_SIZE_MB=64\nLOG_ROTATE_MAX_BACKUPS=5\nLOG_ROTATE_MAX_AGE_DAYS=14\nLOG_ROTATE_COMPRESS=true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nTRUST_AUTO_APPROVE=true\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\nLOG_FILE_PATH=./runtime/clawsynapsed.log\nLOG_ROTATE_MAX_SIZE_MB=64\nLOG_ROTATE_MAX_BACKUPS=5\nLOG_ROTATE_MAX_AGE_DAYS=14\nLOG_ROTATE_COMPRESS=true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,6 +95,9 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 
 	if cfg.TrustMode != "explicit" {
 		t.Fatalf("expected flag trust mode, got %q", cfg.TrustMode)
+	}
+	if !cfg.TrustAutoApprove {
+		t.Fatal("expected dotenv trust auto approve true")
 	}
 	if cfg.LocalAPIAddr != "127.0.0.1:28080" {
 		t.Fatalf("expected os env api addr, got %q", cfg.LocalAPIAddr)
@@ -154,6 +160,42 @@ func TestLoadFromOSUsesExplicitConfigPath(t *testing.T) {
 	}
 }
 
+func TestLoadFromOSCanDisableTrustAutoApproveFromEnvAndFlag(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	clearConfigEnv(t)
+	chdirTempProject(t, project)
+
+	configDir := filepath.Join(home, ".clawsynapse")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
+	content := []byte("natsServers:\n  - nats://10.0.0.1:4222\ntrustAutoApprove: true\n")
+	if err := os.WriteFile(configPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TRUST_AUTO_APPROVE", "false")
+	cfg, err := LoadFromOS(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TrustAutoApprove {
+		t.Fatal("expected env to disable trust auto approve")
+	}
+
+	t.Setenv("TRUST_AUTO_APPROVE", "true")
+	cfg, err = LoadFromOS([]string{"--trust-auto-approve=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TrustAutoApprove {
+		t.Fatal("expected flag to disable trust auto approve")
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
@@ -165,6 +207,7 @@ func clearConfigEnv(t *testing.T) {
 		"HEARTBEAT_INTERVAL_MS",
 		"ANNOUNCE_TTL_MS",
 		"TRUST_MODE",
+		"TRUST_AUTO_APPROVE",
 		"AGENT_ADAPTER",
 		"LOG_LEVEL",
 		"LOG_FORMAT",
@@ -250,6 +293,7 @@ func TestSaveToFileAndReadBack(t *testing.T) {
 		NATSServers:         []string{"nats://10.0.0.1:4222", "nats://10.0.0.2:4222"},
 		LocalAPIAddr:        "127.0.0.1:19090",
 		TrustMode:           "explicit",
+		TrustAutoApprove:    true,
 		AgentAdapter:        "openclaw",
 		LogLevel:            "debug",
 		LogFormat:           "text",
@@ -278,6 +322,9 @@ func TestSaveToFileAndReadBack(t *testing.T) {
 	}
 	if loaded.TrustMode != "explicit" {
 		t.Fatalf("expected trust mode explicit, got %q", loaded.TrustMode)
+	}
+	if !loaded.TrustAutoApprove {
+		t.Fatal("expected trust auto approve true")
 	}
 	if loaded.LogLevel != "debug" {
 		t.Fatalf("expected log level debug, got %q", loaded.LogLevel)

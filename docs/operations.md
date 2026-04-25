@@ -69,6 +69,7 @@ natsServers:
   - nats://127.0.0.1:4222
 localApiAddr: 127.0.0.1:18080
 trustMode: tofu
+trustAutoApprove: false
 heartbeatInterval: 15s
 announceTtl: 30s
 dataDir: ~/.clawsynapse
@@ -90,6 +91,7 @@ NATS_SERVERS=nats://127.0.0.1:4222
 HEARTBEAT_INTERVAL_MS=15000
 ANNOUNCE_TTL_MS=30000
 TRUST_MODE=tofu
+TRUST_AUTO_APPROVE=false
 DATA_DIR=~/.clawsynapse
 IDENTITY_KEY_PATH=~/.clawsynapse/identity.key
 IDENTITY_PUB_PATH=~/.clawsynapse/identity.pub
