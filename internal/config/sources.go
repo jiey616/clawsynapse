@@ -20,6 +20,7 @@ type fileConfig struct {
 	HeartbeatInterval   string   `yaml:"heartbeatInterval"`
 	AnnounceTTL         string   `yaml:"announceTtl"`
 	TrustMode           string   `yaml:"trustMode"`
+	TrustAutoApprove    *bool    `yaml:"trustAutoApprove"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	WebhookURL          string   `yaml:"webhookUrl"`
 	LogFilePath         string   `yaml:"logFilePath"`
@@ -38,6 +39,7 @@ type fileConfig struct {
 
 func toFileConfig(cfg Config) fileConfig {
 	las := cfg.LogAddSource
+	taa := cfg.TrustAutoApprove
 	mfs := cfg.TransferMaxFileSize
 	return fileConfig{
 		NATSServers:         cfg.NATSServers,
@@ -48,6 +50,7 @@ func toFileConfig(cfg Config) fileConfig {
 		HeartbeatInterval:   cfg.HeartbeatInterval,
 		AnnounceTTL:         cfg.AnnounceTTL,
 		TrustMode:           cfg.TrustMode,
+		TrustAutoApprove:    &taa,
 		AgentAdapter:        cfg.AgentAdapter,
 		WebhookURL:          cfg.WebhookURL,
 		LogFilePath:         cfg.LogFilePath,
@@ -114,6 +117,10 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 	if cfg.LogAddSource != nil {
 		values.LogAddSource = *cfg.LogAddSource
 	}
+	if cfg.TrustAutoApprove != nil {
+		values.TrustAutoApprove = *cfg.TrustAutoApprove
+		values.TrustAutoApproveSet = true
+	}
 
 	if cfg.HeartbeatInterval != "" {
 		values.Heartbeat = parseDurationValue(cfg.HeartbeatInterval, 0)
@@ -179,7 +186,8 @@ func loadOSEnvValues() configValues {
 }
 
 func loadValuesFromMap(values map[string]string) configValues {
-	return configValues{
+	trustAutoApproveRaw := strings.TrimSpace(values["TRUST_AUTO_APPROVE"])
+	cfg := configValues{
 		NATSServers:         splitCSV(values["NATS_SERVERS"]),
 		LocalAPIAddr:        strings.TrimSpace(values["LOCAL_API_ADDR"]),
 		DataDir:             strings.TrimSpace(values["DATA_DIR"]),
@@ -203,6 +211,11 @@ func loadValuesFromMap(values map[string]string) configValues {
 		LogFormat:           strings.TrimSpace(values["LOG_FORMAT"]),
 		LogAddSource:        parseBoolValue(values["LOG_ADD_SOURCE"]),
 	}
+	if trustAutoApproveRaw != "" {
+		cfg.TrustAutoApprove = parseBoolValue(trustAutoApproveRaw)
+		cfg.TrustAutoApproveSet = true
+	}
+	return cfg
 }
 
 func parseDurationValue(v string, fallback time.Duration) time.Duration {
