@@ -22,6 +22,7 @@ type fileConfig struct {
 	TrustMode           string   `yaml:"trustMode"`
 	TrustAutoApprove    *bool    `yaml:"trustAutoApprove"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
+	AgentAdapterTimeout string   `yaml:"agentAdapterTimeout"`
 	WebhookURL          string   `yaml:"webhookUrl"`
 	LogFilePath         string   `yaml:"logFilePath"`
 	LogRotateMaxSizeMB  *int     `yaml:"logRotateMaxSizeMb"`
@@ -52,6 +53,7 @@ func toFileConfig(cfg Config) fileConfig {
 		TrustMode:           cfg.TrustMode,
 		TrustAutoApprove:    &taa,
 		AgentAdapter:        cfg.AgentAdapter,
+		AgentAdapterTimeout: cfg.AgentAdapterTimeout,
 		WebhookURL:          cfg.WebhookURL,
 		LogFilePath:         cfg.LogFilePath,
 		LogRotateMaxSizeMB:  &cfg.LogRotateMaxSizeMB,
@@ -95,6 +97,7 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		IdentityPubPath:     strings.TrimSpace(cfg.IdentityPubPath),
 		TrustMode:           strings.TrimSpace(cfg.TrustMode),
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
+		AgentAdapterTimeout: parseDurationValue(cfg.AgentAdapterTimeout, 0),
 		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
 		LogFilePath:         strings.TrimSpace(cfg.LogFilePath),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
@@ -197,6 +200,7 @@ func loadValuesFromMap(values map[string]string) configValues {
 		AnnounceTTL:         parseDurationValue(values["ANNOUNCE_TTL_MS"], 0),
 		TrustMode:           strings.TrimSpace(values["TRUST_MODE"]),
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
+		AgentAdapterTimeout: parseDurationValue(values["AGENT_ADAPTER_TIMEOUT"], 0),
 		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
 		LogFilePath:         strings.TrimSpace(values["LOG_FILE_PATH"]),
 		LogRotateMaxSizeMB:  int(parseIntValue(values["LOG_ROTATE_MAX_SIZE_MB"])),
@@ -224,11 +228,7 @@ func parseDurationValue(v string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 
-	if strings.HasSuffix(v, "ms") || strings.HasSuffix(v, "s") || strings.HasSuffix(v, "m") {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fallback
-		}
+	if d, err := time.ParseDuration(v); err == nil {
 		return d
 	}
 

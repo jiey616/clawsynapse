@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -16,6 +17,7 @@ const (
 	initDefaultLocalAPIAddr        = "127.0.0.1:18080"
 	initDefaultTrustMode           = "tofu"
 	initDefaultAgentAdapter        = "default"
+	initDefaultAgentAdapterTimeout = "10m"
 	initDefaultDeliverablePrefixes = "chat,task"
 	initDefaultHeartbeat           = "15s"
 	initDefaultAnnounceTTL         = "30s"
@@ -32,6 +34,7 @@ type initConfig struct {
 	TrustMode           string
 	TrustAutoApprove    bool
 	AgentAdapter        string
+	AgentAdapterTimeout string
 	WebhookURL          string
 	DeliverablePrefixes string
 	DataDir             string
@@ -92,6 +95,7 @@ func parseInitArgs(args []string, stderr io.Writer) (initConfig, error) {
 		LocalAPIAddr:        initDefaultLocalAPIAddr,
 		TrustMode:           initDefaultTrustMode,
 		AgentAdapter:        initDefaultAgentAdapter,
+		AgentAdapterTimeout: initDefaultAgentAdapterTimeout,
 		DeliverablePrefixes: initDefaultDeliverablePrefixes,
 		DataDir:             defaultDataDir,
 		HeartbeatInterval:   initDefaultHeartbeat,
@@ -110,6 +114,7 @@ func parseInitArgs(args []string, stderr io.Writer) (initConfig, error) {
 	fs.StringVar(&cfg.TrustMode, "trust-mode", cfg.TrustMode, "trust mode: open|tofu|explicit")
 	fs.BoolVar(&cfg.TrustAutoApprove, "trust-auto-approve", false, "automatically approve valid inbound trust requests")
 	fs.StringVar(&cfg.AgentAdapter, "agent-adapter", cfg.AgentAdapter, "agent adapter: default|openclaw|webhook")
+	fs.StringVar(&cfg.AgentAdapterTimeout, "agent-adapter-timeout", cfg.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
 	fs.StringVar(&cfg.WebhookURL, "webhook-url", cfg.WebhookURL, "webhook URL when using webhook adapter")
 	fs.StringVar(&cfg.DeliverablePrefixes, "deliverable-prefixes", cfg.DeliverablePrefixes, "comma-separated deliverable prefixes")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "state directory")
@@ -186,6 +191,7 @@ func finalizeInitConfig(cfg *initConfig) error {
 	cfg.LocalAPIAddr = strings.TrimSpace(cfg.LocalAPIAddr)
 	cfg.TrustMode = strings.ToLower(strings.TrimSpace(cfg.TrustMode))
 	cfg.AgentAdapter = strings.ToLower(strings.TrimSpace(cfg.AgentAdapter))
+	cfg.AgentAdapterTimeout = strings.TrimSpace(cfg.AgentAdapterTimeout)
 	cfg.WebhookURL = strings.TrimSpace(cfg.WebhookURL)
 	cfg.DeliverablePrefixes = strings.TrimSpace(cfg.DeliverablePrefixes)
 	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
@@ -208,6 +214,12 @@ func finalizeInitConfig(cfg *initConfig) error {
 	}
 	if cfg.DataDir == "" {
 		return errors.New("data directory is required")
+	}
+	if cfg.AgentAdapterTimeout == "" {
+		cfg.AgentAdapterTimeout = initDefaultAgentAdapterTimeout
+	}
+	if d, err := time.ParseDuration(cfg.AgentAdapterTimeout); err != nil || d <= 0 {
+		return fmt.Errorf("invalid agent adapter timeout: %s", cfg.AgentAdapterTimeout)
 	}
 	if !cfg.transferDirExplicit || cfg.TransferDir == "" {
 		cfg.TransferDir = filepath.Join(cfg.DataDir, "transfers")
@@ -323,6 +335,7 @@ func renderInitConfig(cfg initConfig) string {
 	fmt.Fprintf(&b, "trustMode: %s\n", cfg.TrustMode)
 	fmt.Fprintf(&b, "trustAutoApprove: %t\n", cfg.TrustAutoApprove)
 	fmt.Fprintf(&b, "agentAdapter: %s\n", cfg.AgentAdapter)
+	fmt.Fprintf(&b, "agentAdapterTimeout: %s\n", cfg.AgentAdapterTimeout)
 	if cfg.WebhookURL != "" {
 		fmt.Fprintf(&b, "webhookUrl: %s\n", cfg.WebhookURL)
 	}

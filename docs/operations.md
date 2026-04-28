@@ -70,6 +70,8 @@ natsServers:
 localApiAddr: 127.0.0.1:18080
 trustMode: tofu
 trustAutoApprove: false
+agentAdapter: default
+agentAdapterTimeout: 10m
 heartbeatInterval: 15s
 announceTtl: 30s
 dataDir: ~/.clawsynapse
@@ -92,6 +94,8 @@ HEARTBEAT_INTERVAL_MS=15000
 ANNOUNCE_TTL_MS=30000
 TRUST_MODE=tofu
 TRUST_AUTO_APPROVE=false
+AGENT_ADAPTER=default
+AGENT_ADAPTER_TIMEOUT=10m
 DATA_DIR=~/.clawsynapse
 IDENTITY_KEY_PATH=~/.clawsynapse/identity.key
 IDENTITY_PUB_PATH=~/.clawsynapse/identity.pub

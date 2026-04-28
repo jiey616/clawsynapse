@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"clawsynapse/internal/adapter"
@@ -107,11 +108,15 @@ func New(cfg config.Config, version string) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)
 	}
+	agentAdapterTimeout, err := resolveAgentAdapterTimeout(cfg)
+	if err != nil {
+		return nil, err
+	}
 	var handlerOpts []messaging.HandlerOption
 	if cfg.AgentAdapter == "webhook" {
 		handlerOpts = append(handlerOpts, messaging.WithFeedbackDelivery())
 	}
-	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, 30*time.Second, handlerOpts...)
+	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, agentAdapterTimeout, handlerOpts...)
 	messagingSvc.SetMessageHandler(adapterHandler)
 
 	transferSvc := transfer.NewService(
@@ -200,6 +205,18 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 	default:
 		return nil, fmt.Errorf("unsupported agent adapter: %s", cfg.AgentAdapter)
 	}
+}
+
+func resolveAgentAdapterTimeout(cfg config.Config) (time.Duration, error) {
+	timeout := strings.TrimSpace(cfg.AgentAdapterTimeout)
+	if timeout == "" {
+		return 10 * time.Minute, nil
+	}
+	d, err := time.ParseDuration(timeout)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("parse agent adapter timeout: %s", timeout)
+	}
+	return d, nil
 }
 
 func (a *App) Run(ctx context.Context) error {

@@ -236,6 +236,9 @@ func defaultExecCmd(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "openclaw", args...)
 	out, err := cmd.Output()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("openclaw command canceled: %w", ctxErr)
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			stderr := strings.TrimSpace(string(exitErr.Stderr))

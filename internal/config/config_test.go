@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadFromOSReadsHomeConfig(t *testing.T) {
@@ -54,6 +55,9 @@ func TestLoadFromOSReadsHomeConfig(t *testing.T) {
 	if cfg.AgentAdapter != "default" {
 		t.Fatalf("expected default agent adapter, got %q", cfg.AgentAdapter)
 	}
+	if cfg.AgentAdapterTimeout != "10m0s" {
+		t.Fatalf("expected default agent adapter timeout 10m0s, got %q", cfg.AgentAdapterTimeout)
+	}
 }
 
 func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
@@ -73,7 +77,7 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nTRUST_AUTO_APPROVE=true\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\nLOG_FILE_PATH=./runtime/clawsynapsed.log\nLOG_ROTATE_MAX_SIZE_MB=64\nLOG_ROTATE_MAX_BACKUPS=5\nLOG_ROTATE_MAX_AGE_DAYS=14\nLOG_ROTATE_COMPRESS=true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TRUST_MODE=open\nTRUST_AUTO_APPROVE=true\nNATS_SERVERS=nats://10.0.0.2:4222\nAGENT_ADAPTER=openclaw\nAGENT_ADAPTER_TIMEOUT=15m\nLOG_LEVEL=debug\nLOG_FORMAT=text\nLOG_ADD_SOURCE=true\nLOG_FILE_PATH=./runtime/clawsynapsed.log\nLOG_ROTATE_MAX_SIZE_MB=64\nLOG_ROTATE_MAX_BACKUPS=5\nLOG_ROTATE_MAX_AGE_DAYS=14\nLOG_ROTATE_COMPRESS=true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -134,6 +138,9 @@ func TestLoadFromOSMergesDotEnvEnvAndFlags(t *testing.T) {
 	}
 	if cfg.AgentAdapter != "openclaw" {
 		t.Fatalf("expected dotenv agent adapter openclaw, got %q", cfg.AgentAdapter)
+	}
+	if cfg.AgentAdapterTimeout != "15m0s" {
+		t.Fatalf("expected dotenv agent adapter timeout 15m0s, got %q", cfg.AgentAdapterTimeout)
 	}
 }
 
@@ -209,6 +216,7 @@ func clearConfigEnv(t *testing.T) {
 		"TRUST_MODE",
 		"TRUST_AUTO_APPROVE",
 		"AGENT_ADAPTER",
+		"AGENT_ADAPTER_TIMEOUT",
 		"LOG_LEVEL",
 		"LOG_FORMAT",
 		"LOG_ADD_SOURCE",
@@ -270,6 +278,23 @@ func TestValidateRejectsInvalidAdapter(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidAgentAdapterTimeout(t *testing.T) {
+	cfg := Config{
+		NATSServers:         []string{"nats://127.0.0.1:4222"},
+		TrustMode:           "tofu",
+		AgentAdapter:        "default",
+		AgentAdapterTimeout: "0s",
+		LogLevel:            "info",
+		LogFormat:           "json",
+		LogRotateMaxSizeMB:  10,
+		LogRotateMaxBackups: 3,
+		LogRotateMaxAgeDays: 7,
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("expected error for invalid agent adapter timeout")
+	}
+}
+
 func TestValidateRejectsEmptyNATS(t *testing.T) {
 	cfg := Config{
 		TrustMode:           "tofu",
@@ -295,6 +320,7 @@ func TestSaveToFileAndReadBack(t *testing.T) {
 		TrustMode:           "explicit",
 		TrustAutoApprove:    true,
 		AgentAdapter:        "openclaw",
+		AgentAdapterTimeout: "20m",
 		LogLevel:            "debug",
 		LogFormat:           "text",
 		LogFilePath:         filepath.Join(dir, "clawsynapsed.log"),
@@ -328,6 +354,9 @@ func TestSaveToFileAndReadBack(t *testing.T) {
 	}
 	if loaded.LogLevel != "debug" {
 		t.Fatalf("expected log level debug, got %q", loaded.LogLevel)
+	}
+	if loaded.AgentAdapterTimeout != 20*time.Minute {
+		t.Fatalf("expected agent adapter timeout 20m, got %s", loaded.AgentAdapterTimeout)
 	}
 	if !loaded.LogAddSource {
 		t.Fatal("expected log add source true")
