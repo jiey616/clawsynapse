@@ -35,6 +35,9 @@ func TestRunInitWritesConfigFromFlags(t *testing.T) {
 	if !strings.Contains(text, "webhookUrl: http://127.0.0.1:8080/hook\n") {
 		t.Fatalf("expected webhookUrl in config, got:\n%s", text)
 	}
+	if !strings.Contains(text, "agentAdapterTimeout: 10m\n") {
+		t.Fatalf("expected agentAdapterTimeout in config, got:\n%s", text)
+	}
 	if !strings.Contains(text, "  - todo\n") {
 		t.Fatalf("expected deliverable prefixes list, got:\n%s", text)
 	}

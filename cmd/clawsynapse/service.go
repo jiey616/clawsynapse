@@ -71,7 +71,7 @@ func runServiceWithRunner(args []string, stdout, stderr io.Writer, runner servic
 	}
 
 	ctx := context.Background()
-	spec, err := buildServiceSpec(ctx, runner, action)
+	spec, err := buildServiceSpec(action)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ type serviceSpec struct {
 	success  string
 }
 
-func buildServiceSpec(ctx context.Context, runner serviceRunner, action string) (serviceSpec, error) {
+func buildServiceSpec(action string) (serviceSpec, error) {
 	switch serviceGOOS {
 	case "linux":
 		return buildSystemdSpec(action), nil

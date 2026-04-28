@@ -105,6 +105,7 @@ Webhook Adapter 收到的 JSON 示例：
 | `WebhookAdapter` | `webhook` | 通过 HTTP POST 将消息 JSON 转发到外部 URL |
 
 通过环境变量 `AGENT_ADAPTER` 或命令行 `--agent-adapter` 选择适配器。
+消息投递超时默认是 10 分钟，可通过 `AGENT_ADAPTER_TIMEOUT`、`--agent-adapter-timeout` 或 YAML 中的 `agentAdapterTimeout` 覆盖。
 
 ---
 
@@ -212,6 +213,7 @@ YAML 配置文件（`~/.clawsynapse/config.yaml`）：
 
 ```yaml
 agentAdapter: webhook
+agentAdapterTimeout: 10m
 webhookUrl: https://example.com/hooks/clawsynapse
 ```
 

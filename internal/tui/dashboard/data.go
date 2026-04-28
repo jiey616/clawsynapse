@@ -277,6 +277,7 @@ func initConfigFields() []configField {
 		{Label: "Trust Mode", Key: "trustMode", Group: "Security", Kind: cfkEnum, Enums: []string{"open", "tofu", "explicit"}},
 		{Label: "Trust Auto Approve", Key: "trustAutoApprove", Group: "Security", Kind: cfkBool},
 		{Label: "Agent Adapter", Key: "agentAdapter", Group: "Agent", Kind: cfkEnum, Enums: []string{"default", "openclaw", "opencode", "webhook"}},
+		{Label: "Agent Adapter Timeout", Key: "agentAdapterTimeout", Group: "Agent", Kind: cfkText},
 		{Label: "Webhook URL", Key: "webhookUrl", Group: "Agent", Kind: cfkText},
 		{Label: "Deliverable Prefixes", Key: "deliverablePrefixes", Group: "Agent", Kind: cfkStringSlice},
 		{Label: "Data Dir", Key: "dataDir", Group: "Storage", Kind: cfkText},

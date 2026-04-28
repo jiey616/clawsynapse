@@ -487,7 +487,7 @@ func (m model) selectedMessageLines() []string {
 	return lines
 }
 
-func (m model) logsView(width, height int) string {
+func (m model) logsView(_ int, height int) string {
 	lo := m.layout
 	leftWidth := lo.logsLeftW
 	rightWidth := lo.logsRightW
@@ -896,13 +896,14 @@ func (m model) handleConfigEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case " ":
-		if f.Kind == cfkBool {
+		switch f.Kind {
+		case cfkBool:
 			if f.EditBuf == "true" {
 				f.EditBuf = "false"
 			} else {
 				f.EditBuf = "true"
 			}
-		} else if f.Kind == cfkText || f.Kind == cfkStringSlice {
+		case cfkText, cfkStringSlice:
 			f.EditBuf += " "
 		}
 		return m, nil
@@ -966,6 +967,7 @@ func buildConfigFromFields(fields []configField) appconfig.Config {
 		TrustMode:           v("trustMode"),
 		TrustAutoApprove:    v("trustAutoApprove") == "true",
 		AgentAdapter:        v("agentAdapter"),
+		AgentAdapterTimeout: v("agentAdapterTimeout"),
 		WebhookURL:          v("webhookUrl"),
 		DeliverablePrefixes: csv("deliverablePrefixes"),
 		TransferDir:         v("transferDir"),

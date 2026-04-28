@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,6 +180,26 @@ func TestOpenClawAdapterGetStatus(t *testing.T) {
 	}
 	if !status.Healthy {
 		t.Fatal("expected healthy")
+	}
+}
+
+func TestDefaultOpenClawExecCmdReportsContextTimeout(t *testing.T) {
+	dir := t.TempDir()
+	openclawPath := filepath.Join(dir, "openclaw")
+	if err := os.WriteFile(openclawPath, []byte("#!/bin/sh\nsleep 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := defaultExecCmd(ctx, "--version")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "openclaw command canceled: context deadline exceeded") {
+		t.Fatalf("error = %q, want context deadline exceeded", err.Error())
 	}
 }
 

@@ -20,6 +20,7 @@ const (
 	defaultAnnounceTTL         = 30 * time.Second
 	defaultTrustMode           = "tofu"
 	defaultAgentAdapter        = "default"
+	defaultAgentAdapterTimeout = 10 * time.Minute
 	defaultLogLevel            = "info"
 	defaultLogFormat           = "json"
 	defaultLogRotateMaxSizeMB  = 10
@@ -41,6 +42,7 @@ type Config struct {
 	TrustMode           string   `json:"trustMode"`
 	TrustAutoApprove    bool     `json:"trustAutoApprove"`
 	AgentAdapter        string   `json:"agentAdapter"`
+	AgentAdapterTimeout string   `json:"agentAdapterTimeout"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
@@ -72,6 +74,12 @@ func Validate(cfg Config) error {
 	}
 	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "webhook" {
 		return errors.New("agent adapter must be one of: default|openclaw|opencode|webhook")
+	}
+	if strings.TrimSpace(cfg.AgentAdapterTimeout) != "" {
+		d, err := time.ParseDuration(strings.TrimSpace(cfg.AgentAdapterTimeout))
+		if err != nil || d <= 0 {
+			return errors.New("agent adapter timeout must be a positive duration")
+		}
 	}
 	if adapterName == "webhook" && strings.TrimSpace(cfg.WebhookURL) == "" {
 		return errors.New("webhook url is required when agent adapter is webhook")
@@ -126,6 +134,7 @@ type runtimeConfig struct {
 	TrustMode           string
 	TrustAutoApprove    bool
 	AgentAdapter        string
+	AgentAdapterTimeout time.Duration
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -154,6 +163,7 @@ type configValues struct {
 	TrustAutoApprove    bool
 	TrustAutoApproveSet bool
 	AgentAdapter        string
+	AgentAdapterTimeout time.Duration
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -173,6 +183,7 @@ func (c Config) Runtime() runtimeConfig {
 	h, _ := time.ParseDuration(c.HeartbeatInterval)
 	t, _ := time.ParseDuration(c.AnnounceTTL)
 	tt, _ := time.ParseDuration(c.TransferTTL)
+	at, _ := time.ParseDuration(c.AgentAdapterTimeout)
 	return runtimeConfig{
 		NATSServers:         c.NATSServers,
 		LocalAPIAddr:        c.LocalAPIAddr,
@@ -184,6 +195,7 @@ func (c Config) Runtime() runtimeConfig {
 		TrustMode:           c.TrustMode,
 		TrustAutoApprove:    c.TrustAutoApprove,
 		AgentAdapter:        c.AgentAdapter,
+		AgentAdapterTimeout: at,
 		WebhookURL:          c.WebhookURL,
 		LogFilePath:         c.LogFilePath,
 		LogRotateMaxSizeMB:  c.LogRotateMaxSizeMB,
@@ -235,6 +247,7 @@ func LoadFromOS(args []string) (Config, error) {
 		trustMode           = fs.String("trust-mode", merged.TrustMode, "trust mode: open|tofu|explicit")
 		trustAutoApprove    = fs.Bool("trust-auto-approve", merged.TrustAutoApprove, "automatically approve valid inbound trust requests")
 		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|webhook")
+		agentAdapterTimeout = fs.Duration("agent-adapter-timeout", merged.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -329,6 +342,7 @@ func LoadFromOS(args []string) (Config, error) {
 		TrustMode:           mode,
 		TrustAutoApprove:    *trustAutoApprove,
 		AgentAdapter:        adapterName,
+		AgentAdapterTimeout: agentAdapterTimeout.String(),
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
@@ -361,6 +375,7 @@ func defaultConfigValues(defaultDataDir string) configValues {
 		TrustAutoApprove:    false,
 		TrustAutoApproveSet: true,
 		AgentAdapter:        defaultAgentAdapter,
+		AgentAdapterTimeout: defaultAgentAdapterTimeout,
 		LogRotateMaxSizeMB:  defaultLogRotateMaxSizeMB,
 		LogRotateMaxBackups: defaultLogRotateMaxBackups,
 		LogRotateMaxAgeDays: defaultLogRotateMaxAgeDays,
@@ -404,6 +419,9 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.AgentAdapter) != "" {
 		base.AgentAdapter = strings.TrimSpace(override.AgentAdapter)
+	}
+	if override.AgentAdapterTimeout > 0 {
+		base.AgentAdapterTimeout = override.AgentAdapterTimeout
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)
