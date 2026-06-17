@@ -1,4 +1,4 @@
-﻿package config
+package config
 
 import (
 	"errors"
@@ -72,8 +72,8 @@ func Validate(cfg Config) error {
 	if adapterName == "" {
 		adapterName = defaultAgentAdapter
 	}
-	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "codex" && adapterName != "webhook" && adapterName != "hermes" {
-		return errors.New("agent adapter must be one of: default|openclaw|opencode|codex|webhook|hermes")
+	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "webhook" {
+		return errors.New("agent adapter must be one of: default|openclaw|opencode|webhook")
 	}
 	if strings.TrimSpace(cfg.AgentAdapterTimeout) != "" {
 		d, err := time.ParseDuration(strings.TrimSpace(cfg.AgentAdapterTimeout))
@@ -246,7 +246,7 @@ func LoadFromOS(args []string) (Config, error) {
 		announceTTL         = fs.Duration("announce-ttl", merged.AnnounceTTL, "announce ttl")
 		trustMode           = fs.String("trust-mode", merged.TrustMode, "trust mode: open|tofu|explicit")
 		trustAutoApprove    = fs.Bool("trust-auto-approve", merged.TrustAutoApprove, "automatically approve valid inbound trust requests")
-		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|codex|webhook|hermes")
+		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|webhook")
 		agentAdapterTimeout = fs.Duration("agent-adapter-timeout", merged.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
@@ -282,8 +282,8 @@ func LoadFromOS(args []string) (Config, error) {
 	if adapterName == "" {
 		adapterName = defaultAgentAdapter
 	}
-	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "codex" && adapterName != "webhook" && adapterName != "hermes" {
-		return Config{}, errors.New("agent adapter must be one of: default|openclaw|opencode|codex|webhook|hermes")
+	if adapterName != "default" && adapterName != "openclaw" && adapterName != "opencode" && adapterName != "webhook" {
+		return Config{}, errors.New("agent adapter must be one of: default|openclaw|opencode|webhook")
 	}
 
 	webhookURL := strings.TrimSpace(*webhookURLFlag)

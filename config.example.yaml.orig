@@ -1,10 +1,8 @@
-﻿natsServers:
+natsServers:
   - nats://220.168.146.21:9414
 localApiAddr: 127.0.0.1:18080
 trustMode: tofu
 trustAutoApprove: false
-# Agent adapter: default|openclaw|opencode|codex|webhook|hermes
-# hermes: AI agent backed by hermes chat CLI (sync mode, requires hermes in PATH)
 agentAdapter: default
 heartbeatInterval: 15s
 announceTtl: 30s
