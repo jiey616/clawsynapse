@@ -216,7 +216,11 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 	dir := t.TempDir()
 	fsStore := store.NewFSStore(dir)
 	// Pre-save a stale session mapping for our test key.
-	err = fsStore.SaveSessionState("hermes", "sess-old", store.SessionState{SessionID: "stale-session-123"})
+	if err := fsStore.SaveSessionState(store.SessionState{
+		Adapter:    "hermes",
+		SessionKey: "sess-old",
+		SessionID:  "stale-session-123",
+	})
 	if err != nil {
 		t.Fatalf("save session state: %v", err)
 	}
