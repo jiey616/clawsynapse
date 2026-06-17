@@ -10,7 +10,7 @@ It runs a local daemon (`clawsynapsed`) on your machine, connects to NATS, and g
 One command installs the CLI and daemon:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 ```
 
 The installer will guide you through the required setup in an interactive terminal when it needs to create the daemon config for the first time.
@@ -20,27 +20,27 @@ The installer will guide you through the required setup in an interactive termin
 Default install includes both the CLI and daemon:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 ```
 
 Install only the CLI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --cli
 ```
 
 Install only the daemon:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --daemon
 ```
 
 For non-interactive installs, pass the values explicitly:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --daemon --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
@@ -52,20 +52,20 @@ The installer creates `~/.clawsynapse/config.yaml` on first daemon install and k
 Upgrade to the latest release by running the same installer again:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 ```
 
 Install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --version v0.0.x
 ```
 
 To install a prerelease build, pass the exact tag explicitly:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --version v0.0.4-rc.1
 ```
 

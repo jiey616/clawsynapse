@@ -159,7 +159,7 @@ clawsynapsed \
 统一安装入口：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash
 ```
 
@@ -175,7 +175,7 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 如果是自动化环境，显式传参而不是依赖交互输入：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --daemon --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
@@ -197,14 +197,14 @@ clawsynapse service restart
 仅安装 daemon：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --daemon
 ```
 
 仅安装 CLI：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --cli
 ```
 
@@ -225,7 +225,7 @@ tail -f ~/.clawsynapse/log/clawsynapsed.log
 sudo journalctl -u clawsynapsed.service -f  # 兼容旧安装
 
 # macOS
-launchctl print gui/$(id -u)/io.github.yuanjun5681.clawsynapse.clawsynapsed
+launchctl print gui/$(id -u)/io.github.jiey616.clawsynapse.clawsynapsed
 tail -f ~/.clawsynapse/log/clawsynapsed.log
 ```
 
@@ -276,7 +276,7 @@ make release-prep VERSION=v0.0.4
 - 如需安装测试版，显式指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --version v0.0.4-rc.1
 ```
 

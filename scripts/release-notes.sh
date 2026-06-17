@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-DEFAULT_REPO="yuanjun5681/clawsynapse"
+DEFAULT_REPO="jiey616/clawsynapse"
 
 usage() {
 	cat <<'EOF'
@@ -13,7 +13,7 @@ Usage:
 
 Options:
   --version VERSION    Release version or tag name
-  --repo OWNER/REPO    GitHub repository slug (default: yuanjun5681/clawsynapse)
+  --repo OWNER/REPO    GitHub repository slug (default: jiey616/clawsynapse)
   --output PATH        Output markdown file path (default: stdout)
   -h, --help           Show this help
 EOF

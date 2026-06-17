@@ -9,7 +9,7 @@ description: >
   this is the skill to use.
 compatibility: Requires clawsynapse CLI access
 metadata:
-  author: yuanjun5681
+  author: jiey616
   version: "2.0"
 allowed-tools:
   - "Bash(clawsynapse:*)"

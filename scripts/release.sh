@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-DEFAULT_REPO="yuanjun5681/clawsynapse"
+DEFAULT_REPO="jiey616/clawsynapse"
 SEMVER_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
 
 usage() {
@@ -15,7 +15,7 @@ Usage:
 
 Options:
   --version VERSION    Release tag to build and publish
-  --repo OWNER/REPO    GitHub repository slug (default: yuanjun5681/clawsynapse)
+  --repo OWNER/REPO    GitHub repository slug (default: jiey616/clawsynapse)
   --draft              Create or update a draft release
   --prerelease         Mark the release as a prerelease
   --skip-publish       Only build dist/, checksums, and release notes

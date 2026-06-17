@@ -15,7 +15,7 @@ import (
 
 const (
 	serviceUnitName = "clawsynapsed.service"
-	launchdLabel    = "io.github.yuanjun5681.clawsynapse.clawsynapsed"
+	launchdLabel    = "io.github.jiey616.clawsynapse.clawsynapsed"
 )
 
 var (

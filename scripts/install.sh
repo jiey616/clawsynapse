@@ -5,18 +5,18 @@
 # Usage:
 #   CLI only:
 #     ./scripts/install.sh
-#     curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash -s -- --cli
+#     curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash -s -- --cli
 #
 #   CLI + daemon service (default):
 #     ./scripts/install.sh --all
-#     curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+#     curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
 #       bash -s -- --daemon
 #
 set -euo pipefail
 
 CLI_BINARY="clawsynapse"
 DAEMON_BINARY="clawsynapsed"
-DEFAULT_REPO="yuanjun5681/clawsynapse"
+DEFAULT_REPO="jiey616/clawsynapse"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 FALLBACK_INSTALL_DIR="${HOME}/.local/bin"
 DEFAULT_CONFIG_ROOT="${HOME}/.clawsynapse"
@@ -36,7 +36,7 @@ DEFAULT_TRANSFER_TTL="24h"
 DEFAULT_LOG_LEVEL="info"
 DEFAULT_LOG_FORMAT="json"
 SYSTEMD_UNIT_NAME="clawsynapsed.service"
-LAUNCHD_LABEL="io.github.yuanjun5681.clawsynapse.clawsynapsed"
+LAUNCHD_LABEL="io.github.jiey616.clawsynapse.clawsynapsed"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -57,7 +57,7 @@ ClawSynapse installer
 
 Usage:
   ./scripts/install.sh [options]
-  curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash -s -- [options]
+  curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash -s -- [options]
 
 Install modes:
   (default)            Install both CLI and daemon service
@@ -68,7 +68,7 @@ Install modes:
 Common options:
   --install-dir DIR    Install binaries into DIR
   --version VERSION    Install a specific release tag instead of latest
-  --repo OWNER/REPO    Override GitHub repo (default: yuanjun5681/clawsynapse)
+  --repo OWNER/REPO    Override GitHub repo (default: jiey616/clawsynapse)
   --uninstall          Uninstall the selected components
   --purge              With --daemon --uninstall, also remove config/data files
   --no-start           Install the daemon service but do not start it
@@ -94,13 +94,13 @@ Daemon bootstrap options:
 Examples:
   Install CLI and daemon as a service:
     ./scripts/install.sh --daemon --nats-servers nats://127.0.0.1:4222
-    curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 
   Install CLI only:
     ./scripts/install.sh --cli
 
   Install daemon only from GitHub Release:
-    curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+    curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
       bash -s -- --daemon
 
   Uninstall the daemon service:

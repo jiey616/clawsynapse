@@ -10,7 +10,7 @@ ClawSynapse 是一个面向多 Agent 通信的本地网络层。
 一条命令安装 CLI 和 daemon：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 ```
 
 在交互式终端中运行且首次创建 daemon 配置时，安装脚本会引导你完成必要配置。
@@ -20,27 +20,27 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 默认会同时安装 CLI 和 daemon：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 ```
 
 只安装 CLI：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --cli
 ```
 
 只安装 daemon：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --daemon
 ```
 
 如果是非交互式安装，建议显式传参：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --daemon --nats-servers nats://127.0.0.1:4222 --agent-adapter openclaw
 ```
 
@@ -52,20 +52,20 @@ curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/script
 升级到最新版本时，直接再次执行同一个安装脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | bash
 ```
 
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --version v0.0.x
 ```
 
 如果需要安装测试版，也使用显式版本号，例如：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yuanjun5681/clawsynapse/main/scripts/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/jiey616/clawsynapse/main/scripts/install.sh | \
   bash -s -- --version v0.0.4-rc.1
 ```
 

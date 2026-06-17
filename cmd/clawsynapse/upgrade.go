@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	defaultUpgradeRepo = "yuanjun5681/clawsynapse"
+	defaultUpgradeRepo = "jiey616/clawsynapse"
 	manifestRelPath    = ".clawsynapse/manifest.json"
 	cliBinaryName      = "clawsynapse"
 	daemonBinaryName   = "clawsynapsed"
@@ -573,7 +573,7 @@ func printUpgradeHelp(stderr io.Writer) {
 	fmt.Fprintln(stderr, "  --daemon            upgrade daemon only")
 	fmt.Fprintln(stderr, "  --all               upgrade both CLI and daemon")
 	fmt.Fprintln(stderr, "  --version string    target release tag (default \"latest\")")
-	fmt.Fprintln(stderr, "  --repo OWNER/REPO   override GitHub repo (default \"yuanjun5681/clawsynapse\")")
+	fmt.Fprintln(stderr, "  --repo OWNER/REPO   override GitHub repo (default \"jiey616/clawsynapse\")")
 	fmt.Fprintln(stderr, "  --yes               skip confirmation prompt")
 	fmt.Fprintln(stderr, "  --json              print structured JSON output for check")
 }
