@@ -205,6 +205,7 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 	case "hermes":
 		return adapter.NewHermesAdapter(adapter.HermesConfig{
 			NodeID:       nodeID,
+			SystemPrompt: cfg.HermesSystemPrompt,
 			Logger:       log.With(slog.String("component", "adapter"), slog.String("adapter", "hermes")),
 			SessionStore: fs,
 		})

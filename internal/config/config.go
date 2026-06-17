@@ -44,6 +44,7 @@ type Config struct {
 	AgentAdapter        string   `json:"agentAdapter"`
 	AgentAdapterTimeout string   `json:"agentAdapterTimeout"`
 	WebhookURL          string   `json:"webhookUrl"`
+	HermesSystemPrompt  string   `json:"hermesSystemPrompt"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
 	LogFilePath         string   `json:"logFilePath"`
@@ -136,6 +137,7 @@ type runtimeConfig struct {
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
 	WebhookURL          string
+	HermesSystemPrompt  string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
 	LogRotateMaxBackups int
@@ -165,6 +167,7 @@ type configValues struct {
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
 	WebhookURL          string
+	HermesSystemPrompt  string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
 	LogRotateMaxBackups int
@@ -197,6 +200,7 @@ func (c Config) Runtime() runtimeConfig {
 		AgentAdapter:        c.AgentAdapter,
 		AgentAdapterTimeout: at,
 		WebhookURL:          c.WebhookURL,
+		HermesSystemPrompt:  c.HermesSystemPrompt,
 		LogFilePath:         c.LogFilePath,
 		LogRotateMaxSizeMB:  c.LogRotateMaxSizeMB,
 		LogRotateMaxBackups: c.LogRotateMaxBackups,
@@ -249,6 +253,7 @@ func LoadFromOS(args []string) (Config, error) {
 		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|codex|webhook|hermes")
 		agentAdapterTimeout = fs.Duration("agent-adapter-timeout", merged.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
+		hermesSystemPrompt  = fs.String("hermes-system-prompt", merged.HermesSystemPrompt, "custom system prompt for hermes adapter (empty uses default)")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
 		logFilePath         = fs.String("log-file-path", merged.LogFilePath, "log file path with rotation enabled when set")
@@ -344,6 +349,7 @@ func LoadFromOS(args []string) (Config, error) {
 		AgentAdapter:        adapterName,
 		AgentAdapterTimeout: agentAdapterTimeout.String(),
 		WebhookURL:          webhookURL,
+		HermesSystemPrompt:  strings.TrimSpace(*hermesSystemPrompt),
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
 		LogRotateMaxBackups: *logRotateMaxBackups,
@@ -425,6 +431,9 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)
+	}
+	if strings.TrimSpace(override.HermesSystemPrompt) != "" {
+		base.HermesSystemPrompt = strings.TrimSpace(override.HermesSystemPrompt)
 	}
 	if strings.TrimSpace(override.LogFilePath) != "" {
 		base.LogFilePath = strings.TrimSpace(override.LogFilePath)

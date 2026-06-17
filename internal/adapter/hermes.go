@@ -15,9 +15,29 @@ import (
 	"clawsynapse/internal/store"
 )
 
+// DefaultHermesSystemPrompt is the default system prompt used when no
+// custom prompt is configured. It instructs hermes how to interpret
+// ClawSynapse protocol headers and how to reply.
+const DefaultHermesSystemPrompt = `You are an AI node in the ClawSynapse/TrustMesh network.
+When you receive a message starting with [clawsynapse ...], parse the header to understand:
+- type: the message type (chat.message, task.message, todo.assigned, task.context.result, etc.)
+- from: the sender node ID
+- session: the session key for this conversation
+- The text after the header is the message body.
+
+Reply using: clawsynapse publish --type <reply_type> --target <sender> --session-key <session> --message "your reply"
+
+Message type guidelines:
+- chat.message → reply with type chat.message
+- task.message → reply with type task.reply
+- todo.assigned → acknowledge with task.comment, update progress with todo.progress, complete with todo.complete
+- For todo.assigned: create deliverables locally first, upload with: clawsynapse transfer send --target <sender> --file <path> --mime-type <type>
+- Always send todo.complete AFTER uploading deliverables`
+
 // HermesConfig holds configuration for the Hermes agent adapter.
 type HermesConfig struct {
 	NodeID       string
+	SystemPrompt string // optional custom system prompt; defaults to DefaultHermesSystemPrompt
 	Logger       *slog.Logger
 	SessionStore *store.FSStore
 }
@@ -25,6 +45,7 @@ type HermesConfig struct {
 // HermesAdapter delivers messages to a local Hermes agent via the hermes CLI.
 type HermesAdapter struct {
 	nodeID       string
+	systemPrompt string
 	log          *slog.Logger
 	sessionStore *store.FSStore
 	execCmd      func(ctx context.Context, args ...string) ([]byte, error)
@@ -32,25 +53,30 @@ type HermesAdapter struct {
 
 // NewHermesAdapter creates a Hermes adapter instance.
 func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
+	sp := strings.TrimSpace(cfg.SystemPrompt)
+	if sp == "" {
+		sp = DefaultHermesSystemPrompt
+	}
 	return &HermesAdapter{
 		nodeID:       strings.TrimSpace(cfg.NodeID),
+		systemPrompt: sp,
 		log:          cfg.Logger,
 		sessionStore: cfg.SessionStore,
 		execCmd:      defaultHermesExecCmd,
 	}, nil
 }
 
-// DeliverMessage formats the incoming message as a prompt, invokes hermes chat -q,
+// DeliverMessage formats the incoming message with the standard ClawSynapse
+// protocol header, prepends the system prompt, invokes hermes chat -q,
 // waits for completion, and returns the result.
 func (a *HermesAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRequest) (*DeliverMessageResult, error) {
-	msg := formatDeliverMessage(a.nodeID, req)
+	// Use the standard structured header format (same as openclaw/opencode/codex)
+	formatted := formatDeliverMessage(a.nodeID, req)
+
+	// Prepend system prompt so hermes understands the protocol
+	prompt := a.systemPrompt + "\n\n" + formatted
+
 	sessionID := a.loadMappedSessionID(req.SessionKey)
-
-	// Parse header to extract message type
-	msgType, _, _, body := parseHeader(msg)
-
-	// Build the hermes prompt based on message type
-	prompt := buildHermesPrompt(msgType, req.From, req.SessionKey, body)
 
 	out, err := a.runCommand(ctx, prompt, sessionID)
 	if err != nil && sessionID != "" && isHermesUnknownSessionError(err) {
@@ -89,7 +115,6 @@ func (a *HermesAdapter) runCommand(ctx context.Context, prompt string, sessionID
 	args := []string{
 		"chat", "-q", prompt,
 		"-s", "tm-task-exec",
-		"-s", "wrt-writer",
 		"-t", "terminal",
 		"--max-turns", "100",
 		"--yolo",
@@ -222,143 +247,6 @@ func parseHermesResult(data []byte) (*DeliverMessageResult, error) {
 		Accepted: true,
 		Reply:    reply,
 	}, nil
-}
-
-// ── Prompt building ─────────────────────────────────────────────────
-
-// buildHermesPrompt constructs a hermes chat -q prompt based on the
-// incoming message type. This mirrors the logic from openclaw-wrapper.py.
-func buildHermesPrompt(msgType string, from string, sessionKey string, body string) string {
-	target := from // reply to sender by default
-
-	switch msgType {
-	case "chat.message":
-		return fmt.Sprintf(
-			"你通过 ClawSynapse/TrustMesh 收到一条聊天消息。\n"+
-				"发送者: %s\n"+
-				"会话: %s\n"+
-				"消息: %s\n\n"+
-				"请理解内容，用 clawsynapse publish 回复。\n"+
-				"回复格式：\n"+
-				"  clawsynapse publish --type chat.message --target %s --session-key %s --message \"你的回复\"",
-			from, sessionKey, body, target, sessionKey,
-		)
-
-	case "task.message":
-		return fmt.Sprintf(
-			"你通过 ClawSynapse/TrustMesh 收到一条任务消息。\n"+
-				"发送者: %s\n"+
-				"会话: %s\n"+
-				"内容: %s\n\n"+
-				"请理解任务内容，用 clawsynapse publish 回复。\n"+
-				"  clawsynapse publish --type task.reply --target %s --session-key %s --message \"你的回复\"",
-			from, sessionKey, body, target, sessionKey,
-		)
-
-	case "todo.assigned":
-		return fmt.Sprintf(
-			"你收到一个来自 ClawSynapse/TrustMesh 的 Todo 任务分配。这是你的主任务，请完成全部工作。\n"+
-				"发送者: %s\n"+
-				"会话: %s\n"+
-				"内容: %s\n\n"+
-				"请严格按照以下步骤执行，每一步都用 clawsynapse publish 发送：\n\n"+
-				"【步骤 1 — 开工确认】发送 task.comment\n"+
-				"  从内容中提取 task_id 和 todo_id，构建 JSON：\n"+
-				"  {\"task_id\": \"<TASK_ID>\", \"todo_id\": \"<TODO_ID>\", \"content\": \"已收到任务，开始处理\"}\n"+
-				"  clawsynapse publish --target %s --type task.comment --session-key %s --message \"<JSON>\"\n\n"+
-				"【步骤 2 — 进度确认】发送 todo.progress\n"+
-				"  {\"task_id\": \"<TASK_ID>\", \"todo_id\": \"<TODO_ID>\", \"message\": \"开始执行\"}\n"+
-				"  clawsynapse publish --target %s --type todo.progress --session-key %s --message \"<JSON>\"\n\n"+
-				"【步骤 3 — 实际工作】执行 Todo 内容，完成后：\n"+
-				"  a) 创建实际交付物（代码文件、文档等），保存在本地\n"+
-				"  b) 用 clawsynapse transfer send 上传文件：\n"+
-				"     clawsynapse transfer send --target %s --file /path/to/file --mime-type text/plain\n"+
-				"  c) 构建 todo.complete 并发送：\n"+
-				"     {\"task_id\": \"<TASK_ID>\", \"todo_id\": \"<TODO_ID>\", \"result\": {\"summary\": \"一句话总结\", \"output\": \"详细输出\"}}\n"+
-				"     clawsynapse publish --target %s --type todo.complete --session-key %s --message \"<JSON>\"\n\n"+
-				"关键规则：\n"+
-				"- 步骤 1、2 快速完成（各 1 条命令）\n"+
-				"- 步骤 3 花大部分轮次构建实际作品\n"+
-				"- 交付物文件用 .md 格式\n"+
-				"- 先上传文件再发 todo.complete\n"+
-				"- 所有 clawsynapse publish 用 --target %s --session-key %s",
-			from, sessionKey, body,
-			target, sessionKey,
-			target, sessionKey,
-			target,
-			target, sessionKey,
-			target, sessionKey,
-		)
-
-	case "task.context.result":
-		return fmt.Sprintf(
-			"你收到 ClawSynapse/TrustMesh 返回的任务上下文查询结果。\n"+
-				"会话: %s\n"+
-				"内容: %s\n\n"+
-				"请理解其中的任务快照信息，用于后续工作。",
-			sessionKey, body,
-		)
-
-	default:
-		return fmt.Sprintf(
-			"你通过 ClawSynapse/TrustMesh 收到一条消息。\n"+
-				"类型: %s\n"+
-				"发送者: %s\n"+
-				"会话: %s\n"+
-				"内容: %s\n\n"+
-				"请理解并适当回复。",
-			msgType, from, sessionKey, body,
-		)
-	}
-}
-
-// ── Header parsing ──────────────────────────────────────────────────
-
-// parseHeader extracts message type, sender, session, and body from a
-// ClawSynapse-formatted message string.
-//
-// Format:
-//
-//	[clawsynapse type=chat.message from=n1-xxx to=n1-yyy session=abc ...]
-//	<body>
-func parseHeader(message string) (msgType string, from string, session string, body string) {
-	msgType = "chat.message"
-	body = message
-
-	// Find the [clawsynapse ...] header block
-	if !strings.HasPrefix(message, "[clawsynapse") {
-		return
-	}
-
-	closingBracket := strings.Index(message, "]")
-	if closingBracket == -1 {
-		return
-	}
-
-	headerStr := message[len("[clawsynapse"):closingBracket]
-	body = strings.TrimSpace(message[closingBracket+1:])
-
-	// Parse key=value pairs from the header
-	fields := strings.Fields(headerStr)
-	for _, field := range fields {
-		eqIdx := strings.Index(field, "=")
-		if eqIdx == -1 {
-			continue
-		}
-		key := field[:eqIdx]
-		value := field[eqIdx+1:]
-
-		switch key {
-		case "type":
-			msgType = value
-		case "from":
-			from = value
-		case "session":
-			session = value
-		}
-	}
-
-	return
 }
 
 // ── Command formatting for logging ──────────────────────────────────

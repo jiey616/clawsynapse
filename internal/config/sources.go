@@ -24,6 +24,7 @@ type fileConfig struct {
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	AgentAdapterTimeout string   `yaml:"agentAdapterTimeout"`
 	WebhookURL          string   `yaml:"webhookUrl"`
+	HermesSystemPrompt  string   `yaml:"hermesSystemPrompt"`
 	LogFilePath         string   `yaml:"logFilePath"`
 	LogRotateMaxSizeMB  *int     `yaml:"logRotateMaxSizeMb"`
 	LogRotateMaxBackups *int     `yaml:"logRotateMaxBackups"`
@@ -55,6 +56,7 @@ func toFileConfig(cfg Config) fileConfig {
 		AgentAdapter:        cfg.AgentAdapter,
 		AgentAdapterTimeout: cfg.AgentAdapterTimeout,
 		WebhookURL:          cfg.WebhookURL,
+		HermesSystemPrompt:  cfg.HermesSystemPrompt,
 		LogFilePath:         cfg.LogFilePath,
 		LogRotateMaxSizeMB:  &cfg.LogRotateMaxSizeMB,
 		LogRotateMaxBackups: &cfg.LogRotateMaxBackups,
@@ -99,6 +101,7 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
 		AgentAdapterTimeout: parseDurationValue(cfg.AgentAdapterTimeout, 0),
 		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
+		HermesSystemPrompt:  strings.TrimSpace(cfg.HermesSystemPrompt),
 		LogFilePath:         strings.TrimSpace(cfg.LogFilePath),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
 		TransferDir:         strings.TrimSpace(cfg.TransferDir),
@@ -202,6 +205,7 @@ func loadValuesFromMap(values map[string]string) configValues {
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
 		AgentAdapterTimeout: parseDurationValue(values["AGENT_ADAPTER_TIMEOUT"], 0),
 		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
+		HermesSystemPrompt:  strings.TrimSpace(values["HERMES_SYSTEM_PROMPT"]),
 		LogFilePath:         strings.TrimSpace(values["LOG_FILE_PATH"]),
 		LogRotateMaxSizeMB:  int(parseIntValue(values["LOG_ROTATE_MAX_SIZE_MB"])),
 		LogRotateMaxBackups: int(parseIntValue(values["LOG_ROTATE_MAX_BACKUPS"])),

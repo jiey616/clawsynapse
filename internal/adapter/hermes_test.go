@@ -25,6 +25,46 @@ func TestNewHermesAdapter(t *testing.T) {
 	}
 }
 
+func TestNewHermesAdapter_DefaultSystemPrompt(t *testing.T) {
+	cfg := HermesConfig{NodeID: "n1-test"}
+	a, err := NewHermesAdapter(cfg)
+	if err != nil {
+		t.Fatalf("NewHermesAdapter failed: %v", err)
+	}
+	if a.systemPrompt != DefaultHermesSystemPrompt {
+		t.Error("expected default system prompt when none provided")
+	}
+}
+
+func TestNewHermesAdapter_CustomSystemPrompt(t *testing.T) {
+	custom := "Custom prompt for testing"
+	cfg := HermesConfig{
+		NodeID:       "n1-test",
+		SystemPrompt: custom,
+	}
+	a, err := NewHermesAdapter(cfg)
+	if err != nil {
+		t.Fatalf("NewHermesAdapter failed: %v", err)
+	}
+	if a.systemPrompt != custom {
+		t.Errorf("expected custom prompt, got '%s'", a.systemPrompt)
+	}
+}
+
+func TestNewHermesAdapter_EmptySystemPromptFallsBack(t *testing.T) {
+	cfg := HermesConfig{
+		NodeID:       "n1-test",
+		SystemPrompt: "   ",
+	}
+	a, err := NewHermesAdapter(cfg)
+	if err != nil {
+		t.Fatalf("NewHermesAdapter failed: %v", err)
+	}
+	if a.systemPrompt != DefaultHermesSystemPrompt {
+		t.Error("expected default system prompt when empty string provided")
+	}
+}
+
 func TestHermesAdapter_GetStatus_NoHermesCLI(t *testing.T) {
 	a := &HermesAdapter{
 		nodeID: "n1-test",
@@ -77,110 +117,152 @@ func TestHermesAdapter_GetStatus_EmptyOutput(t *testing.T) {
 	}
 }
 
-func TestBuildHermesPrompt_ChatMessage(t *testing.T) {
-	prompt := buildHermesPrompt("chat.message", "n1-sender", "sess-123", "Hello!")
-	if !strings.Contains(prompt, "聊天消息") {
-		t.Error("expected chat message prompt to mention 聊天消息")
+func TestHermesAdapter_DeliverMessage_UsesSystemPrompt(t *testing.T) {
+	var capturedPrompt string
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: "SYS_PROMPT",
+		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+			// Capture the -q prompt argument
+			for i, arg := range args {
+				if arg == "-q" && i+1 < len(args) {
+					capturedPrompt = args[i+1]
+					break
+				}
+			}
+			return []byte("reply from hermes"), nil
+		},
 	}
-	if !strings.Contains(prompt, "n1-sender") {
+
+	req := DeliverMessageRequest{
+		Type:       "chat.message",
+		From:       "n1-sender",
+		SessionKey: "sess-123",
+		Message:    "Hello!",
+	}
+
+	result, err := a.DeliverMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success")
+	}
+
+	// Verify the prompt starts with the system prompt
+	if !strings.HasPrefix(capturedPrompt, "SYS_PROMPT") {
+		t.Errorf("expected prompt to start with system prompt, got: %s", capturedPrompt[:min(50, len(capturedPrompt))])
+	}
+
+	// Verify the prompt contains the structured header from formatDeliverMessage
+	if !strings.Contains(capturedPrompt, "[clawsynapse") {
+		t.Error("expected prompt to contain [clawsynapse header")
+	}
+	if !strings.Contains(capturedPrompt, "type=chat.message") {
+		t.Error("expected prompt to contain message type")
+	}
+	if !strings.Contains(capturedPrompt, "from=n1-sender") {
 		t.Error("expected prompt to contain sender")
 	}
-	if !strings.Contains(prompt, "sess-123") {
+	if !strings.Contains(capturedPrompt, "session=sess-123") {
 		t.Error("expected prompt to contain session key")
 	}
-	if !strings.Contains(prompt, "Hello!") {
+	if !strings.Contains(capturedPrompt, "Hello!") {
 		t.Error("expected prompt to contain message body")
 	}
-	if !strings.Contains(prompt, "clawsynapse publish") {
-		t.Error("expected prompt to mention clawsynapse publish")
+}
+
+func TestHermesAdapter_DeliverMessage_DefaultSystemPrompt(t *testing.T) {
+	var capturedPrompt string
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: DefaultHermesSystemPrompt,
+		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+			for i, arg := range args {
+				if arg == "-q" && i+1 < len(args) {
+					capturedPrompt = args[i+1]
+					break
+				}
+			}
+			return []byte("ok"), nil
+		},
+	}
+
+	req := DeliverMessageRequest{
+		Type:    "task.message",
+		From:    "n1-boss",
+		Message: "Do something",
+	}
+
+	_, err := a.DeliverMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+
+	// Default prompt mentions clawsynapse publish
+	if !strings.Contains(capturedPrompt, "clawsynapse publish") {
+		t.Error("expected default system prompt to mention clawsynapse publish")
+	}
+	if !strings.Contains(capturedPrompt, "type=task.message") {
+		t.Error("expected structured header with message type")
 	}
 }
 
-func TestBuildHermesPrompt_TaskMessage(t *testing.T) {
-	prompt := buildHermesPrompt("task.message", "n1-sender", "sess-456", "Build a website")
-	if !strings.Contains(prompt, "任务消息") {
-		t.Error("expected task message prompt to mention 任务消息")
+func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
+	callCount := 0
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: DefaultHermesSystemPrompt,
+		sessionStore: nil,
+		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+			callCount++
+			// First call with stale session fails
+			if callCount == 1 {
+				for _, arg := range args {
+					if strings.HasPrefix(arg, "--session") {
+						return nil, &testError{msg: "unknown session id"}
+					}
+				}
+			}
+			return []byte("retry success"), nil
+		},
 	}
-	if !strings.Contains(prompt, "task.reply") {
-		t.Error("expected task.reply type in reply instructions")
+
+	req := DeliverMessageRequest{
+		Type:       "chat.message",
+		From:       "n1-sender",
+		SessionKey: "sess-old",
+		Message:    "test",
+	}
+
+	result, err := a.DeliverMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success after retry")
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (initial + retry), got %d", callCount)
 	}
 }
 
-func TestBuildHermesPrompt_TodoAssigned(t *testing.T) {
-	prompt := buildHermesPrompt("todo.assigned", "n1-sender", "sess-789", `{"task_id":"t1","todo_id":"d1","title":"Test"}`)
-	if !strings.Contains(prompt, "Todo 任务分配") {
-		t.Error("expected todo.assigned prompt to mention Todo")
+func TestDefaultHermesSystemPrompt_Contents(t *testing.T) {
+	// Verify the default prompt covers key message types
+	if !strings.Contains(DefaultHermesSystemPrompt, "chat.message") {
+		t.Error("default prompt should mention chat.message")
 	}
-	if !strings.Contains(prompt, "task.comment") {
-		t.Error("expected step 1 to mention task.comment")
+	if !strings.Contains(DefaultHermesSystemPrompt, "task.message") {
+		t.Error("default prompt should mention task.message")
 	}
-	if !strings.Contains(prompt, "todo.progress") {
-		t.Error("expected step 2 to mention todo.progress")
+	if !strings.Contains(DefaultHermesSystemPrompt, "todo.assigned") {
+		t.Error("default prompt should mention todo.assigned")
 	}
-	if !strings.Contains(prompt, "todo.complete") {
-		t.Error("expected step 3 to mention todo.complete")
+	if !strings.Contains(DefaultHermesSystemPrompt, "clawsynapse publish") {
+		t.Error("default prompt should mention clawsynapse publish")
 	}
-	if !strings.Contains(prompt, "transfer send") {
-		t.Error("expected step 3 to mention transfer send")
-	}
-}
-
-func TestBuildHermesPrompt_TaskContextResult(t *testing.T) {
-	prompt := buildHermesPrompt("task.context.result", "n1-sender", "sess-abc", "Context data here")
-	if !strings.Contains(prompt, "任务上下文查询结果") {
-		t.Error("expected task.context.result prompt to mention 上下文查询结果")
-	}
-}
-
-func TestBuildHermesPrompt_Fallback(t *testing.T) {
-	prompt := buildHermesPrompt("unknown.type", "n1-sender", "sess-xyz", "Some content")
-	if !strings.Contains(prompt, "unknown.type") {
-		t.Error("expected fallback prompt to contain message type")
-	}
-	if !strings.Contains(prompt, "n1-sender") {
-		t.Error("expected fallback prompt to contain sender")
-	}
-}
-
-func TestParseHeader(t *testing.T) {
-	msg := "[clawsynapse type=chat.message from=n1-sender to=n1-recv session=sess-123]\nHello world!"
-	msgType, from, session, body := parseHeader(msg)
-
-	if msgType != "chat.message" {
-		t.Errorf("expected type 'chat.message', got '%s'", msgType)
-	}
-	if from != "n1-sender" {
-		t.Errorf("expected from 'n1-sender', got '%s'", from)
-	}
-	if session != "sess-123" {
-		t.Errorf("expected session 'sess-123', got '%s'", session)
-	}
-	if body != "Hello world!" {
-		t.Errorf("expected body 'Hello world!', got '%s'", body)
-	}
-}
-
-func TestParseHeader_NoHeader(t *testing.T) {
-	msg := "plain text without header"
-	msgType, _, _, body := parseHeader(msg)
-
-	if msgType != "chat.message" {
-		t.Errorf("expected default type 'chat.message', got '%s'", msgType)
-	}
-	if body != "plain text without header" {
-		t.Errorf("expected body to match input, got '%s'", body)
-	}
-}
-
-func TestParseHeader_MultilineBody(t *testing.T) {
-	msg := "[clawsynapse type=task.message from=n1-a session=s1]\nLine 1\nLine 2\nLine 3"
-	_, _, _, body := parseHeader(msg)
-
-	if !strings.Contains(body, "Line 1") {
-		t.Error("expected body to contain multiline content")
-	}
-	if !strings.Contains(body, "Line 3") {
-		t.Error("expected body to contain last line")
+	if !strings.Contains(DefaultHermesSystemPrompt, "[clawsynapse") {
+		t.Error("default prompt should mention [clawsynapse header format")
 	}
 }
 
