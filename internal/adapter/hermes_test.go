@@ -232,7 +232,8 @@ func TestParseHermesResult_LongOutput(t *testing.T) {
 }
 
 func TestFormatHermesCommandForLog(t *testing.T) {
-	args := []string{"chat", "-q", "This is a very long prompt that should be truncated in the log output because it exceeds the maximum length allowed for logging purposes", "--yolo"}
+	longPrompt := strings.Repeat("This is a very long prompt that should be truncated in the log output. ", 5)
+	args := []string{"chat", "-q", longPrompt, "--yolo"}
 	logStr := formatHermesCommandForLog(args)
 	if !strings.Contains(logStr, "hermes") {
 		t.Error("expected log to contain 'hermes'")
