@@ -216,13 +216,9 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 		sessionStore: nil,
 		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			callCount++
-			// First call with stale session fails
+			// First call fails with unknown session error
 			if callCount == 1 {
-				for _, arg := range args {
-					if strings.HasPrefix(arg, "--session") {
-						return nil, &testError{msg: "unknown session id"}
-					}
-				}
+				return nil, &testError{msg: "unknown session id"}
 			}
 			return []byte("retry success"), nil
 		},
