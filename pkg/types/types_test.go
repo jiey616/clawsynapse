@@ -13,8 +13,11 @@ func TestPeerJSONTags(t *testing.T) {
 }
 
 func TestResultSuccess(t *testing.T) {
-	r := DeliverResult{Accepted: true}
-	if !r.Accepted {
-		t.Fatal("expected accepted")
+	r := APIResult{OK: true, Code: "ok"}
+	if !r.OK {
+		t.Fatal("expected ok")
+	}
+	if r.Code != "ok" {
+		t.Fatalf("expected code 'ok', got %q", r.Code)
 	}
 }
