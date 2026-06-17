@@ -220,8 +220,7 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 		Adapter:    "hermes",
 		SessionKey: "sess-old",
 		SessionID:  "stale-session-123",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("save session state: %v", err)
 	}
 
