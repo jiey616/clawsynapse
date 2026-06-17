@@ -3,7 +3,7 @@ package types
 import "testing"
 
 func TestAPIResultFields(t *testing.T) {
-	r := APIResult{OK: true, Code: "ok", Ts: 0}
+	r := APIResult{OK: true, Code: "ok", TS: 0}
 	if !r.OK {
 		t.Error("expected OK true")
 	}
