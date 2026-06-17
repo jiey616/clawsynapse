@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"clawsynapse/internal/store"
 )
 
 func TestNewHermesAdapter(t *testing.T) {
@@ -209,14 +211,27 @@ func TestHermesAdapter_DeliverMessage_DefaultSystemPrompt(t *testing.T) {
 }
 
 func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
+	// Set up a real session store with a stale session ID so the
+	// retry-on-unknown-session path actually executes.
+	dir := t.TempDir()
+	fsStore, err := store.NewFSStore(dir)
+	if err != nil {
+		t.Fatalf("create FSStore: %v", err)
+	}
+	// Pre-save a stale session mapping for our test key.
+	err = fsStore.SaveSessionState("hermes", "sess-old", store.SessionState{SessionID: "stale-session-123"})
+	if err != nil {
+		t.Fatalf("save session state: %v", err)
+	}
+
 	callCount := 0
 	a := &HermesAdapter{
 		nodeID:       "n1-test",
 		systemPrompt: DefaultHermesSystemPrompt,
-		sessionStore: nil,
+		sessionStore: fsStore,
 		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			callCount++
-			// First call fails with unknown session error
+			// First call fails with unknown session error (stale ID)
 			if callCount == 1 {
 				return nil, &testError{msg: "unknown session id"}
 			}
