@@ -214,10 +214,7 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 	// Set up a real session store with a stale session ID so the
 	// retry-on-unknown-session path actually executes.
 	dir := t.TempDir()
-	fsStore, err := store.NewFSStore(dir)
-	if err != nil {
-		t.Fatalf("create FSStore: %v", err)
-	}
+	fsStore := store.NewFSStore(dir)
 	// Pre-save a stale session mapping for our test key.
 	err = fsStore.SaveSessionState("hermes", "sess-old", store.SessionState{SessionID: "stale-session-123"})
 	if err != nil {
