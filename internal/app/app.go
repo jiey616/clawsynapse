@@ -1,4 +1,4 @@
-﻿package app
+package app
 
 import (
 	"context"
@@ -25,17 +25,18 @@ import (
 )
 
 type App struct {
-	log       *slog.Logger
-	cfg       config.Config
-	api       *api.Server
-	discovery *discovery.Service
-	auth      *auth.Service
-	trust     *trust.Service
-	messaging *messaging.Service
-	transfer  *transfer.Service
-	bus       *natsbus.Client
-	peers     *discovery.Registry
-	identity  *identity.Identity
+	log          *slog.Logger
+	cfg          config.Config
+	api          *api.Server
+	discovery    *discovery.Service
+	auth         *auth.Service
+	trust        *trust.Service
+	messaging    *messaging.Service
+	transfer     *transfer.Service
+	bus          *natsbus.Client
+	peers        *discovery.Registry
+	identity     *identity.Identity
+	agentAdapter adapter.AgentAdapter
 }
 
 func New(cfg config.Config, version string) (*App, error) {
@@ -161,17 +162,18 @@ func New(cfg config.Config, version string) (*App, error) {
 	}, version, cfg)
 
 	return &App{
-		log:       log,
-		cfg:       cfg,
-		api:       apiServer,
-		discovery: discoverySvc,
-		auth:      authSvc,
-		trust:     trustSvc,
-		messaging: messagingSvc,
-		transfer:  transferSvc,
-		bus:       bus,
-		peers:     peers,
-		identity:  id,
+		log:          log,
+		cfg:          cfg,
+		api:          apiServer,
+		discovery:    discoverySvc,
+		auth:         authSvc,
+		trust:        trustSvc,
+		messaging:    messagingSvc,
+		transfer:     transferSvc,
+		bus:          bus,
+		peers:        peers,
+		identity:     id,
+		agentAdapter: agentAdapter,
 	}, nil
 }
 
@@ -272,6 +274,11 @@ func (a *App) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		// Shut down the hermes adapter (kills background processes) and
+		// any other adapter that implements shutdown.
+		if shutdownable, ok := a.agentAdapter.(interface{ Shutdown() }); ok {
+			shutdownable.Shutdown()
+		}
 		a.bus.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

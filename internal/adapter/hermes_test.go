@@ -70,8 +70,7 @@ func TestNewHermesAdapter_EmptySystemPromptFallsBack(t *testing.T) {
 func TestHermesAdapter_GetStatus_NoHermesCLI(t *testing.T) {
 	a := &HermesAdapter{
 		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			// Simulate hermes not installed
+		versionCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			return nil, context.DeadlineExceeded
 		},
 	}
@@ -88,7 +87,7 @@ func TestHermesAdapter_GetStatus_NoHermesCLI(t *testing.T) {
 func TestHermesAdapter_GetStatus_Healthy(t *testing.T) {
 	a := &HermesAdapter{
 		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+		versionCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			return []byte("hermes v1.0.0"), nil
 		},
 	}
@@ -105,7 +104,7 @@ func TestHermesAdapter_GetStatus_Healthy(t *testing.T) {
 func TestHermesAdapter_GetStatus_EmptyOutput(t *testing.T) {
 	a := &HermesAdapter{
 		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+		versionCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			return []byte("   "), nil
 		},
 	}
@@ -119,12 +118,65 @@ func TestHermesAdapter_GetStatus_EmptyOutput(t *testing.T) {
 	}
 }
 
+func TestHermesAdapter_DeliverMessage_BackgroundMode(t *testing.T) {
+	var capturedArgs []string
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: "SYS_PROMPT",
+		startCmd: func(ctx context.Context, args ...string) error {
+			capturedArgs = args
+			return nil
+		},
+	}
+
+	req := DeliverMessageRequest{
+		Type:       "chat.message",
+		From:       "n1-sender",
+		SessionKey: "sess-123",
+		Message:    "Hello!",
+	}
+
+	result, err := a.DeliverMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+
+	// In background mode, the adapter should return Accepted=true with empty Reply
+	// so the messaging layer does not send a duplicate chat.response.
+	if !result.Success {
+		t.Error("expected success")
+	}
+	if !result.Accepted {
+		t.Error("expected accepted")
+	}
+	if result.Reply != "" {
+		t.Errorf("expected empty reply in background mode, got '%s'", result.Reply)
+	}
+
+	// Verify the command starts with "chat" and includes -Q flag
+	if len(capturedArgs) < 2 || capturedArgs[0] != "chat" {
+		t.Errorf("expected first arg to be 'chat', got %v", capturedArgs)
+	}
+
+	// Verify -Q (quiet/programmatic mode) flag is present
+	hasQuietFlag := false
+	for _, arg := range capturedArgs {
+		if arg == "-Q" {
+			hasQuietFlag = true
+			break
+		}
+	}
+	if !hasQuietFlag {
+		t.Error("expected -Q flag in command args")
+	}
+}
+
 func TestHermesAdapter_DeliverMessage_UsesSystemPrompt(t *testing.T) {
 	var capturedPrompt string
 	a := &HermesAdapter{
 		nodeID:       "n1-test",
 		systemPrompt: "SYS_PROMPT",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+		startCmd: func(ctx context.Context, args ...string) error {
 			// Capture the -q prompt argument
 			for i, arg := range args {
 				if arg == "-q" && i+1 < len(args) {
@@ -132,7 +184,7 @@ func TestHermesAdapter_DeliverMessage_UsesSystemPrompt(t *testing.T) {
 					break
 				}
 			}
-			return []byte("reply from hermes"), nil
+			return nil
 		},
 	}
 
@@ -179,14 +231,14 @@ func TestHermesAdapter_DeliverMessage_DefaultSystemPrompt(t *testing.T) {
 	a := &HermesAdapter{
 		nodeID:       "n1-test",
 		systemPrompt: DefaultHermesSystemPrompt,
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
+		startCmd: func(ctx context.Context, args ...string) error {
 			for i, arg := range args {
 				if arg == "-q" && i+1 < len(args) {
 					capturedPrompt = args[i+1]
 					break
 				}
 			}
-			return []byte("ok"), nil
+			return nil
 		},
 	}
 
@@ -210,39 +262,53 @@ func TestHermesAdapter_DeliverMessage_DefaultSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
-	// Set up a real session store with a stale session ID so the
-	// retry-on-unknown-session path actually executes.
+func TestHermesAdapter_DeliverMessage_StartError(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: DefaultHermesSystemPrompt,
+		startCmd: func(ctx context.Context, args ...string) error {
+			return context.DeadlineExceeded
+		},
+	}
+
+	req := DeliverMessageRequest{
+		Type:    "chat.message",
+		From:    "n1-sender",
+		Message: "test",
+	}
+
+	_, err := a.DeliverMessage(context.Background(), req)
+	if err == nil {
+		t.Error("expected error when hermes fails to start")
+	}
+}
+
+func TestHermesAdapter_DeliverMessage_WithSessionID(t *testing.T) {
 	dir := t.TempDir()
 	fsStore := store.NewFSStore(dir)
-	// Pre-save a stale session mapping for our test key.
 	if err := fsStore.SaveSessionState(store.SessionState{
 		Adapter:    "hermes",
-		SessionKey: "sess-old",
-		SessionID:  "stale-session-123",
+		SessionKey: "sess-existing",
+		SessionID:  "hermes-session-abc",
 	}); err != nil {
 		t.Fatalf("save session state: %v", err)
 	}
 
-	callCount := 0
+	var capturedArgs []string
 	a := &HermesAdapter{
 		nodeID:       "n1-test",
 		systemPrompt: DefaultHermesSystemPrompt,
 		sessionStore: fsStore,
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			callCount++
-			// First call fails with unknown session error (stale ID)
-			if callCount == 1 {
-				return nil, &testError{msg: "unknown session id"}
-			}
-			return []byte("retry success"), nil
+		startCmd: func(ctx context.Context, args ...string) error {
+			capturedArgs = args
+			return nil
 		},
 	}
 
 	req := DeliverMessageRequest{
 		Type:       "chat.message",
 		From:       "n1-sender",
-		SessionKey: "sess-old",
+		SessionKey: "sess-existing",
 		Message:    "test",
 	}
 
@@ -250,11 +316,55 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeliverMessage failed: %v", err)
 	}
-	if !result.Success {
-		t.Error("expected success after retry")
+	if !result.Success || !result.Accepted {
+		t.Error("expected success and accepted")
 	}
-	if callCount != 2 {
-		t.Errorf("expected 2 calls (initial + retry), got %d", callCount)
+
+	// Verify --session flag is present with the mapped session ID
+	hasSessionFlag := false
+	for i, arg := range capturedArgs {
+		if arg == "--session" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "hermes-session-abc" {
+			hasSessionFlag = true
+			break
+		}
+	}
+	if !hasSessionFlag {
+		t.Errorf("expected --session hermes-session-abc in args, got %v", capturedArgs)
+	}
+}
+
+func TestHermesAdapter_DeliverMessage_NoSessionStore(t *testing.T) {
+	var capturedArgs []string
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: DefaultHermesSystemPrompt,
+		sessionStore: nil,
+		startCmd: func(ctx context.Context, args ...string) error {
+			capturedArgs = args
+			return nil
+		},
+	}
+
+	req := DeliverMessageRequest{
+		Type:       "chat.message",
+		From:       "n1-sender",
+		SessionKey: "sess-123",
+		Message:    "test",
+	}
+
+	result, err := a.DeliverMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if !result.Success || !result.Accepted {
+		t.Error("expected success and accepted")
+	}
+
+	// Verify no --session flag when sessionStore is nil
+	for _, arg := range capturedArgs {
+		if arg == "--session" {
+			t.Error("expected no --session flag when sessionStore is nil")
+		}
 	}
 }
 
@@ -277,53 +387,6 @@ func TestDefaultHermesSystemPrompt_Contents(t *testing.T) {
 	}
 }
 
-func TestParseHermesResult(t *testing.T) {
-	result, err := parseHermesResult([]byte("Hermes completed the task successfully."))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success")
-	}
-	if !result.Accepted {
-		t.Error("expected accepted")
-	}
-	if !strings.Contains(result.Reply, "Hermes completed") {
-		t.Errorf("expected reply to contain output, got '%s'", result.Reply)
-	}
-}
-
-func TestParseHermesResult_Empty(t *testing.T) {
-	result, err := parseHermesResult([]byte("   "))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Success {
-		t.Error("expected failure for empty output")
-	}
-	if result.Error != "hermes returned empty output" {
-		t.Errorf("expected empty output error, got '%s'", result.Error)
-	}
-}
-
-func TestParseHermesResult_LongOutput(t *testing.T) {
-	// Create output longer than 4000 characters
-	longText := strings.Repeat("A", 5000)
-	result, err := parseHermesResult([]byte(longText))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success for long output")
-	}
-	if !strings.Contains(result.Reply, "...(truncated)") {
-		t.Error("expected truncated marker in long output")
-	}
-	if len(result.Reply) > 4000+len("...(truncated)\n")+100 {
-		t.Errorf("reply too long: %d chars", len(result.Reply))
-	}
-}
-
 func TestFormatHermesCommandForLog(t *testing.T) {
 	longPrompt := strings.Repeat("A", 500)
 	args := []string{"chat", "-q", longPrompt}
@@ -336,37 +399,71 @@ func TestFormatHermesCommandForLog(t *testing.T) {
 	}
 }
 
-func TestIsHermesUnknownSessionError(t *testing.T) {
-	tests := []struct {
-		errMsg   string
-		expected bool
-	}{
-		{"session not found", true},
-		{"unknown session id", true},
-		{"no such session", true},
-		{"no recorded session for key", true},
-		{"connection refused", false},
-		{"timeout", false},
-		{"", false},
+func TestBuildCommandArgs_QuietFlag(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: "test",
 	}
 
-	for _, tt := range tests {
-		var err error
-		if tt.errMsg != "" {
-			err = &testError{msg: tt.errMsg}
+	args := a.buildCommandArgs("test prompt", "")
+
+	// Verify -Q flag is present
+	found := false
+	for _, arg := range args {
+		if arg == "-Q" {
+			found = true
+			break
 		}
-		result := isHermesUnknownSessionError(err)
-		if result != tt.expected {
-			t.Errorf("isHermesUnknownSessionError(%q) = %v, want %v", tt.errMsg, result, tt.expected)
+	}
+	if !found {
+		t.Errorf("expected -Q flag in args: %v", args)
+	}
+}
+
+func TestBuildCommandArgs_WithSession(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: "test",
+	}
+
+	args := a.buildCommandArgs("test prompt", "session-123")
+
+	// Verify --session is appended
+	found := false
+	for i, arg := range args {
+		if arg == "--session" && i+1 < len(args) && args[i+1] == "session-123" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected --session session-123 in args: %v", args)
+	}
+}
+
+func TestBuildCommandArgs_NoSession(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: "test",
+	}
+
+	args := a.buildCommandArgs("test prompt", "")
+
+	for _, arg := range args {
+		if arg == "--session" {
+			t.Errorf("expected no --session flag when sessionID is empty, got: %v", args)
 		}
 	}
 }
 
-// testError is a simple error type for testing.
-type testError struct {
-	msg string
-}
+func TestHermesAdapter_Shutdown(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		systemPrompt: "test",
+		startCmd:     func(ctx context.Context, args ...string) error { return nil },
+		versionCmd:   func(ctx context.Context, args ...string) ([]byte, error) { return []byte("v1"), nil },
+	}
 
-func (e *testError) Error() string {
-	return e.msg
+	// Shutdown with no processes should not panic
+	a.Shutdown()
 }
