@@ -15,29 +15,9 @@ import (
 	"clawsynapse/internal/store"
 )
 
-// DefaultHermesSystemPrompt is the default system prompt used when no
-// custom prompt is configured. It instructs hermes how to interpret
-// ClawSynapse protocol headers and how to reply.
-const DefaultHermesSystemPrompt = `You are an AI node in the ClawSynapse/TrustMesh network.
-When you receive a message starting with [clawsynapse ...], parse the header to understand:
-- type: the message type (chat.message, task.message, todo.assigned, task.context.result, etc.)
-- from: the sender node ID
-- session: the session key for this conversation
-- The text after the header is the message body.
-
-Reply using: clawsynapse publish --type <reply_type> --target <sender> --session-key <session> --message "your reply"
-
-Message type guidelines:
-- chat.message → reply with type chat.message
-- task.message → reply with type task.reply
-- todo.assigned → acknowledge with task.comment, update progress with todo.progress, complete with todo.complete
-- For todo.assigned: create deliverables locally first, upload with: clawsynapse transfer send --target <sender> --file <path> --mime-type <type>
-- Always send todo.complete AFTER uploading deliverables`
-
 // HermesConfig holds configuration for the Hermes agent adapter.
 type HermesConfig struct {
 	NodeID       string
-	SystemPrompt string // optional custom system prompt; defaults to DefaultHermesSystemPrompt
 	Logger       *slog.Logger
 	SessionStore *store.FSStore
 }
@@ -45,7 +25,6 @@ type HermesConfig struct {
 // HermesAdapter delivers messages to a local Hermes agent via the hermes CLI.
 type HermesAdapter struct {
 	nodeID       string
-	systemPrompt string
 	log          *slog.Logger
 	sessionStore *store.FSStore
 	execCmd      func(ctx context.Context, args ...string) ([]byte, error)
@@ -53,13 +32,8 @@ type HermesAdapter struct {
 
 // NewHermesAdapter creates a Hermes adapter instance.
 func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
-	sp := strings.TrimSpace(cfg.SystemPrompt)
-	if sp == "" {
-		sp = DefaultHermesSystemPrompt
-	}
 	return &HermesAdapter{
 		nodeID:       strings.TrimSpace(cfg.NodeID),
-		systemPrompt: sp,
 		log:          cfg.Logger,
 		sessionStore: cfg.SessionStore,
 		execCmd:      defaultHermesExecCmd,
@@ -67,21 +41,18 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 }
 
 // DeliverMessage formats the incoming message with the standard ClawSynapse
-// protocol header, prepends the system prompt, invokes hermes chat -q,
-// waits for completion, and returns the result.
+// protocol header, invokes hermes chat -q, waits for completion, and
+// returns the result.
 func (a *HermesAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRequest) (*DeliverMessageResult, error) {
 	// Use the standard structured header format (same as openclaw/opencode/codex)
 	formatted := formatDeliverMessage(a.nodeID, req)
 
-	// Prepend system prompt so hermes understands the protocol
-	prompt := a.systemPrompt + "\n\n" + formatted
-
 	sessionID := a.loadMappedSessionID(req.SessionKey)
 
-	out, err := a.runCommand(ctx, prompt, sessionID)
+	out, err := a.runCommand(ctx, formatted, sessionID)
 	if err != nil && sessionID != "" && isHermesUnknownSessionError(err) {
 		a.deleteMappedSession(req.SessionKey)
-		out, err = a.runCommand(ctx, prompt, "")
+		out, err = a.runCommand(ctx, formatted, "")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("hermes exec command: %w", err)
@@ -114,9 +85,7 @@ func (a *HermesAdapter) runCommand(ctx context.Context, prompt string, sessionID
 	// Build hermes chat -q command
 	args := []string{
 		"chat", "-q", prompt,
-		"-s", "tm-task-exec",
 		"-t", "terminal",
-		"--max-turns", "100",
 		"--yolo",
 	}
 
@@ -235,17 +204,12 @@ func parseHermesResult(data []byte) (*DeliverMessageResult, error) {
 		}, nil
 	}
 
-	// Use the last 4000 characters as the reply
-	// (hermes output tail typically contains the final summary)
-	reply := text
-	if len(reply) > 4000 {
-		reply = "...(truncated)\n" + reply[len(reply)-4000:]
-	}
-
+	// Return the full output as the reply (same as openclaw/opencode/codex).
+	// Hermes outputs plain text — the entire response is treated as the reply.
 	return &DeliverMessageResult{
 		Success:  true,
 		Accepted: true,
-		Reply:    reply,
+		Reply:    text,
 	}, nil
 }
 

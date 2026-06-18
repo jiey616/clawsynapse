@@ -6,13 +6,6 @@ trustAutoApprove: false
 # Agent adapter: default|openclaw|opencode|codex|webhook|hermes
 # hermes: AI agent backed by hermes chat CLI (sync mode, requires hermes in PATH)
 agentAdapter: default
-# Custom system prompt for hermes adapter (empty uses built-in default)
-# hermesSystemPrompt: |
-#   You are an AI node in the ClawSynapse/TrustMesh network.
-#   When you receive a message starting with [clawsynapse ...], parse the header to understand:
-#   - type: the message type
-#   - from: the sender node ID
-#   - session: the session key
 heartbeatInterval: 15s
 announceTtl: 30s
 dataDir: ~/.clawsynapse

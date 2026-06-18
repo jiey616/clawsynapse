@@ -27,46 +27,6 @@ func TestNewHermesAdapter(t *testing.T) {
 	}
 }
 
-func TestNewHermesAdapter_DefaultSystemPrompt(t *testing.T) {
-	cfg := HermesConfig{NodeID: "n1-test"}
-	a, err := NewHermesAdapter(cfg)
-	if err != nil {
-		t.Fatalf("NewHermesAdapter failed: %v", err)
-	}
-	if a.systemPrompt != DefaultHermesSystemPrompt {
-		t.Error("expected default system prompt when none provided")
-	}
-}
-
-func TestNewHermesAdapter_CustomSystemPrompt(t *testing.T) {
-	custom := "Custom prompt for testing"
-	cfg := HermesConfig{
-		NodeID:       "n1-test",
-		SystemPrompt: custom,
-	}
-	a, err := NewHermesAdapter(cfg)
-	if err != nil {
-		t.Fatalf("NewHermesAdapter failed: %v", err)
-	}
-	if a.systemPrompt != custom {
-		t.Errorf("expected custom prompt, got '%s'", a.systemPrompt)
-	}
-}
-
-func TestNewHermesAdapter_EmptySystemPromptFallsBack(t *testing.T) {
-	cfg := HermesConfig{
-		NodeID:       "n1-test",
-		SystemPrompt: "   ",
-	}
-	a, err := NewHermesAdapter(cfg)
-	if err != nil {
-		t.Fatalf("NewHermesAdapter failed: %v", err)
-	}
-	if a.systemPrompt != DefaultHermesSystemPrompt {
-		t.Error("expected default system prompt when empty string provided")
-	}
-}
-
 func TestHermesAdapter_GetStatus_NoHermesCLI(t *testing.T) {
 	a := &HermesAdapter{
 		nodeID: "n1-test",
@@ -119,11 +79,10 @@ func TestHermesAdapter_GetStatus_EmptyOutput(t *testing.T) {
 	}
 }
 
-func TestHermesAdapter_DeliverMessage_UsesSystemPrompt(t *testing.T) {
+func TestHermesAdapter_DeliverMessage_Format(t *testing.T) {
 	var capturedPrompt string
 	a := &HermesAdapter{
-		nodeID:       "n1-test",
-		systemPrompt: "SYS_PROMPT",
+		nodeID: "n1-test",
 		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			// Capture the -q prompt argument
 			for i, arg := range args {
@@ -151,14 +110,9 @@ func TestHermesAdapter_DeliverMessage_UsesSystemPrompt(t *testing.T) {
 		t.Error("expected success")
 	}
 
-	// Verify the prompt starts with the system prompt
-	if !strings.HasPrefix(capturedPrompt, "SYS_PROMPT") {
-		t.Errorf("expected prompt to start with system prompt, got: %s", capturedPrompt[:min(50, len(capturedPrompt))])
-	}
-
-	// Verify the prompt contains the structured header from formatDeliverMessage
-	if !strings.Contains(capturedPrompt, "[clawsynapse") {
-		t.Error("expected prompt to contain [clawsynapse header")
+	// Verify prompt contains the structured header from formatDeliverMessage (bare, no system prompt)
+	if !strings.HasPrefix(capturedPrompt, "[clawsynapse") {
+		t.Errorf("expected prompt to start with [clawsynapse, got: %s", capturedPrompt[:min(50, len(capturedPrompt))])
 	}
 	if !strings.Contains(capturedPrompt, "type=chat.message") {
 		t.Error("expected prompt to contain message type")
@@ -174,11 +128,10 @@ func TestHermesAdapter_DeliverMessage_UsesSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestHermesAdapter_DeliverMessage_DefaultSystemPrompt(t *testing.T) {
+func TestHermesAdapter_DeliverMessage_NoSystemPrompt(t *testing.T) {
 	var capturedPrompt string
 	a := &HermesAdapter{
-		nodeID:       "n1-test",
-		systemPrompt: DefaultHermesSystemPrompt,
+		nodeID: "n1-test",
 		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			for i, arg := range args {
 				if arg == "-q" && i+1 < len(args) {
@@ -196,14 +149,18 @@ func TestHermesAdapter_DeliverMessage_DefaultSystemPrompt(t *testing.T) {
 		Message: "Do something",
 	}
 
-	_, err := a.DeliverMessage(context.Background(), req)
+	result, err := a.DeliverMessage(context.Background(), req)
 	if err != nil {
 		t.Fatalf("DeliverMessage failed: %v", err)
 	}
+	if !result.Success {
+		t.Error("expected success")
+	}
 
-	// Default prompt mentions clawsynapse publish
-	if !strings.Contains(capturedPrompt, "clawsynapse publish") {
-		t.Error("expected default system prompt to mention clawsynapse publish")
+	// Verify no system prompt — prompt starts directly with protocol header
+	if !strings.HasPrefix(capturedPrompt, "[clawsynapse") {
+		t.Errorf("expected prompt to start with [clawsynapse (no system prompt), got: %s",
+			capturedPrompt[:min(60, len(capturedPrompt))])
 	}
 	if !strings.Contains(capturedPrompt, "type=task.message") {
 		t.Error("expected structured header with message type")
@@ -227,7 +184,6 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 	callCount := 0
 	a := &HermesAdapter{
 		nodeID:       "n1-test",
-		systemPrompt: DefaultHermesSystemPrompt,
 		sessionStore: fsStore,
 		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
 			callCount++
@@ -258,22 +214,43 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 	}
 }
 
-func TestDefaultHermesSystemPrompt_Contents(t *testing.T) {
-	// Verify the default prompt covers key message types
-	if !strings.Contains(DefaultHermesSystemPrompt, "chat.message") {
-		t.Error("default prompt should mention chat.message")
+func TestBuildCommandArgs_NoRoleOrMaxTurns(t *testing.T) {
+	// Verify that -s (role/skill), --max-turns are NOT present in the command args
+	a := &HermesAdapter{
+		nodeID: "n1-test",
 	}
-	if !strings.Contains(DefaultHermesSystemPrompt, "task.message") {
-		t.Error("default prompt should mention task.message")
+	var capturedArgs []string
+	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("ok"), nil
 	}
-	if !strings.Contains(DefaultHermesSystemPrompt, "todo.assigned") {
-		t.Error("default prompt should mention todo.assigned")
+
+	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		Type:    "chat.message",
+		From:    "n1-sender",
+		Message: "test",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
 	}
-	if !strings.Contains(DefaultHermesSystemPrompt, "clawsynapse publish") {
-		t.Error("default prompt should mention clawsynapse publish")
+
+	// Check that required flags are present
+	if !containsArg(capturedArgs, "-q") {
+		t.Error("expected -q flag")
 	}
-	if !strings.Contains(DefaultHermesSystemPrompt, "[clawsynapse") {
-		t.Error("default prompt should mention [clawsynapse header format")
+	if !containsArg(capturedArgs, "-t") {
+		t.Error("expected -t flag for toolsets")
+	}
+	if !containsArg(capturedArgs, "--yolo") {
+		t.Error("expected --yolo flag")
+	}
+
+	// Check that removed flags are NOT present
+	if containsArg(capturedArgs, "-s") {
+		t.Error("-s (role/skill) should not be present")
+	}
+	if containsArg(capturedArgs, "--max-turns") {
+		t.Error("--max-turns should not be present")
 	}
 }
 
@@ -307,7 +284,7 @@ func TestParseHermesResult_Empty(t *testing.T) {
 }
 
 func TestParseHermesResult_LongOutput(t *testing.T) {
-	// Create output longer than 4000 characters
+	// Output longer than 4000 characters — should NOT be truncated
 	longText := strings.Repeat("A", 5000)
 	result, err := parseHermesResult([]byte(longText))
 	if err != nil {
@@ -316,11 +293,8 @@ func TestParseHermesResult_LongOutput(t *testing.T) {
 	if !result.Success {
 		t.Error("expected success for long output")
 	}
-	if !strings.Contains(result.Reply, "...(truncated)") {
-		t.Error("expected truncated marker in long output")
-	}
-	if len(result.Reply) > 4000+len("...(truncated)\n")+100 {
-		t.Errorf("reply too long: %d chars", len(result.Reply))
+	if result.Reply != longText {
+		t.Errorf("expected full untruncated output (%d chars), got %d chars", len(longText), len(result.Reply))
 	}
 }
 
@@ -360,6 +334,16 @@ func TestIsHermesUnknownSessionError(t *testing.T) {
 			t.Errorf("isHermesUnknownSessionError(%q) = %v, want %v", tt.errMsg, result, tt.expected)
 		}
 	}
+}
+
+// containsArg checks if a slice of strings contains a specific argument value.
+func containsArg(args []string, target string) bool {
+	for _, a := range args {
+		if a == target {
+			return true
+		}
+	}
+	return false
 }
 
 // testError is a simple error type for testing.

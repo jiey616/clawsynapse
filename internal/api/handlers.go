@@ -133,7 +133,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.adapter == nil {
 		adapterStatus["error"] = "agent adapter unavailable"
 	} else {
-		ctx, cancel := contextWithTimeout(r.Context(), 3*time.Second)
+		ctx, cancel := contextWithTimeout(r.Context(), 6*time.Second)
 		defer cancel()
 
 		st, err := s.adapter.GetStatus(ctx)
