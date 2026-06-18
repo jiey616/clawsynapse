@@ -214,8 +214,8 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_NoRoleOrMaxTurns(t *testing.T) {
-	// Verify that -s (role/skill), --max-turns are NOT present in the command args
+func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
+	// Verify that -s clawsynapse is present, --max-turns is NOT present
 	a := &HermesAdapter{
 		nodeID: "n1-test",
 	}
@@ -238,6 +238,12 @@ func TestBuildCommandArgs_NoRoleOrMaxTurns(t *testing.T) {
 	if !containsArg(capturedArgs, "-q") {
 		t.Error("expected -q flag")
 	}
+	if !containsArg(capturedArgs, "-s") {
+		t.Error("expected -s flag for skill")
+	}
+	if !containsArg(capturedArgs, "clawsynapse") {
+		t.Error("expected -s clawsynapse skill name")
+	}
 	if !containsArg(capturedArgs, "-t") {
 		t.Error("expected -t flag for toolsets")
 	}
@@ -245,10 +251,7 @@ func TestBuildCommandArgs_NoRoleOrMaxTurns(t *testing.T) {
 		t.Error("expected --yolo flag")
 	}
 
-	// Check that removed flags are NOT present
-	if containsArg(capturedArgs, "-s") {
-		t.Error("-s (role/skill) should not be present")
-	}
+	// Check that --max-turns is NOT present
 	if containsArg(capturedArgs, "--max-turns") {
 		t.Error("--max-turns should not be present")
 	}

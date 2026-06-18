@@ -198,12 +198,23 @@ clawsynapse trust reject --request-id <requestId> --reason "unknown peer"
 clawsynapse trust revoke --target <nodeId> --reason "no longer needed"
 ```
 
+**Response notes for `trust request`:**
+- `trust.ok: request sent` — trust request successfully submitted; wait for approval.
+- `trust.request_failed: trust.already_trusted: peer already trusted` — the two nodes already have a trust relationship; no further action needed.
+- `trust.request_failed: trust.self_request` — cannot send a trust request to yourself.
+- Check `clawsynapse --json peers` and look for `"trustStatus": "trusted"` to confirm the relationship after a request.
+
 ### Authentication
 
 ```bash
 # The only auth subcommand currently exposed by the CLI
 clawsynapse auth challenge --target <nodeId>
 ```
+
+**Response notes for `auth challenge`:**
+- On success: `auth.challenge_accepted: challenge completed` with `targetNode` and `status: authenticated`.
+- On failure: `auth.challenge_failed: <reason>` — the challenge handshake did not complete. Common causes: peer offline, network partition, or NATS disconnection.
+- Always verify with `clawsynapse health` (check `natsConnected` and `natsStatus`) if a challenge fails.
 
 ### File Transfer
 
@@ -300,3 +311,5 @@ clawsynapse publish --target node-2 --message "[request] Can you summarize the l
 - `auth` currently only supports `challenge` from the CLI.
 - `trust request` supports repeatable `--capability` flags.
 - Do NOT send fields that are not defined by the protocol or CLI.
+- **Binary location**: `clawsynapse` is a standalone Go binary (`clawsynapse.exe` on Windows). It may NOT be in PATH. On this system it lives at `D:\AiWorkspace\clawsynapse\clawsynapse.exe` (WSL: `/mnt/d/AiWorkspace/clawsynapse/clawsynapse.exe`). If `clawsynapse: command not found` is returned, use the full path or add its directory to PATH.
+- **WSL2 terminal quirk**: When running `clawsynapse` commands via Hermes terminal on WSL2, the shell startup `cd C:\Windows\system32` fails because the path does not exist under WSL's filesystem. Workaround: pass `workdir='.'` in `terminal()` calls from `execute_code`, or run commands from the user's WSL home directory (`/home/jiey`).
