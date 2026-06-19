@@ -3,7 +3,6 @@ package adapter
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -291,17 +290,13 @@ func defaultHermesExecCmd(ctx context.Context, args ...string) ([]byte, error) {
 	defer devNull.Close()
 	cmd.Stdin = devNull
 
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("hermes command canceled: %w", ctxErr)
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			stderr := strings.TrimSpace(string(exitErr.Stderr))
-			return nil, fmt.Errorf("hermes exited %s: %s", strconv.Itoa(exitErr.ExitCode()), stderr)
-		}
-		return nil, err
+		// CombinedOutput already includes stderr, no need to read exitErr.Stderr
+		return nil, fmt.Errorf("hermes exited: %w", err)
 	}
 	return out, nil
 }
