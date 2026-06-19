@@ -191,7 +191,7 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 			if callCount == 1 {
 				return nil, &testError{msg: "unknown session id"}
 			}
-			return []byte("retry success"), nil
+			return []byte("session_id: fresh-session-456\n\nretry success"), nil
 		},
 	}
 
@@ -215,7 +215,7 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 }
 
 func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
-	// Verify that -s clawsynapse is present, --max-turns is NOT present
+	// Verify that -s clawsynapse, -Q, --resume are correct, --max-turns is NOT present
 	a := &HermesAdapter{
 		nodeID: "n1-test",
 	}
@@ -238,6 +238,9 @@ func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
 	if !containsArg(capturedArgs, "-q") {
 		t.Error("expected -q flag")
 	}
+	if !containsArg(capturedArgs, "-Q") {
+		t.Error("expected -Q (quiet mode) flag")
+	}
 	if !containsArg(capturedArgs, "-s") {
 		t.Error("expected -s flag for skill")
 	}
@@ -255,10 +258,68 @@ func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
 	if containsArg(capturedArgs, "--max-turns") {
 		t.Error("--max-turns should not be present")
 	}
+
+	// Without a session, --resume should NOT be present
+	if containsArg(capturedArgs, "--resume") {
+		t.Error("--resume should not be present without a session")
+	}
+}
+
+func TestBuildCommandArgs_ResumeWithSession(t *testing.T) {
+	// When a session mapping exists, --resume <id> should be present
+	dir := t.TempDir()
+	fsStore := store.NewFSStore(dir)
+	if err := fsStore.SaveSessionState(store.SessionState{
+		Adapter:    "hermes",
+		SessionKey: "sess-resume-test",
+		SessionID:  "20260619_100000_abc",
+	}); err != nil {
+		t.Fatalf("save session state: %v", err)
+	}
+
+	a := &HermesAdapter{
+		nodeID:       "n1-test",
+		sessionStore: fsStore,
+	}
+	var capturedArgs []string
+	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("session_id: 20260619_100000_abc\n\nok"), nil
+	}
+
+	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		Type:       "chat.message",
+		From:       "n1-sender",
+		SessionKey: "sess-resume-test",
+		Message:    "test",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+
+	if !containsArg(capturedArgs, "--resume") {
+		t.Error("expected --resume flag when session mapping exists")
+	}
+
+	// Verify the session ID is the value after --resume
+	foundResume := false
+	for i, arg := range capturedArgs {
+		if arg == "--resume" && i+1 < len(capturedArgs) {
+			if capturedArgs[i+1] == "20260619_100000_abc" {
+				foundResume = true
+			}
+			break
+		}
+	}
+	if !foundResume {
+		t.Error("expected --resume 20260619_100000_abc")
+	}
 }
 
 func TestParseHermesResult(t *testing.T) {
-	result, err := parseHermesResult([]byte("Hermes completed the task successfully."))
+	// Quiet mode output: session_id line + blank line + reply
+	input := "session_id: 20260619_120000_abc123\n\nHermes completed the task successfully."
+	result, err := parseHermesResult([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -268,8 +329,46 @@ func TestParseHermesResult(t *testing.T) {
 	if !result.Accepted {
 		t.Error("expected accepted")
 	}
-	if !strings.Contains(result.Reply, "Hermes completed") {
-		t.Errorf("expected reply to contain output, got '%s'", result.Reply)
+	if result.SessionID != "20260619_120000_abc123" {
+		t.Errorf("expected session ID '20260619_120000_abc123', got '%s'", result.SessionID)
+	}
+	if result.Reply != "Hermes completed the task successfully." {
+		t.Errorf("expected clean reply, got '%s'", result.Reply)
+	}
+}
+
+func TestParseHermesResult_NoSessionID(t *testing.T) {
+	// Output without session_id line (e.g., older hermes version)
+	result, err := parseHermesResult([]byte("plain reply without session id"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success")
+	}
+	if result.SessionID != "" {
+		t.Errorf("expected empty session ID, got '%s'", result.SessionID)
+	}
+	if result.Reply != "plain reply without session id" {
+		t.Errorf("expected full output as reply, got '%s'", result.Reply)
+	}
+}
+
+func TestParseHermesResult_MultiLineReply(t *testing.T) {
+	input := "session_id: sess-xyz\n\nLine 1 of reply\nLine 2 of reply\nLine 3"
+	result, err := parseHermesResult([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success")
+	}
+	if result.SessionID != "sess-xyz" {
+		t.Errorf("expected session ID 'sess-xyz', got '%s'", result.SessionID)
+	}
+	expected := "Line 1 of reply\nLine 2 of reply\nLine 3"
+	if result.Reply != expected {
+		t.Errorf("expected multi-line reply, got '%s'", result.Reply)
 	}
 }
 
@@ -289,12 +388,16 @@ func TestParseHermesResult_Empty(t *testing.T) {
 func TestParseHermesResult_LongOutput(t *testing.T) {
 	// Output longer than 4000 characters — should NOT be truncated
 	longText := strings.Repeat("A", 5000)
-	result, err := parseHermesResult([]byte(longText))
+	input := "session_id: sess-long\n\n" + longText
+	result, err := parseHermesResult([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Success {
 		t.Error("expected success for long output")
+	}
+	if result.SessionID != "sess-long" {
+		t.Errorf("expected session ID 'sess-long', got '%s'", result.SessionID)
 	}
 	if result.Reply != longText {
 		t.Errorf("expected full untruncated output (%d chars), got %d chars", len(longText), len(result.Reply))

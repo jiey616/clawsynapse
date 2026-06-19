@@ -83,15 +83,17 @@ func (a *HermesAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
 
 func (a *HermesAdapter) runCommand(ctx context.Context, prompt string, sessionID string) ([]byte, error) {
 	// Build hermes chat -q command
+	// -Q enables quiet mode: suppresses banner/spinner, outputs session_id + final response only
 	args := []string{
 		"chat", "-q", prompt,
+		"-Q",
 		"-s", "clawsynapse",
 		"-t", "terminal",
 		"--yolo",
 	}
 
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
-		args = append(args, "--session", sessionID)
+		args = append(args, "--resume", sessionID)
 	}
 
 	a.logCommand(args, sessionID)
@@ -193,9 +195,14 @@ func (a *HermesAdapter) logCommand(args []string, sessionID string) {
 
 // ── Output parsing ──────────────────────────────────────────────────
 
-// parseHermesResult parses the plain-text output from hermes chat.
-// Hermes outputs plain text (not JSON stream), so we take the output
-// as the reply directly.
+// parseHermesResult parses the output from `hermes chat -Q`.
+// In quiet mode, hermes outputs:
+//
+//	session_id: <SESSION_ID>
+//	<blank line>
+//	<actual reply text>
+//
+// We extract the session_id for continuity and use the remaining lines as the reply.
 func parseHermesResult(data []byte) (*DeliverMessageResult, error) {
 	text := strings.TrimSpace(string(data))
 	if text == "" {
@@ -205,12 +212,35 @@ func parseHermesResult(data []byte) (*DeliverMessageResult, error) {
 		}, nil
 	}
 
-	// Return the full output as the reply (same as openclaw/opencode/codex).
-	// Hermes outputs plain text — the entire response is treated as the reply.
+	lines := strings.Split(text, "\n")
+
+	// Extract session_id from the first line if present
+	var sessionID string
+	var replyLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if sessionID == "" && strings.HasPrefix(trimmed, "session_id:") {
+			sessionID = strings.TrimSpace(strings.TrimPrefix(trimmed, "session_id:"))
+			continue // skip this line, don't include in reply
+		}
+		replyLines = append(replyLines, line)
+	}
+
+	reply := strings.TrimSpace(strings.Join(replyLines, "\n"))
+	if reply == "" {
+		return &DeliverMessageResult{
+			Success:  false,
+			Error:    "hermes returned empty reply (only session_id line)",
+			SessionID: sessionID,
+		}, nil
+	}
+
 	return &DeliverMessageResult{
-		Success:  true,
-		Accepted: true,
-		Reply:    text,
+		Success:   true,
+		Accepted:  true,
+		SessionID: sessionID,
+		Reply:     reply,
 	}, nil
 }
 
