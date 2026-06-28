@@ -87,6 +87,7 @@ func (a *HermesAdapter) runCommand(ctx context.Context, prompt string, sessionID
 		"chat", "-q", prompt,
 		"-Q",
 		"-s", "clawsynapse",
+		"-s", "tm-task-plan",
 		"-t", "terminal",
 		"--yolo",
 	}

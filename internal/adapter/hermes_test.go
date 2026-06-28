@@ -215,7 +215,7 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 }
 
 func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
-	// Verify that -s clawsynapse, -Q, --resume are correct, --max-turns is NOT present
+	// Verify that -s clawsynapse, -s tm-task-plan, -Q, --resume are correct, --max-turns is NOT present
 	a := &HermesAdapter{
 		nodeID: "n1-test",
 	}
@@ -246,6 +246,9 @@ func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
 	}
 	if !containsArg(capturedArgs, "clawsynapse") {
 		t.Error("expected -s clawsynapse skill name")
+	}
+	if !containsArg(capturedArgs, "tm-task-plan") {
+		t.Error("expected -s tm-task-plan skill name")
 	}
 	if !containsArg(capturedArgs, "-t") {
 		t.Error("expected -t flag for toolsets")
