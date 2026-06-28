@@ -215,7 +215,7 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 }
 
 func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
-	// Verify that -s clawsynapse, -s tm-task-plan, -Q, --resume are correct, --max-turns is NOT present
+	// Verify that -Q, --resume are correct, -s is NOT present (skills managed by hermes config)
 	a := &HermesAdapter{
 		nodeID: "n1-test",
 	}
@@ -241,20 +241,16 @@ func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
 	if !containsArg(capturedArgs, "-Q") {
 		t.Error("expected -Q (quiet mode) flag")
 	}
-	if !containsArg(capturedArgs, "-s") {
-		t.Error("expected -s flag for skill")
-	}
-	if !containsArg(capturedArgs, "clawsynapse") {
-		t.Error("expected -s clawsynapse skill name")
-	}
-	if !containsArg(capturedArgs, "tm-task-plan") {
-		t.Error("expected -s tm-task-plan skill name")
-	}
 	if !containsArg(capturedArgs, "-t") {
 		t.Error("expected -t flag for toolsets")
 	}
 	if !containsArg(capturedArgs, "--yolo") {
 		t.Error("expected --yolo flag")
+	}
+
+	// Verify -s is NOT present (skills are managed by hermes config, not hardcoded)
+	if containsArg(capturedArgs, "-s") {
+		t.Error("-s should NOT be present (skills managed by hermes config)")
 	}
 
 	// Check that --max-turns is NOT present

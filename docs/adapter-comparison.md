@@ -164,7 +164,7 @@ chat.message → formatDeliverMessage() 生成协议头
 | 特性 | 实现 |
 |------|------|
 | **类型** | CLI 同步阻塞 + 会话重试 |
-| **命令** | `hermes chat -q "<prompt>" -t terminal --yolo [--session <id>]` |
+| **命令** | `hermes chat -q "<prompt>" -Q -t terminal --yolo [--resume <id>]` |
 | **消息格式** | `[clawsynapse type=... from=... to=... session=...]\n<msg>`（裸传协议头，与 openclaw/codex 一致） |
 | **会话管理** | SessionKey → SessionID 映射（两层 ID 体系，存储在 `sessions/hermes/`） |
 | **Session Store** | **需要** — session 映射持久化 |
