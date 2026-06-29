@@ -51,6 +51,23 @@ func (a *HermesAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRe
 
 	sessionID := a.loadMappedSessionID(req.SessionKey)
 
+	// Fallback: when the message SessionKey differs from the original
+	// (e.g. todo.assigned → task.context.result round-trip where the agent
+	// generated a new SessionKey), look up the Hermes session via taskId
+	// from Metadata, which is stable across the task lifecycle.
+	if sessionID == "" {
+		if taskID := extractTaskID(req.Metadata); taskID != "" {
+			sessionID = a.loadMappedSessionID(taskID)
+			if sessionID != "" && a.log != nil {
+				a.log.Info("hermes session resolved via taskId fallback",
+					slog.String("sessionKey", req.SessionKey),
+					slog.String("taskId", taskID),
+					slog.String("hermesSessionId", sessionID),
+				)
+			}
+		}
+	}
+
 	out, err := a.runCommand(ctx, formatted, sessionID)
 	if err != nil && sessionID != "" && isHermesUnknownSessionError(err) {
 		a.deleteMappedSession(req.SessionKey)
@@ -64,7 +81,15 @@ func (a *HermesAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRe
 	if err != nil {
 		return nil, err
 	}
+
+	// Always save the primary SessionKey mapping.
 	a.saveMappedSession(req.SessionKey, result.SessionID)
+
+	// Also index by taskId so follow-up messages (which may carry a
+	// different SessionKey) can still find the same Hermes session.
+	if taskID := extractTaskID(req.Metadata); taskID != "" && taskID != req.SessionKey {
+		a.saveMappedSession(taskID, result.SessionID)
+	}
 
 	return result, nil
 }
@@ -110,6 +135,19 @@ func (a *HermesAdapter) runCommand(ctx context.Context, prompt string, sessionID
 
 	a.logCommand(args, sessionID)
 	return a.execCmd(ctx, args...)
+}
+
+// ── Task ID extraction ─────────────────────────────────────────────
+
+// extractTaskID returns the taskId from message metadata, if present.
+// This is used as a stable fallback key when the message SessionKey
+// changes across rounds (e.g. todo.assigned → task.context.result).
+func extractTaskID(metadata map[string]any) string {
+	if metadata == nil {
+		return ""
+	}
+	id, _ := metadata["taskId"].(string)
+	return strings.TrimSpace(id)
 }
 
 // ── Session mapping (reuses store.SessionState like Codex adapter) ──
