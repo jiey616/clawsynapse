@@ -23,6 +23,7 @@ type fileConfig struct {
 	TrustAutoApprove    *bool    `yaml:"trustAutoApprove"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	AgentAdapterTimeout string   `yaml:"agentAdapterTimeout"`
+	AgentRole           string   `yaml:"agentRole"`
 	WebhookURL          string   `yaml:"webhookUrl"`
 	LogFilePath         string   `yaml:"logFilePath"`
 	LogRotateMaxSizeMB  *int     `yaml:"logRotateMaxSizeMb"`
@@ -54,6 +55,7 @@ func toFileConfig(cfg Config) fileConfig {
 		TrustAutoApprove:    &taa,
 		AgentAdapter:        cfg.AgentAdapter,
 		AgentAdapterTimeout: cfg.AgentAdapterTimeout,
+		AgentRole:           cfg.AgentRole,
 		WebhookURL:          cfg.WebhookURL,
 		LogFilePath:         cfg.LogFilePath,
 		LogRotateMaxSizeMB:  &cfg.LogRotateMaxSizeMB,
@@ -98,6 +100,7 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		TrustMode:           strings.TrimSpace(cfg.TrustMode),
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
 		AgentAdapterTimeout: parseDurationValue(cfg.AgentAdapterTimeout, 0),
+		AgentRole:           strings.TrimSpace(cfg.AgentRole),
 		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
 		LogFilePath:         strings.TrimSpace(cfg.LogFilePath),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),
@@ -201,6 +204,7 @@ func loadValuesFromMap(values map[string]string) configValues {
 		TrustMode:           strings.TrimSpace(values["TRUST_MODE"]),
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
 		AgentAdapterTimeout: parseDurationValue(values["AGENT_ADAPTER_TIMEOUT"], 0),
+		AgentRole:           strings.TrimSpace(values["AGENT_ROLE"]),
 		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
 		LogFilePath:         strings.TrimSpace(values["LOG_FILE_PATH"]),
 		LogRotateMaxSizeMB:  int(parseIntValue(values["LOG_ROTATE_MAX_SIZE_MB"])),

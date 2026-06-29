@@ -19,6 +19,7 @@ type HermesConfig struct {
 	NodeID       string
 	Logger       *slog.Logger
 	SessionStore *store.FSStore
+	AgentRole    string // pm | executor | ""
 }
 
 // HermesAdapter delivers messages to a local Hermes agent via the hermes CLI.
@@ -26,6 +27,7 @@ type HermesAdapter struct {
 	nodeID       string
 	log          *slog.Logger
 	sessionStore *store.FSStore
+	agentRole    string
 	execCmd      func(ctx context.Context, args ...string) ([]byte, error)
 }
 
@@ -35,6 +37,7 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		nodeID:       strings.TrimSpace(cfg.NodeID),
 		log:          cfg.Logger,
 		sessionStore: cfg.SessionStore,
+		agentRole:    strings.ToLower(strings.TrimSpace(cfg.AgentRole)),
 		execCmd:      defaultHermesExecCmd,
 	}, nil
 }
@@ -88,6 +91,17 @@ func (a *HermesAdapter) runCommand(ctx context.Context, prompt string, sessionID
 		"-Q",
 		"-t", "terminal",
 		"--yolo",
+	}
+
+	// Protocol skill (clawsynapse) is always required for message delivery
+	args = append(args, "-s", "clawsynapse")
+
+	// Load business skill based on the configured agent role
+	switch a.agentRole {
+	case "pm":
+		args = append(args, "-s", "tm-task-plan")
+	case "executor":
+		args = append(args, "-s", "tm-task-exec")
 	}
 
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {

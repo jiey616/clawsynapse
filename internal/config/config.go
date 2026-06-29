@@ -43,6 +43,7 @@ type Config struct {
 	TrustAutoApprove    bool     `json:"trustAutoApprove"`
 	AgentAdapter        string   `json:"agentAdapter"`
 	AgentAdapterTimeout string   `json:"agentAdapterTimeout"`
+	AgentRole           string   `json:"agentRole"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
@@ -83,6 +84,10 @@ func Validate(cfg Config) error {
 	}
 	if adapterName == "webhook" && strings.TrimSpace(cfg.WebhookURL) == "" {
 		return errors.New("webhook url is required when agent adapter is webhook")
+	}
+	role := strings.ToLower(strings.TrimSpace(cfg.AgentRole))
+	if role != "" && role != "pm" && role != "executor" {
+		return errors.New("agent role must be one of: pm|executor (or empty)")
 	}
 	level := strings.ToLower(strings.TrimSpace(cfg.LogLevel))
 	if level != "debug" && level != "info" && level != "warn" && level != "error" {
@@ -135,6 +140,7 @@ type runtimeConfig struct {
 	TrustAutoApprove    bool
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
+	AgentRole           string
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -164,6 +170,7 @@ type configValues struct {
 	TrustAutoApproveSet bool
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
+	AgentRole           string
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -196,6 +203,7 @@ func (c Config) Runtime() runtimeConfig {
 		TrustAutoApprove:    c.TrustAutoApprove,
 		AgentAdapter:        c.AgentAdapter,
 		AgentAdapterTimeout: at,
+		AgentRole:           c.AgentRole,
 		WebhookURL:          c.WebhookURL,
 		LogFilePath:         c.LogFilePath,
 		LogRotateMaxSizeMB:  c.LogRotateMaxSizeMB,
@@ -248,6 +256,7 @@ func LoadFromOS(args []string) (Config, error) {
 		trustAutoApprove    = fs.Bool("trust-auto-approve", merged.TrustAutoApprove, "automatically approve valid inbound trust requests")
 		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|codex|webhook|hermes")
 		agentAdapterTimeout = fs.Duration("agent-adapter-timeout", merged.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
+		agentRole           = fs.String("agent-role", merged.AgentRole, "agent role: pm|executor (for hermes adapter)")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -289,6 +298,10 @@ func LoadFromOS(args []string) (Config, error) {
 	webhookURL := strings.TrimSpace(*webhookURLFlag)
 	if adapterName == "webhook" && webhookURL == "" {
 		return Config{}, errors.New("webhook url is required when agent adapter is webhook (set --webhook-url or WEBHOOK_URL)")
+	}
+	agentRoleVal := strings.ToLower(strings.TrimSpace(*agentRole))
+	if agentRoleVal != "" && agentRoleVal != "pm" && agentRoleVal != "executor" {
+		return Config{}, errors.New("agent role must be one of: pm|executor (or empty)")
 	}
 	level := strings.ToLower(strings.TrimSpace(*logLevel))
 	if level != "debug" && level != "info" && level != "warn" && level != "error" {
@@ -343,6 +356,7 @@ func LoadFromOS(args []string) (Config, error) {
 		TrustAutoApprove:    *trustAutoApprove,
 		AgentAdapter:        adapterName,
 		AgentAdapterTimeout: agentAdapterTimeout.String(),
+		AgentRole:           agentRoleVal,
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
@@ -422,6 +436,9 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if override.AgentAdapterTimeout > 0 {
 		base.AgentAdapterTimeout = override.AgentAdapterTimeout
+	}
+	if strings.TrimSpace(override.AgentRole) != "" {
+		base.AgentRole = strings.TrimSpace(override.AgentRole)
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)

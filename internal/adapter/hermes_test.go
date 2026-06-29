@@ -215,9 +215,11 @@ func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
 }
 
 func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
-	// Verify that -Q, --resume are correct, -s is NOT present (skills managed by hermes config)
+	// Verify that -Q, --resume are correct, -s clawsynapse IS present (protocol skill),
+	// and -s tm-task-plan / -s tm-task-exec are NOT present when agentRole is empty.
 	a := &HermesAdapter{
-		nodeID: "n1-test",
+		nodeID:    "n1-test",
+		agentRole: "",
 	}
 	var capturedArgs []string
 	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
@@ -248,9 +250,17 @@ func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
 		t.Error("expected --yolo flag")
 	}
 
-	// Verify -s is NOT present (skills are managed by hermes config, not hardcoded)
-	if containsArg(capturedArgs, "-s") {
-		t.Error("-s should NOT be present (skills managed by hermes config)")
+	// Protocol skill clawsynapse is always loaded
+	if !containsArg(capturedArgs, "clawsynapse") {
+		t.Error("expected -s clawsynapse (protocol skill always loaded)")
+	}
+
+	// Business skills should NOT be present when agentRole is empty
+	if containsArg(capturedArgs, "tm-task-plan") {
+		t.Error("tm-task-plan should NOT be present when agentRole is empty")
+	}
+	if containsArg(capturedArgs, "tm-task-exec") {
+		t.Error("tm-task-exec should NOT be present when agentRole is empty")
 	}
 
 	// Check that --max-turns is NOT present
@@ -261,6 +271,68 @@ func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
 	// Without a session, --resume should NOT be present
 	if containsArg(capturedArgs, "--resume") {
 		t.Error("--resume should not be present without a session")
+	}
+}
+
+func TestBuildCommandArgs_Skill_PM(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:    "n1-pm",
+		agentRole: "pm",
+	}
+	var capturedArgs []string
+	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("ok"), nil
+	}
+
+	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		Type:    "task.message",
+		From:    "n1-sender",
+		Message: "test",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+
+	if !containsArg(capturedArgs, "clawsynapse") {
+		t.Error("expected -s clawsynapse (protocol skill)")
+	}
+	if !containsArg(capturedArgs, "tm-task-plan") {
+		t.Error("expected -s tm-task-plan for PM role")
+	}
+	if containsArg(capturedArgs, "tm-task-exec") {
+		t.Error("tm-task-exec should NOT be present for PM role")
+	}
+}
+
+func TestBuildCommandArgs_Skill_Executor(t *testing.T) {
+	a := &HermesAdapter{
+		nodeID:    "n1-exec",
+		agentRole: "executor",
+	}
+	var capturedArgs []string
+	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("ok"), nil
+	}
+
+	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
+		Type:    "todo.assigned",
+		From:    "n1-sender",
+		Message: "test",
+	})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+
+	if !containsArg(capturedArgs, "clawsynapse") {
+		t.Error("expected -s clawsynapse (protocol skill)")
+	}
+	if !containsArg(capturedArgs, "tm-task-exec") {
+		t.Error("expected -s tm-task-exec for executor role")
+	}
+	if containsArg(capturedArgs, "tm-task-plan") {
+		t.Error("tm-task-plan should NOT be present for executor role")
 	}
 }
 
