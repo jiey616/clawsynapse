@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +27,9 @@ const (
 	initDefaultLogLevel            = "info"
 	initDefaultLogFormat           = "json"
 )
+
+//go:embed skill_assets/clawsynapse/SKILL.md
+var skillClawsynapse []byte
 
 type initConfig struct {
 	ConfigPath          string
@@ -72,6 +76,14 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	if err := writeInitConfig(cfg); err != nil {
 		return err
+	}
+
+	if cfg.AgentAdapter == "hermes" {
+		if err := deployHermesSkill(); err != nil {
+			fmt.Fprintf(stderr, "warning: deploy skill: %v\n", err)
+		} else {
+			fmt.Fprintf(stdout, "skill deployed: ~/.hermes/skills/clawsynapse/SKILL.md\n")
+		}
 	}
 
 	fmt.Fprintf(stdout, "config written: %s\n", cfg.ConfigPath)
@@ -451,6 +463,19 @@ func promptChoice(reader *bufio.Reader, stdout io.Writer, label, current string,
 		}
 		fmt.Fprintf(stdout, "choose one of: %s\n", strings.Join(allowed, ", "))
 	}
+}
+
+func deployHermesSkill() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	skillDir := filepath.Join(home, ".hermes", "skills", "clawsynapse")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		return fmt.Errorf("create skill dir: %w", err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	return os.WriteFile(skillPath, skillClawsynapse, 0o644)
 }
 
 func promptYesNo(reader *bufio.Reader, stdout io.Writer, label string, defaultYes bool) (bool, error) {
