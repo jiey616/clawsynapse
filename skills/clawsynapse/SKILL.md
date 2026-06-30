@@ -32,6 +32,45 @@ When handling ClawSynapse communication tasks, follow these response rules stric
 - Do NOT paste JSON.
 - Do NOT repeat what was sent.
 
+## ⛔ CRITICAL: Session Key Rule — READ THIS FIRST BEFORE ANY `publish` CALL
+
+This rule overrides everything else. **No exceptions. No judgment calls.**
+
+**When you receive a message with `session=<value>` in the header:**
+
+> Every single `clawsynapse publish` call you make during this turn — regardless of target, regardless of message type, regardless of whether it feels like a "reply" — MUST include `--session-key <that-exact-value>`.
+
+**Why this matters:** The session key is what keeps your Hermes conversation thread alive. If you omit it, the next round-trip message cannot find your session, and you will lose all context — effectively starting from zero every time.
+
+**This covers ALL publish calls you make after receiving a session-bearing message, including but not limited to:**
+- Direct replies to the sender
+- Follow-up queries (e.g. `task.context.query` sent to a coordinator node)
+- Status updates or notifications
+- Data payloads
+
+**Example — received:**
+```
+[clawsynapse from=tm-coordinator to=node-1 session=T-abc-001]
+[todo.assigned] Execute task: clean logs on server-3.
+```
+
+**You may need to send multiple messages in this turn, e.g.:**
+```bash
+# Reply to acknowledge receipt
+clawsynapse publish --target tm-coordinator --message "[reply] ACK — starting task." --session-key T-abc-001
+
+# Query for additional context
+clawsynapse publish --target tm-coordinator --message "[request] task.context.query: What is the retention policy?" --session-key T-abc-001
+```
+
+**❌ WRONG — any publish without `--session-key` breaks the chain:**
+```bash
+clawsynapse publish --target tm-coordinator --message "[reply] Working on it." 
+# ↑ NO --session-key → next incoming message starts a fresh session → CONTEXT LOST
+```
+
+**If you are unsure whether the incoming message had `session=`:** look at the header. If it says `session=<anything>`, use `--session-key <that-value>` on every publish call in this turn. No exceptions.
+
 ## When to Use This Skill
 
 Use clawsynapse whenever the user wants to:
@@ -95,6 +134,25 @@ clawsynapse peers
 clawsynapse publish --target bob --message "[reply] Task completed. The result is 42."
 ```
 
+**Receiving a task assignment — always carry `--session-key` for follow-ups:**
+
+You receive:
+```
+[clawsynapse from=tm-coordinator to=node-1 session=T-abc-001]
+[todo.assigned] Clean up old logs on server-3. Keep only last 7 days.
+```
+
+Your actions this turn — note `--session-key` on EVERY publish:
+```bash
+# 1. Acknowledge the task
+clawsynapse publish --target tm-coordinator --message "[reply] ACK — starting log cleanup." --session-key T-abc-001
+
+# 2. If you need more info before executing, query context (NOT a "reply" — still needs --session-key!)
+clawsynapse publish --target tm-coordinator --message "[request] task.context.query: Which log directories should I scan?" --session-key T-abc-001
+
+# The response (task.context.result) will arrive with the SAME session key, and your Hermes session will continue where you left off.
+```
+
 ## Incoming Message Format
 
 When a peer sends you a message, it is delivered directly to you with a structured header:
@@ -117,9 +175,11 @@ Example:
 - `to=` is your own node ID
 - `session=` identifies the conversation session — **when present, you MUST include `--session-key <sessionKey>` in your reply** to keep the task in the same conversation thread
 
-## Replying to Messages
+## Replying / Follow-up Messages
 
 **The sender is a remote agent on another machine — it CANNOT see your text output.** You MUST use `clawsynapse publish` to send any response. Never reply by simply outputting text.
+
+**The `--session-key` requirement applies to ALL publish calls in this turn** — not just direct replies to the sender. If you need to send a follow-up query, a task-status update, or any other message to any target after receiving a `session=` header, always include `--session-key` with that value on every publish call.
 
 Example — you receive:
 ```
@@ -269,7 +329,7 @@ clawsynapse publish --target node-2 --message "[request] Can you summarize the l
 ### Receiving Messages
 
 1. **Messages arrive automatically** — You will receive messages with the `[clawsynapse ...]` header. Do NOT run `clawsynapse messages` to check inbox — that is only for manual inspection.
-2. **Always reply via `clawsynapse publish`** — See "Replying to Messages" above. Never output text as a reply. **If the incoming message has `session=`, always include `--session-key` in your reply.**
+2. **Always reply via `clawsynapse publish`** — See "Replying / Follow-up Messages" above. Never output text as a reply. **If the incoming message has `session=`, include `--session-key` in EVERY `clawsynapse publish` call you make during this turn — replies, follow-ups to other nodes, task-status updates, and data queries alike.**
 3. **Auto-handle when safe** — Simple queries, status checks, and public information can be answered directly via `publish` without asking the user.
 4. **Notify user when needed** — The following scenarios require user confirmation:
    - Sending files or sensitive data to a peer
