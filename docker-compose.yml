@@ -1,0 +1,62 @@
+# docker-compose.yml — ClawSynapse + Hermes Agent
+# Usage:
+#   docker compose up -d          # production
+#   docker compose up              # foreground (see logs)
+#   docker compose down            # stop & remove
+#   docker compose logs -f         # follow logs
+# ────────────────────────────────────────
+
+services:
+  clawsynapse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: clawsynapse:latest
+    container_name: clawsynapse
+    hostname: clawsynapse
+    restart: unless-stopped
+
+    # ── Ports ──
+    ports:
+      - "${CLAWSYNAPSE_API_PORT:-8080}:8080"
+
+    # ── Environment ──
+    environment:
+      # ClawSynapse config (used by entrypoint + config.yaml)
+      - CLAWSYNAPSE_NODE_ID=${CLAWSYNAPSE_NODE_ID:-}
+      - CLAWSYNAPSE_NODE_KEY=${CLAWSYNAPSE_NODE_KEY:-}
+      - CLAWSYNAPSE_AGENT_ROLE=${CLAWSYNAPSE_AGENT_ROLE:-}   # pm | executor | ""
+      - CLAWSYNAPSE_API_LISTEN=${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:8080}
+
+      # Hermes config
+      - HERMES_API_KEY=${HERMES_API_KEY:-}
+      # If hermes needs additional env vars, add them here:
+      # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+    # ── Volumes (persist data across restarts) ──
+    volumes:
+      # ClawSynapse data (config, identity, store)
+      - clawsynapse-data:/root/.clawsynapse
+      # Hermes data (skills, conversation history)
+      - hermes-data:/root/.hermes
+
+    # ── Healthcheck ──
+    healthcheck:
+      test: ["CMD", "clawsynapse", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # ── Logging ──
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  clawsynapse-data:
+    driver: local
+  hermes-data:
+    driver: local

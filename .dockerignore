@@ -1,0 +1,57 @@
+# ── Git & VCS ──
+.git
+.gitignore
+.gitattributes
+
+# ── Binaries & build artifacts ──
+*.exe
+*.dll
+*.so
+*.dylib
+/clawsynapse
+/clawsynapsed
+/dist/
+/release-*/
+/cmd/clawsynapse/clawsynapse.exe
+/cmd/clawsynapsed/clawsynapsed.exe
+
+# ── OS files ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE & editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Go cache ──
+*.out
+/go-cache/
+
+# ── Test & coverage ──
+*.test
+*.out
+/coverage/
+
+# ── Python (hermes dev) ──
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# ── Logs ──
+*.log
+/logs/
+
+# ── Docs (not needed in image) ──
+/docs/
+*.md
+!cmd/clawsynapse/skill_assets/clawsynapse/SKILL.md
+
+# ── Plans & memory (dev only) ──
+.plans/
+.workbuddy/

@@ -1,0 +1,14 @@
+# ── Force LF line endings for shell scripts (Linux containers need LF) ──
+*.sh text eol=lf
+*.bash text eol=lf
+
+# ── Docker files ──
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+docker-compose.yml text eol=lf
+
+# ── Source code ──
+*.go text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
