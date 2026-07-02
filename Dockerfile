@@ -31,19 +31,21 @@ FROM python:3.11-slim
 
 LABEL org.opencontainers.image.source=https://github.com/jiey616/clawsynapse
 
-# ── System dependencies (hermes install script needs: git, curl, bash) ──
+# ── System dependencies (hermes install needs: git, curl, bash, build tools) ──
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git ca-certificates bash procps \
+    build-essential python3-dev python3-venv libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install Hermes Agent (Chinese mirror) ──
 # Mirror script may contain ANSI color codes; strip them before bash execution.
-# --non-interactive: skip setup wizard
 # --skip-setup: skip interactive API key configuration
 RUN curl -fsSL https://res1.hermesagent.org.cn/install.sh -o /tmp/install.sh && \
     python3 -c "import re; s=open('/tmp/install.sh').read(); s=re.sub(r'\033\[[0-9;]*m', '', s); open('/tmp/install.sh','w').write(s)" && \
-    bash /tmp/install.sh --non-interactive --skip-setup
+    bash /tmp/install.sh --skip-setup
 
+# Make the hermes symlink (created by install script in ~/.local/bin) discoverable
+ENV PATH="/root/.local/bin:${PATH}"
 # ── Copy clawsynapse binaries ──
 COPY --from=builder /build/clawsynapse /usr/local/bin/clawsynapse
 COPY --from=builder /build/clawsynapsed /usr/local/bin/clawsynapsed
