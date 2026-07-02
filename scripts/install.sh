@@ -28,7 +28,9 @@ DEFAULT_NATS_SERVERS="nats://220.168.146.21:9414"
 DEFAULT_LOCAL_API_ADDR="127.0.0.1:18080"
 DEFAULT_TRUST_MODE="tofu"
 DEFAULT_AGENT_ADAPTER="default"
+DEFAULT_AGENT_ROLE=""
 DEFAULT_DELIVERABLE_PREFIXES="chat,task"
+HERMES_DELIVERABLE_PREFIXES="chat,task,todo"
 DEFAULT_HEARTBEAT="15s"
 DEFAULT_ANNOUNCE_TTL="30s"
 DEFAULT_TRANSFER_MAX_FILE_SIZE="104857600"
@@ -79,6 +81,7 @@ Daemon bootstrap options:
   --local-api-addr ADDR
   --trust-mode MODE
   --agent-adapter NAME
+  --agent-role ROLE     pm | executor | (empty); only used with --agent-adapter hermes
   --webhook-url URL
   --deliverable-prefixes CSV
   --config PATH
@@ -309,11 +312,14 @@ maybe_prompt_daemon_config() {
     info "interactive daemon configuration"
     info "reading answers from your terminal"
     NATS_SERVERS="$(prompt_value "NATS servers (comma-separated)" "$NATS_SERVERS")"
-    AGENT_ADAPTER="$(prompt_choice "Agent adapter" "$AGENT_ADAPTER" default openclaw opencode webhook)"
+    AGENT_ADAPTER="$(prompt_choice "Agent adapter" "$AGENT_ADAPTER" default openclaw opencode codex hermes webhook)"
     if [ "$AGENT_ADAPTER" = "webhook" ]; then
         WEBHOOK_URL="$(prompt_required "Webhook URL" "$WEBHOOK_URL")"
     else
         WEBHOOK_URL=""
+    fi
+    if [ "$AGENT_ADAPTER" = "hermes" ]; then
+        AGENT_ROLE="$(prompt_choice "Agent role" "$AGENT_ROLE" pm executor "")"
     fi
     TRUST_MODE="$(prompt_choice "Trust mode" "$TRUST_MODE" open tofu explicit)"
     LOCAL_API_ADDR="$(prompt_value "Local API address" "$LOCAL_API_ADDR")"
@@ -545,6 +551,11 @@ write_config_if_missing() {
         error "--webhook-url is required when --agent-adapter webhook is used"
     fi
 
+    # Hermes adapter needs "todo" prefix for todo.assigned/todo.response
+    if [ "$AGENT_ADAPTER" = "hermes" ] && [ "$DELIVERABLE_PREFIXES" = "$DEFAULT_DELIVERABLE_PREFIXES" ]; then
+        DELIVERABLE_PREFIXES="$HERMES_DELIVERABLE_PREFIXES"
+    fi
+
     tmpfile="$(mktemp)"
 
     {
@@ -553,6 +564,9 @@ write_config_if_missing() {
         printf 'localApiAddr: %s\n' "$LOCAL_API_ADDR"
         printf 'trustMode: %s\n' "$TRUST_MODE"
         printf 'agentAdapter: %s\n' "$AGENT_ADAPTER"
+        if [ -n "$AGENT_ROLE" ]; then
+            printf 'agentRole: %s\n' "$AGENT_ROLE"
+        fi
         if [ -n "$WEBHOOK_URL" ]; then
             printf 'webhookUrl: %s\n' "$WEBHOOK_URL"
         fi
@@ -887,6 +901,11 @@ parse_args() {
                 AGENT_ADAPTER="$2"
                 shift
                 ;;
+            --agent-role)
+                [ $# -ge 2 ] || error "missing value for --agent-role"
+                AGENT_ROLE="$2"
+                shift
+                ;;
             --webhook-url)
                 [ $# -ge 2 ] || error "missing value for --webhook-url"
                 WEBHOOK_URL="$2"
@@ -1033,6 +1052,7 @@ main() {
     LOCAL_API_ADDR="${LOCAL_API_ADDR:-$DEFAULT_LOCAL_API_ADDR}"
     TRUST_MODE="${TRUST_MODE:-$DEFAULT_TRUST_MODE}"
     AGENT_ADAPTER="${AGENT_ADAPTER:-$DEFAULT_AGENT_ADAPTER}"
+    AGENT_ROLE="${AGENT_ROLE:-$DEFAULT_AGENT_ROLE}"
     WEBHOOK_URL="${WEBHOOK_URL:-}"
     DELIVERABLE_PREFIXES="${DELIVERABLE_PREFIXES:-$DEFAULT_DELIVERABLE_PREFIXES}"
     HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-$DEFAULT_HEARTBEAT}"
