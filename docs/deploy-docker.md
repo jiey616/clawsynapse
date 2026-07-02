@@ -1,6 +1,6 @@
 # ClawSynapse + Hermes Agent — Docker 部署指南
 
-在全新的 Linux 服务器上，通过 Docker 一键部署 ClawSynapse + Hermes Agent。
+> 本文档命令使用新版 Compose 语法 `docker compose ...`。如果你的服务器只有旧版独立 `docker-compose`（v1.x），请把命令替换成 `docker-compose ...`（带连字符）。
 
 ---
 
@@ -8,7 +8,7 @@
 
 - Linux 服务器（amd64 / arm64，Ubuntu 20.04+ / Debian 11+ / CentOS 8+ 均可）
 - [Docker](https://docs.docker.com/engine/install/) >= 24.0
-- [Docker Compose](https://docs.docker.com/compose/install/) >= 2.0（`docker compose` 插件）
+- Docker Compose：支持新版 `docker compose` 或旧版独立 `docker-compose` 1.x
 
 ```bash
 # 一键安装 Docker（如果未装）
@@ -49,7 +49,11 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 ### 3. 构建镜像
 
 ```bash
+# 新版 Compose (v2 插件)
 docker compose build
+
+# 旧版独立 docker-compose (v1)
+docker-compose build
 ```
 
 首次构建约 10-15 分钟（需要下载 Go 依赖、克隆 hermes-agent、安装 Node.js + Playwright 等），后续会利用缓存加速。
@@ -57,7 +61,11 @@ docker compose build
 ### 4. 启动容器
 
 ```bash
+# 新版 Compose
 docker compose up -d
+
+# 旧版 docker-compose
+docker-compose up -d
 ```
 
 ### 5. 查看日志
@@ -65,9 +73,13 @@ docker compose up -d
 ```bash
 # 实时日志
 docker compose logs -f
+# 或
+docker-compose logs -f
 
 # 最近 50 行
 docker compose logs --tail 50
+# 或
+docker-compose logs --tail 50
 ```
 
 首次启动时 entrypoint 会自动：
