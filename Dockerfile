@@ -36,13 +36,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git ca-certificates bash procps \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install Hermes Agent (official install script) ──
-# The script detects "root" user → installs binary to /usr/local/lib/hermes-agent/
-# and creates /usr/local/bin/hermes. Data dir: /root/.hermes/
+# ── Install Hermes Agent (Chinese mirror) ──
+# Mirror script may contain ANSI color codes; strip them before bash execution.
 # --non-interactive: skip setup wizard
 # --skip-setup: skip interactive API key configuration
-RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | \
-    bash -s -- --non-interactive --skip-setup
+RUN curl -fsSL https://res1.hermesagent.org.cn/install.sh -o /tmp/install.sh && \
+    python3 -c "import re; s=open('/tmp/install.sh').read(); s=re.sub(r'\033\[[0-9;]*m', '', s); open('/tmp/install.sh','w').write(s)" && \
+    bash /tmp/install.sh --non-interactive --skip-setup
 
 # ── Copy clawsynapse binaries ──
 COPY --from=builder /build/clawsynapse /usr/local/bin/clawsynapse
