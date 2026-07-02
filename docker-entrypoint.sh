@@ -13,6 +13,9 @@ HERMES_SKILL_DIR="${HERMES_SKILL_DIR:-$HERMES_HOME/skills/clawsynapse}"
 SKILL_SRC="${SKILL_SRC:-/usr/local/share/clawsynapse/SKILL.md}"
 HERMES_ENV_FILE="$HERMES_HOME/.env"
 
+# In Docker, the API must bind to all interfaces and match the exposed port.
+CLAWSYNAPSE_API_LISTEN="${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:8080}"
+
 log() { echo "[entrypoint] $*"; }
 
 # ─────────────────────────────────────────────────
@@ -99,12 +102,16 @@ fi
 if [ ! -f "$CLAWSYNAPSE_CONFIG" ]; then
     log "First run — initializing clawsynapse with hermes adapter..."
 
-    INIT_ARGS=(--agent-adapter hermes)
+    INIT_ARGS=(
+        --agent-adapter hermes
+        --local-api-addr "$CLAWSYNAPSE_API_LISTEN"
+        --deliverable-prefixes chat,task,todo
+        --log-file-path ""
+    )
 
     [ -n "$CLAWSYNAPSE_NODE_ID" ]     && INIT_ARGS+=(--node-id "$CLAWSYNAPSE_NODE_ID")
     [ -n "$CLAWSYNAPSE_NODE_KEY" ]    && INIT_ARGS+=(--node-key "$CLAWSYNAPSE_NODE_KEY")
     [ -n "$CLAWSYNAPSE_AGENT_ROLE" ]  && INIT_ARGS+=(--agent-role "$CLAWSYNAPSE_AGENT_ROLE")
-    [ -n "$CLAWSYNAPSE_API_LISTEN" ]  && INIT_ARGS+=(--api-listen "$CLAWSYNAPSE_API_LISTEN")
 
     clawsynapse init "${INIT_ARGS[@]}"
 
@@ -133,8 +140,9 @@ fi
 # ─────────────────────────────────────────────────
 # Step 4: Runtime config overrides from env
 # ─────────────────────────────────────────────────
-if [ -n "$CLAWSYNAPSE_API_LISTEN" ] && [ -f "$CLAWSYNAPSE_CONFIG" ]; then
-    sed -i "s|^apiListen:.*|apiListen: ${CLAWSYNAPSE_API_LISTEN}|" "$CLAWSYNAPSE_CONFIG" 2>/dev/null || true
+if [ -f "$CLAWSYNAPSE_CONFIG" ]; then
+    sed -i "s|^localApiAddr:.*|localApiAddr: ${CLAWSYNAPSE_API_LISTEN}|" "$CLAWSYNAPSE_CONFIG" 2>/dev/null || true
+    sed -i "s|^logFilePath:.*|logFilePath: \"\"|" "$CLAWSYNAPSE_CONFIG" 2>/dev/null || true
 fi
 
 # ─────────────────────────────────────────────────
