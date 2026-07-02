@@ -32,7 +32,10 @@ services:
       - CLAWSYNAPSE_API_LISTEN=${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:8080}
 
       # Hermes LLM provider (entrypoint 写入 ~/.hermes/.env)
-      # 至少配置一组 API Key，推荐 DeepSeek
+      # TokenFlow — 默认 provider (OpenAI 兼容)
+      - TOKENFLOW_API_KEY=${TOKENFLOW_API_KEY:-sk-pjh88cnMJ4EZIiyZpD63NK7gJeji9VCvU23VPRbiSd7uhwou}
+      - TOKENFLOW_BASE_URL=${TOKENFLOW_BASE_URL:-http://36.137.106.15:3030/v1}
+      # 其他 provider (可选)
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
@@ -44,10 +47,9 @@ services:
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
 
       # Hermes 模型配置 (entrypoint 写入 ~/.hermes/config.yaml)
-      # 留空则使用 hermes 默认值 (deepseek-v4-flash)
       - HERMES_MODEL=${HERMES_MODEL:-}
-      - HERMES_PROVIDER=${HERMES_PROVIDER:-}
-      - HERMES_BASE_URL=${HERMES_BASE_URL:-}
+      - HERMES_PROVIDER=${HERMES_PROVIDER:-openai}
+      - HERMES_BASE_URL=${HERMES_BASE_URL:-http://36.137.106.15:3030/v1}
 
     # ── Volumes (data persistence across restarts) ──
     volumes:

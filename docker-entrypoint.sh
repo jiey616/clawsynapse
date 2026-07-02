@@ -28,8 +28,11 @@ if [ ! -f "$HERMES_ENV_FILE" ]; then
 HERMES_HEADER
 
     # Map known env vars → hermes .env
-    # Add more mappings below as needed
     declare -A ENV_MAP=(
+        # TokenFlow (custom OpenAI-compatible, default)
+        ["TOKENFLOW_API_KEY"]="$TOKENFLOW_API_KEY"
+        ["TOKENFLOW_BASE_URL"]="$TOKENFLOW_BASE_URL"
+        # Other providers
         ["DEEPSEEK_API_KEY"]="$DEEPSEEK_API_KEY"
         ["DEEPSEEK_BASE_URL"]="$DEEPSEEK_BASE_URL"
         ["OPENROUTER_API_KEY"]="$OPENROUTER_API_KEY"
@@ -37,6 +40,7 @@ HERMES_HEADER
         ["GOOGLE_API_KEY"]="$GOOGLE_API_KEY"
         ["GEMINI_API_KEY"]="$GEMINI_API_KEY"
         ["NOVITA_API_KEY"]="$NOVITA_API_KEY"
+        ["NOVITA_BASE_URL"]="$NOVITA_BASE_URL"
         ["OLLAMA_API_KEY"]="$OLLAMA_API_KEY"
     )
 
@@ -45,6 +49,13 @@ HERMES_HEADER
             echo "$var=${ENV_MAP[$var]}" >> "$HERMES_ENV_FILE"
         fi
     done
+
+    # TokenFlow alias: also write as OPENAI_API_KEY so hermes picks it up
+    # (hermes looks for OPENAI_API_KEY when provider = openai)
+    if [ -n "$TOKENFLOW_API_KEY" ]; then
+        echo "OPENAI_API_KEY=$TOKENFLOW_API_KEY" >> "$HERMES_ENV_FILE"
+        log "  TokenFlow key aliased as OPENAI_API_KEY for hermes compatibility"
+    fi
 
     chmod 600 "$HERMES_ENV_FILE"
     log "Wrote $HERMES_ENV_FILE"
