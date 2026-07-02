@@ -12,6 +12,8 @@
 #   5. docker compose down                    # 停止
 # ────────────────────────────────────────────
 
+version: '3.8'
+
 services:
   clawsynapse:
     build:
