@@ -2,6 +2,9 @@
 # 同一个容器运行 clawsynapsed + hermes CLI
 #
 # 使用方式:
+#   新版 Compose (v2): docker compose build / docker compose up -d
+#   旧版 Compose (v1): docker-compose build / docker-compose up -d
+#
 #   1. cp .env.example .env && vim .env     # 填写 API Key
 #   2. docker compose build                   # 构建镜像
 #   3. docker compose up -d                   # 启动
