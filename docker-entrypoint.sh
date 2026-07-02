@@ -53,6 +53,36 @@ else
 fi
 
 # ─────────────────────────────────────────────────
+# Step 1b: Set hermes model config (config.yaml)
+#   HERMES_MODEL     — model name (e.g. gpt-4o, claude-sonnet-4-20250514)
+#   HERMES_PROVIDER  — provider key (openai, anthropic, google, deepseek, openrouter, novita, ollama)
+#   HERMES_BASE_URL  — optional custom base URL
+# ─────────────────────────────────────────────────
+HERMES_CONFIG="$HERMES_HOME/config.yaml"
+
+if [ -n "$HERMES_MODEL" ] || [ -n "$HERMES_PROVIDER" ] || [ -n "$HERMES_BASE_URL" ]; then
+    # Wait for config.yaml to exist (hermes install creates it)
+    if [ -f "$HERMES_CONFIG" ]; then
+        log "Configuring hermes model in config.yaml..."
+        if [ -n "$HERMES_MODEL" ]; then
+            sed -i "s|^  default:.*|  default: ${HERMES_MODEL}|" "$HERMES_CONFIG"
+            log "  model.default = $HERMES_MODEL"
+        fi
+        if [ -n "$HERMES_PROVIDER" ]; then
+            sed -i "s|^  provider:.*|  provider: ${HERMES_PROVIDER}|" "$HERMES_CONFIG"
+            log "  model.provider = $HERMES_PROVIDER"
+        fi
+        if [ -n "$HERMES_BASE_URL" ]; then
+            sed -i "s|^  base_url:.*|  base_url: ${HERMES_BASE_URL}|" "$HERMES_CONFIG"
+            log "  model.base_url = $HERMES_BASE_URL"
+        fi
+    else
+        log "WARN: $HERMES_CONFIG not found yet — model config skipped."
+        log "      Run 'hermes setup' inside the container after first start."
+    fi
+fi
+
+# ─────────────────────────────────────────────────
 # Step 2: First-time clawsynapse init
 # ─────────────────────────────────────────────────
 if [ ! -f "$CLAWSYNAPSE_CONFIG" ]; then

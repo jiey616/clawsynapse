@@ -40,7 +40,14 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - NOVITA_API_KEY=${NOVITA_API_KEY:-}
+      - NOVITA_BASE_URL=${NOVITA_BASE_URL:-}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+
+      # Hermes 模型配置 (entrypoint 写入 ~/.hermes/config.yaml)
+      # 留空则使用 hermes 默认值 (deepseek-v4-flash)
+      - HERMES_MODEL=${HERMES_MODEL:-}
+      - HERMES_PROVIDER=${HERMES_PROVIDER:-}
+      - HERMES_BASE_URL=${HERMES_BASE_URL:-}
 
     # ── Volumes (data persistence across restarts) ──
     volumes:
