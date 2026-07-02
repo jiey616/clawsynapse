@@ -33,7 +33,7 @@ services:
 
       # Hermes LLM provider (entrypoint 写入 ~/.hermes/.env)
       # TokenFlow — 默认 provider (OpenAI 兼容)
-      - TOKENFLOW_API_KEY=${TOKENFLOW_API_KEY:-sk-pjh88cnMJ4EZIiyZpD63NK7gJeji9VCvU23VPRbiSd7uhwou}
+      - TOKENFLOW_API_KEY=${TOKENFLOW_API_KEY:-}
       - TOKENFLOW_BASE_URL=${TOKENFLOW_BASE_URL:-http://36.137.106.15:3030/v1}
       # 其他 provider (可选)
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
