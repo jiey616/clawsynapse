@@ -1,10 +1,13 @@
 # docker-compose.yml — ClawSynapse + Hermes Agent
-# Usage:
-#   docker compose up -d          # production
-#   docker compose up              # foreground (see logs)
-#   docker compose down            # stop & remove
-#   docker compose logs -f         # follow logs
-# ────────────────────────────────────────
+# 同一个容器运行 clawsynapsed + hermes CLI
+#
+# 使用方式:
+#   1. cp .env.example .env && vim .env     # 填写 API Key
+#   2. docker compose build                   # 构建镜像
+#   3. docker compose up -d                   # 启动
+#   4. docker compose logs -f                 # 查看日志
+#   5. docker compose down                    # 停止
+# ────────────────────────────────────────────
 
 services:
   clawsynapse:
@@ -20,33 +23,31 @@ services:
     ports:
       - "${CLAWSYNAPSE_API_PORT:-8080}:8080"
 
-    # ── Environment ──
+    # ── Environment variables ──
     environment:
-      # ClawSynapse config (used by entrypoint + config.yaml)
+      # ClawSynapse identity (init 时使用，留空则自动生成)
       - CLAWSYNAPSE_NODE_ID=${CLAWSYNAPSE_NODE_ID:-}
       - CLAWSYNAPSE_NODE_KEY=${CLAWSYNAPSE_NODE_KEY:-}
-      - CLAWSYNAPSE_AGENT_ROLE=${CLAWSYNAPSE_AGENT_ROLE:-}   # pm | executor | ""
+      - CLAWSYNAPSE_AGENT_ROLE=${CLAWSYNAPSE_AGENT_ROLE:-pm}
       - CLAWSYNAPSE_API_LISTEN=${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:8080}
 
-      # Hermes config
-      - HERMES_API_KEY=${HERMES_API_KEY:-}
-      # If hermes needs additional env vars, add them here:
-      # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Hermes LLM provider (entrypoint 写入 ~/.hermes/.env)
+      # 至少配置一组 API Key，推荐 DeepSeek
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - NOVITA_API_KEY=${NOVITA_API_KEY:-}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
 
-    # ── Volumes (persist data across restarts) ──
+    # ── Volumes (data persistence across restarts) ──
     volumes:
-      # ClawSynapse data (config, identity, store)
+      # ClawSynapse: config, identity, store
       - clawsynapse-data:/root/.clawsynapse
-      # Hermes data (skills, conversation history)
+      # Hermes: config, .env, skills, history, auth
       - hermes-data:/root/.hermes
-
-    # ── Healthcheck ──
-    healthcheck:
-      test: ["CMD", "clawsynapse", "version"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 
     # ── Logging ──
     logging:
