@@ -39,6 +39,7 @@ type initConfig struct {
 	TrustAutoApprove    bool
 	AgentAdapter        string
 	AgentAdapterTimeout string
+	AgentRole           string
 	WebhookURL          string
 	DeliverablePrefixes string
 	DataDir             string
@@ -127,6 +128,7 @@ func parseInitArgs(args []string, stderr io.Writer) (initConfig, error) {
 	fs.BoolVar(&cfg.TrustAutoApprove, "trust-auto-approve", false, "automatically approve valid inbound trust requests")
 	fs.StringVar(&cfg.AgentAdapter, "agent-adapter", cfg.AgentAdapter, "agent adapter: default|openclaw|opencode|codex|webhook|hermes")
 	fs.StringVar(&cfg.AgentAdapterTimeout, "agent-adapter-timeout", cfg.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
+	fs.StringVar(&cfg.AgentRole, "agent-role", cfg.AgentRole, "agent role: pm|executor|empty (hermes only)")
 	fs.StringVar(&cfg.WebhookURL, "webhook-url", cfg.WebhookURL, "webhook URL when using webhook adapter")
 	fs.StringVar(&cfg.DeliverablePrefixes, "deliverable-prefixes", cfg.DeliverablePrefixes, "comma-separated deliverable prefixes")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "state directory")
@@ -204,6 +206,7 @@ func finalizeInitConfig(cfg *initConfig) error {
 	cfg.TrustMode = strings.ToLower(strings.TrimSpace(cfg.TrustMode))
 	cfg.AgentAdapter = strings.ToLower(strings.TrimSpace(cfg.AgentAdapter))
 	cfg.AgentAdapterTimeout = strings.TrimSpace(cfg.AgentAdapterTimeout)
+	cfg.AgentRole = strings.ToLower(strings.TrimSpace(cfg.AgentRole))
 	cfg.WebhookURL = strings.TrimSpace(cfg.WebhookURL)
 	cfg.DeliverablePrefixes = strings.TrimSpace(cfg.DeliverablePrefixes)
 	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
@@ -248,6 +251,11 @@ func finalizeInitConfig(cfg *initConfig) error {
 	}
 	if cfg.AgentAdapter == "webhook" && cfg.WebhookURL == "" {
 		return errors.New("webhook url is required when agent adapter is webhook")
+	}
+	switch cfg.AgentRole {
+	case "", "pm", "executor":
+	default:
+		return fmt.Errorf("invalid agent role: %s (must be pm, executor, or empty)", cfg.AgentRole)
 	}
 	switch cfg.LogLevel {
 	case "debug", "info", "warn", "error":
@@ -348,6 +356,9 @@ func renderInitConfig(cfg initConfig) string {
 	fmt.Fprintf(&b, "trustAutoApprove: %t\n", cfg.TrustAutoApprove)
 	fmt.Fprintf(&b, "agentAdapter: %s\n", cfg.AgentAdapter)
 	fmt.Fprintf(&b, "agentAdapterTimeout: %s\n", cfg.AgentAdapterTimeout)
+	if cfg.AgentRole != "" {
+		fmt.Fprintf(&b, "agentRole: %s\n", cfg.AgentRole)
+	}
 	if cfg.WebhookURL != "" {
 		fmt.Fprintf(&b, "webhookUrl: %s\n", cfg.WebhookURL)
 	}
