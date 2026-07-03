@@ -39,6 +39,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential python3-dev python3-venv libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install PyYAML so docker-entrypoint can safely rewrite Hermes config.yaml
+RUN pip install --no-cache-dir PyYAML
+
 # ── Install Hermes Agent (Chinese mirror) ──
 # Mirror script may contain ANSI color codes; strip them before bash execution.
 # --skip-setup: skip interactive API key configuration

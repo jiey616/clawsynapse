@@ -68,33 +68,113 @@ fi
 
 # ─────────────────────────────────────────────────
 # Step 1b: Set hermes model config (config.yaml)
-#   HERMES_MODEL     — model name (e.g. gpt-4o, claude-sonnet-4-20250514)
-#   HERMES_PROVIDER  — provider key (openai, anthropic, google, deepseek, openrouter, novita, ollama)
-#   HERMES_BASE_URL  — optional custom base URL
+#   Uses Python + PyYAML for robust multi-line editing.
+#
+#   Custom provider mode (recommended):
+#     HERMES_CUSTOM_PROVIDER_NAME=tokenflow
+#     HERMES_CUSTOM_PROVIDER_BASE_URL=http://...
+#     HERMES_CUSTOM_PROVIDER_API_KEY=sk-...
+#     HERMES_CUSTOM_PROVIDER_MODEL=qwen36
+#     If API_KEY is empty, falls back to TOKENFLOW_API_KEY.
+#
+#   Legacy provider mode (fallback):
+#     HERMES_MODEL, HERMES_PROVIDER, HERMES_BASE_URL
 # ─────────────────────────────────────────────────
 HERMES_CONFIG="$HERMES_HOME/config.yaml"
 
-if [ -n "$HERMES_MODEL" ] || [ -n "$HERMES_PROVIDER" ] || [ -n "$HERMES_BASE_URL" ]; then
-    # Wait for config.yaml to exist (hermes install creates it)
-    if [ -f "$HERMES_CONFIG" ]; then
-        log "Configuring hermes model in config.yaml..."
-        if [ -n "$HERMES_MODEL" ]; then
-            sed -i "s|^  default:.*|  default: ${HERMES_MODEL}|" "$HERMES_CONFIG"
-            log "  model.default = $HERMES_MODEL"
-        fi
-        if [ -n "$HERMES_PROVIDER" ]; then
-            sed -i "s|^  provider:.*|  provider: ${HERMES_PROVIDER}|" "$HERMES_CONFIG"
-            log "  model.provider = $HERMES_PROVIDER"
-        fi
-        if [ -n "$HERMES_BASE_URL" ]; then
-            sed -i "s|^  base_url:.*|  base_url: ${HERMES_BASE_URL}|" "$HERMES_CONFIG"
-            log "  model.base_url = $HERMES_BASE_URL"
-        fi
-    else
-        log "WARN: $HERMES_CONFIG not found yet — model config skipped."
-        log "      Run 'hermes setup' inside the container after first start."
-    fi
-fi
+configure_hermes_yaml() {
+    python3 - << 'PY'
+import os, sys, yaml
+
+class IndentedDumper(yaml.SafeDumper):
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+config_path = os.environ.get("HERMES_CONFIG", "/root/.hermes/config.yaml")
+
+# Custom provider env
+name = os.environ.get("HERMES_CUSTOM_PROVIDER_NAME", "").strip()
+base_url = os.environ.get("HERMES_CUSTOM_PROVIDER_BASE_URL", "").strip()
+api_key = os.environ.get("HERMES_CUSTOM_PROVIDER_API_KEY", "").strip()
+model = os.environ.get("HERMES_CUSTOM_PROVIDER_MODEL", "").strip()
+
+# Fallback API key to TokenFlow key
+if not api_key:
+    api_key = os.environ.get("TOKENFLOW_API_KEY", "").strip()
+
+# Legacy env
+legacy_model = os.environ.get("HERMES_MODEL", "").strip()
+legacy_provider = os.environ.get("HERMES_PROVIDER", "").strip()
+legacy_base = os.environ.get("HERMES_BASE_URL", "").strip()
+
+if not os.path.exists(config_path):
+    print(f"WARN: {config_path} not found yet — model config skipped.")
+    print("      Run 'hermes setup' inside the container after first start.")
+    sys.exit(0)
+
+with open(config_path, "r", encoding="utf-8") as f:
+    config = yaml.safe_load(f) or {}
+
+if "model" not in config or config["model"] is None:
+    config["model"] = {}
+model_section = config["model"]
+
+if name:
+    print(f"[entrypoint] Configuring custom provider: {name}")
+
+    if "custom_providers" not in config or config["custom_providers"] is None:
+        config["custom_providers"] = []
+    providers = config["custom_providers"]
+    if not isinstance(providers, list):
+        providers = []
+        config["custom_providers"] = providers
+
+    provider_entry = None
+    for p in providers:
+        if isinstance(p, dict) and p.get("name") == name:
+            provider_entry = p
+            break
+
+    if provider_entry is None:
+        provider_entry = {}
+        providers.append(provider_entry)
+
+    provider_entry["name"] = name
+    if base_url:
+        provider_entry["base_url"] = base_url
+    if api_key:
+        provider_entry["api_key"] = api_key
+    if model:
+        provider_entry["model"] = model
+
+    if model:
+        model_section["default"] = model
+        print(f"[entrypoint]   model.default = {model}")
+    model_section["provider"] = name
+    print(f"[entrypoint]   model.provider = {name}")
+    # base_url lives on the provider entry now
+    model_section.pop("base_url", None)
+else:
+    print("[entrypoint] Configuring hermes model (legacy provider mode)...")
+    if legacy_model:
+        model_section["default"] = legacy_model
+        print(f"[entrypoint]   model.default = {legacy_model}")
+    if legacy_provider:
+        model_section["provider"] = legacy_provider
+        print(f"[entrypoint]   model.provider = {legacy_provider}")
+    if legacy_base:
+        model_section["base_url"] = legacy_base
+        print(f"[entrypoint]   model.base_url = {legacy_base}")
+
+with open(config_path, "w", encoding="utf-8") as f:
+    yaml.dump(config, f, Dumper=IndentedDumper, default_flow_style=False,
+              sort_keys=False, allow_unicode=True, indent=2)
+
+print("[entrypoint] Hermes config.yaml updated.")
+PY
+}
+
+configure_hermes_yaml
 
 # ─────────────────────────────────────────────────
 # Step 2: First-time clawsynapse init
