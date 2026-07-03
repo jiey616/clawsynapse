@@ -51,6 +51,7 @@ type initConfig struct {
 	LogLevel            string
 	LogFormat           string
 	Overwrite           bool
+	NonInteractive      bool
 	transferDirExplicit bool
 }
 
@@ -60,7 +61,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	interactive := isInteractiveInput(stdin)
+	interactive := isInteractiveInput(stdin) && !cfg.NonInteractive
 	if interactive {
 		if err := promptInitConfig(stdin, stdout, &cfg); err != nil {
 			return err
@@ -140,6 +141,7 @@ func parseInitArgs(args []string, stderr io.Writer) (initConfig, error) {
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug|info|warn|error")
 	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: json|text")
 	fs.BoolVar(&cfg.Overwrite, "overwrite", false, "overwrite an existing config file without prompting")
+	fs.BoolVar(&cfg.NonInteractive, "non-interactive", false, "skip interactive prompts (use with flags)")
 
 	if err := fs.Parse(args); err != nil {
 		return initConfig{}, err
@@ -207,6 +209,10 @@ func finalizeInitConfig(cfg *initConfig) error {
 	cfg.AgentAdapter = strings.ToLower(strings.TrimSpace(cfg.AgentAdapter))
 	cfg.AgentAdapterTimeout = strings.TrimSpace(cfg.AgentAdapterTimeout)
 	cfg.AgentRole = strings.ToLower(strings.TrimSpace(cfg.AgentRole))
+	// Strip inline comments (e.g. "executor # comment" → "executor")
+	if idx := strings.Index(cfg.AgentRole, "#"); idx >= 0 {
+		cfg.AgentRole = strings.TrimSpace(cfg.AgentRole[:idx])
+	}
 	cfg.WebhookURL = strings.TrimSpace(cfg.WebhookURL)
 	cfg.DeliverablePrefixes = strings.TrimSpace(cfg.DeliverablePrefixes)
 	cfg.DataDir = strings.TrimSpace(cfg.DataDir)

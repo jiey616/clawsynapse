@@ -106,6 +106,8 @@ if [ ! -f "$CLAWSYNAPSE_CONFIG" ]; then
         --agent-adapter hermes
         --local-api-addr "$CLAWSYNAPSE_API_LISTEN"
         --deliverable-prefixes chat,task,todo
+        --non-interactive
+        --overwrite
     )
 
     [ -n "$CLAWSYNAPSE_NODE_ID" ]     && INIT_ARGS+=(--node-id "$CLAWSYNAPSE_NODE_ID")
