@@ -13,9 +13,11 @@
 # ─────────────────────────────────────────────
 
 # ── Stage 1: Build clawsynapse ──
-FROM golang:1.25-alpine AS builder
-
-RUN apk add --no-cache git
+# Use the glibc-based (bookworm) Go image instead of alpine. The alpine
+# variant on some hosts (especially arm64) can hit a runtime panic in the
+# Go compiler during the build, which manifests as an obscure GC stack trace
+# and a non-zero build exit code.
+FROM golang:1.25 AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./
