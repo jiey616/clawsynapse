@@ -191,7 +191,7 @@ docker compose up -d
 
 | Secret 名 | 说明 |
 |---|---|
-| `ALIYUN_REGISTRY` | ACR 地址，如 `registry.cn-hangzhou.aliyuncs.com` |
-| `ALIYUN_NAMESPACE` | ACR 命名空间，如 `jiey616` |
-| `ALIYUN_USERNAME` | 阿里云账号 |
-| `ALIYUN_PASSWORD` | 阿里云密码或 RAM 访问密钥 |
+| `ALIYUN_ACR_REGISTRY` | ACR 地址，如 `registry.cn-hangzhou.aliyuncs.com` |
+| `ALIYUN_ACR_NAMESPACE` | ACR 命名空间，如 `jiey616` |
+| `ALIYUN_ACR_USERNAME` | 阿里云账号 |
+| `ALIYUN_ACR_PASSWORD` | 阿里云密码或 RAM 访问密钥 |
