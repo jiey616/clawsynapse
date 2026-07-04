@@ -17,14 +17,15 @@
 # variant on some hosts (especially arm64) can hit a runtime panic in the
 # Go compiler during the build, which manifests as an obscure GC stack trace
 # and a non-zero build exit code.
-FROM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
 
+ARG TARGETARCH
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN GOPROXY=https://goproxy.cn,direct go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /build/clawsynapse ./cmd/clawsynapse/ && \
     go build -ldflags="-s -w" -o /build/clawsynapsed ./cmd/clawsynapsed/
 

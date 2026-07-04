@@ -1,15 +1,17 @@
 # docker-compose.yml — ClawSynapse + Hermes Agent
 # 同一个容器运行 clawsynapsed + hermes CLI
 #
-# 使用方式:
-#   新版 Compose (v2): docker compose build / docker compose up -d
-#   旧版 Compose (v1): docker-compose build / docker-compose up -d
+# 两种使用模式:
+#   1. 本地构建（默认）:
+#      docker compose build && docker compose up -d
+#   2. 从 Registry 拉取（推荐，速度快）:
+#      export CLAWSYNAPSE_IMAGE=ghcr.io/jiey616/clawsynapse:v1.0.19
+#      docker compose pull && docker compose up -d
 #
 #   1. cp .env.example .env && vim .env     # 填写 API Key
-#   2. docker compose build                   # 构建镜像
-#   3. docker compose up -d                   # 启动
-#   4. docker compose logs -f                 # 查看日志
-#   5. docker compose down                    # 停止
+#   2. docker compose up -d                 # 启动 (自动构建或拉取)
+#   3. docker compose logs -f               # 查看日志
+#   4. docker compose down                  # 停止
 # ────────────────────────────────────────────
 
 version: '3.3'
@@ -19,7 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: clawsynapse:latest
+    image: ${CLAWSYNAPSE_IMAGE:-clawsynapse:latest}
     container_name: clawsynapse
     hostname: clawsynapse
     restart: unless-stopped

@@ -39,24 +39,49 @@ vim .env
 # 角色: pm=项目经理 / executor=执行者
 CLAWSYNAPSE_AGENT_ROLE=pm
 
-# Hermes LLM API Key (DeepSeek 推荐)
-DEEPSEEK_API_KEY=sk-your-deepseek-key-here
-DEEPSEEK_BASE_URL=https://api.deepseek.com
+# Hermes LLM API Key (TokenFlow 默认)
+TOKENFLOW_API_KEY=sk-your-tokenflow-key
 ```
 
-> 如需使用其他 LLM 提供商（OpenAI、OpenRouter 等），在 `.env` 中填写对应的 `*_API_KEY` 即可。
+### 3. 选择部署模式
 
-### 3. 构建镜像
+#### 模式 A：从 Registry 拉取（推荐，速度快）
+
+镜像已自动构建并推送到 GitHub Container Registry 和阿里云 ACR，直接拉取即可：
 
 ```bash
-# 新版 Compose (v2 插件)
-docker compose build
+# 编辑 .env，设置镜像地址（二选一）
+# 国内推荐阿里云:
+CLAWSYNAPSE_IMAGE=registry.cn-hangzhou.aliyuncs.com/jiey616/clawsynapse:v1.0.19
+# 国外可用 ghcr.io:
+# CLAWSYNAPSE_IMAGE=ghcr.io/jiey616/clawsynapse:v1.0.19
 
-# 旧版独立 docker-compose (v1)
-docker-compose build
+# 拉取镜像
+docker compose pull
+
+# 启动
+docker compose up -d
 ```
 
-首次构建约 10-15 分钟（需要下载 Go 依赖、克隆 hermes-agent、安装 Node.js + Playwright 等），后续会利用缓存加速。
+**可用镜像地址：**
+
+| Registry | 地址 | 适用场景 |
+|---|---|---|
+| 阿里云 ACR | `registry.cn-hangzhou.aliyuncs.com/jiey616/clawsynapse:v1.0.19` | 国内，速度快 |
+| ghcr.io | `ghcr.io/jiey616/clawsynapse:v1.0.19` | 国外/科学上网 |
+
+> 镜像支持 `linux/amd64` 和 `linux/arm64` 双架构，pull 时自动匹配。
+
+#### 模式 B：本地构建
+
+```bash
+# 留空 CLAWSYNAPSE_IMAGE（或删除该行）
+# 然后本地构建
+docker compose build
+docker compose up -d
+```
+
+首次构建约 10-15 分钟，后续利用缓存加速。
 
 ### 4. 启动容器
 
@@ -73,17 +98,14 @@ docker-compose up -d
 ```bash
 # 实时日志
 docker compose logs -f
-# 或
-docker-compose logs -f
 
 # 最近 50 行
 docker compose logs --tail 50
-# 或
-docker-compose logs --tail 50
 ```
 
 首次启动时 entrypoint 会自动：
 - 创建 `~/.hermes/.env`（从容器环境变量注入 API Key）
+- 注册 TokenFlow 为 Hermes custom_providers（如已配置）
 - 执行 `clawsynapse init --agent-adapter hermes`
 - 部署 SKILL.md 到 `~/.hermes/skills/clawsynapse/`
 - 启动 `clawsynapsed start`
@@ -94,14 +116,11 @@ docker-compose logs --tail 50
 # 检查 clawsynapse 版本
 docker compose exec clawsynapse clawsynapse version
 
-# 检查 hermes 是否可用
-docker compose exec clawsynapse hermes --version
-
 # 检查 health
 docker compose exec clawsynapse clawsynapse health
 
-# 检查 SKILL.md 是否已部署
-docker compose exec clawsynapse ls -la /root/.hermes/skills/clawsynapse/
+# 检查 Hermes 配置（应看到 provider: tokenflow）
+docker compose exec clawsynapse cat /root/.hermes/config.yaml | grep -A 5 "^model:"
 ```
 
 ---
@@ -115,17 +134,14 @@ docker compose down
 # 重启
 docker compose restart
 
-# 重建镜像并重启
+# 拉取最新镜像并重启
+docker compose pull && docker compose up -d
+
+# 重建镜像并重启（本地构建模式）
 docker compose up -d --build
 
 # 进入容器调试
 docker compose exec clawsynapse bash
-
-# 查看 hermes 配置
-docker compose exec clawsynapse cat /root/.hermes/.env
-
-# 查看 clawsynapse 配置
-docker compose exec clawsynapse cat /root/.clawsynapse/config.yaml
 ```
 
 ---
@@ -139,17 +155,6 @@ docker compose exec clawsynapse cat /root/.clawsynapse/config.yaml
 | `clawsynapse-data` | `/root/.clawsynapse/` | clawsynapse 配置、身份密钥、存储 |
 | `hermes-data` | `/root/.hermes/` | hermes .env、skills、会话历史、认证 |
 
-```bash
-# 查看 volume 位置
-docker volume inspect clawsynapse_clawsynapse-data
-
-# 备份 volume
-docker run --rm -v clawsynapse_clawsynapse-data:/data -v $(pwd):/backup alpine tar czf /backup/clawsynapse-backup.tar.gz -C /data .
-
-# 恢复 volume
-docker run --rm -v clawsynapse_clawsynapse-data:/data -v $(pwd):/backup alpine tar xzf /backup/clawsynapse-backup.tar.gz -C /data
-```
-
 ---
 
 ## 更换 LLM API Key
@@ -157,29 +162,9 @@ docker run --rm -v clawsynapse_clawsynapse-data:/data -v $(pwd):/backup alpine t
 直接修改 `.env` 文件然后重启容器：
 
 ```bash
-vim .env                          # 修改 DEEPSEEK_API_KEY
-docker compose down               # 停止
-docker compose up -d              # 重新启动
-```
-
-> 容器内的 `/root/.hermes/.env` 只会在**首次不存在时**自动生成。如果已存在（volume 持久化），需进入容器手动修改：
-> ```bash
-> docker compose exec clawsynapse vim /root/.hermes/.env
-> ```
-
----
-
-## 切换到其他 LLM 提供商
-
-1. 修改 `.env`，填写对应 `*_API_KEY`
-2. 进入容器修改 `~/.hermes/config.yaml` 中的 `model.default`
-3. 重启容器
-
-```bash
-docker compose exec clawsynapse bash
-vim /root/.hermes/config.yaml      # 改 model.default
-exit
-docker compose restart
+vim .env
+docker compose down
+docker compose up -d
 ```
 
 ---
@@ -189,30 +174,24 @@ docker compose restart
 | 问题 | 排查命令 |
 |------|---------|
 | 容器启动失败 | `docker compose logs --tail 100` |
-| hermes 命令不可用 | `docker compose exec clawsynapse which hermes` |
-| API Key 未生效 | `docker compose exec clawsynapse cat /root/.hermes/.env` |
-| 端口冲突 | `docker compose port clawsynapse 8080` |
-| 磁盘空间不足 | `docker system prune -a`（清理未使用的镜像） |
+| 镜像拉取慢 | 换用阿里云 ACR 地址 |
+| 架构不匹配 | `docker inspect <image> | grep Architecture` |
+| 磁盘空间不足 | `docker system prune -a` |
 
 ---
 
-## 架构说明
+## CI/CD：自动构建 Docker 镜像
 
-```
-┌─────────────────────────────────────┐
-│            Docker Container          │
-│                                     │
-│  /usr/local/bin/clawsynapsed        │
-│       │ (hermes adapter)            │
-│       │ spawns                      │
-│  ┌────▼────────────────────┐        │
-│  │  hermes chat -q "msg"   │        │
-│  │  (installed at build)   │        │
-│  │  /usr/local/bin/hermes  │        │
-│  └─────────────────────────┘        │
-│                                     │
-│  Data volumes:                      │
-│    /root/.clawsynapse/  ← config    │
-│    /root/.hermes/       ← env/skills│
-└─────────────────────────────────────┘
-```
+每次推送 `v*` tag 时，GitHub Actions 自动：
+1. 运行测试 + 构建 CLI release 包
+2. 用 QEMU + Buildx 构建 `linux/amd64` + `linux/arm64` 双架构镜像
+3. 推送到 `ghcr.io` 和阿里云 ACR（需配置 Secrets）
+
+**所需 GitHub Secrets：**
+
+| Secret 名 | 说明 |
+|---|---|
+| `ALIYUN_REGISTRY` | ACR 地址，如 `registry.cn-hangzhou.aliyuncs.com` |
+| `ALIYUN_NAMESPACE` | ACR 命名空间，如 `jiey616` |
+| `ALIYUN_USERNAME` | 阿里云账号 |
+| `ALIYUN_PASSWORD` | 阿里云密码或 RAM 访问密钥 |
