@@ -47,12 +47,12 @@ TOKENFLOW_API_KEY=sk-your-tokenflow-key
 
 #### 模式 A：从 Registry 拉取（推荐，速度快）
 
-镜像已自动构建并推送到 GitHub Container Registry 和阿里云 ACR，直接拉取即可：
+镜像已自动构建并推送到 GitHub Container Registry 和腾讯云 TCR，直接拉取即可：
 
 ```bash
 # 编辑 .env，设置镜像地址（二选一）
-# 国内推荐阿里云:
-CLAWSYNAPSE_IMAGE=registry.cn-hangzhou.aliyuncs.com/jiey616/clawsynapse:v1.0.19
+# 国内推荐腾讯云 TCR:
+CLAWSYNAPSE_IMAGE=ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.19
 # 国外可用 ghcr.io:
 # CLAWSYNAPSE_IMAGE=ghcr.io/jiey616/clawsynapse:v1.0.19
 
@@ -67,7 +67,7 @@ docker compose up -d
 
 | Registry | 地址 | 适用场景 |
 |---|---|---|
-| 阿里云 ACR | `registry.cn-hangzhou.aliyuncs.com/jiey616/clawsynapse:v1.0.19` | 国内，速度快 |
+| 腾讯云 TCR | `ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.19` | 国内，速度快 |
 | ghcr.io | `ghcr.io/jiey616/clawsynapse:v1.0.19` | 国外/科学上网 |
 
 > 镜像支持 `linux/amd64` 和 `linux/arm64` 双架构，pull 时自动匹配。
@@ -174,7 +174,7 @@ docker compose up -d
 | 问题 | 排查命令 |
 |------|---------|
 | 容器启动失败 | `docker compose logs --tail 100` |
-| 镜像拉取慢 | 换用阿里云 ACR 地址 |
+| 镜像拉取慢 | 换用腾讯云 TCR 地址 |
 | 架构不匹配 | `docker inspect <image> | grep Architecture` |
 | 磁盘空间不足 | `docker system prune -a` |
 
@@ -185,14 +185,14 @@ docker compose up -d
 每次推送 `v*` tag 时，GitHub Actions 自动：
 1. 运行测试 + 构建 CLI release 包
 2. 用 QEMU + Buildx 构建 `linux/amd64` + `linux/arm64` 双架构镜像
-3. 推送到 `ghcr.io` 和阿里云 ACR（需配置 Secrets）
+3. 推送到 `ghcr.io` 和腾讯云 TCR（需配置 Secrets）
 
 **所需 GitHub Secrets：**
 
 | Secret 名 | 说明 |
 |---|---|
 | `GHCR_TOKEN` | **推荐**：GitHub Personal Access Token（classic），勾选 `write:packages` 和 `repo`。当 `GITHUB_TOKEN` 因 `insufficient_scope` 无法推送时使用。若未设置，则回退到 `GITHUB_TOKEN`。 |
-| `ALIYUN_ACR_REGISTRY` | ACR 地址，如 `registry.cn-hangzhou.aliyuncs.com` |
-| `ALIYUN_ACR_NAMESPACE` | ACR 命名空间，如 `jiey616` |
-| `ALIYUN_ACR_USERNAME` | 阿里云账号 |
-| `ALIYUN_ACR_PASSWORD` | 阿里云密码或 RAM 访问密钥 |
+| `TCR_REGISTRY` | TCR 地址，如 `ccr.ccs.tencentyun.com` |
+| `TCR_NAMESPACE` | TCR 命名空间，如 `jiey616` |
+| `TCR_USERNAME` | 腾讯云账号 ID（数字格式） |
+| `TCR_PASSWORD` | TCR 登录密码（在控制台设置的固定密码） |
