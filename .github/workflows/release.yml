@@ -109,16 +109,36 @@ jobs:
       - name: Compute image tags
         id: tags
         run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          REPO="${{ github.repository }}"
           TAGS=""
+
           if [ "${{ steps.check.outputs.has_ghcr }}" == "true" ]; then
-            TAGS="ghcr.io/${{ github.repository }}:latest"
-            TAGS="$TAGS,ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}"
+            TAGS="ghcr.io/${REPO}:latest,ghcr.io/${REPO}:${VERSION}"
           fi
+
           if [ "${{ steps.check.outputs.has_aliyun }}" == "true" ]; then
-            if [ -n "$TAGS" ]; then TAGS="$TAGS,"; fi
-            TAGS="$TAGS${{ secrets.ALIYUN_ACR_REGISTRY }}/${{ secrets.ALIYUN_ACR_NAMESPACE }}/clawsynapse:latest"
-            TAGS="$TAGS,${{ secrets.ALIYUN_ACR_REGISTRY }}/${{ secrets.ALIYUN_ACR_NAMESPACE }}/clawsynapse:${{ steps.version.outputs.VERSION }}"
+            ALIYUN_REGISTRY=$(printf '%s' "${{ secrets.ALIYUN_ACR_REGISTRY }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            ALIYUN_NAMESPACE=$(printf '%s' "${{ secrets.ALIYUN_ACR_NAMESPACE }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+            echo "Aliyun registry: [${ALIYUN_REGISTRY}]"
+            echo "Aliyun namespace: [${ALIYUN_NAMESPACE}]"
+
+            if [ -z "$ALIYUN_REGISTRY" ] || [ -z "$ALIYUN_NAMESPACE" ]; then
+              echo "::error::ALIYUN_ACR_REGISTRY and ALIYUN_ACR_NAMESPACE must be set"
+              exit 1
+            fi
+
+            if [[ ! "$ALIYUN_REGISTRY" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$ ]]; then
+              echo "::error::Invalid ALIYUN_ACR_REGISTRY format: [$ALIYUN_REGISTRY]. It should be a registry host like 97x2s2mq7h52n6m.cn-hangzhou.personal.cr.aliyuncs.com"
+              exit 1
+            fi
+
+            if [ -n "$TAGS" ]; then TAGS="${TAGS},"; fi
+            TAGS="${TAGS}${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/clawsynapse:latest"
+            TAGS="${TAGS},${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/clawsynapse:${VERSION}"
           fi
+
           echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
           echo "Will push tags: $TAGS"
 
