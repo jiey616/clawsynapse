@@ -175,7 +175,7 @@ jobs:
 
       # ── Fail the job only if BOTH registries failed (or neither was configured) ──
       - name: Check overall result
-        if: always
+        if: always()
         run: |
           ALIYUN_OK="${{ steps.check.outputs.has_aliyun == 'true' && steps.aliyun_push.outcome == 'success' }}"
           GHCR_OK="${{ steps.check.outputs.has_ghcr == 'true' && steps.ghcr_push.outcome == 'success' }}"
