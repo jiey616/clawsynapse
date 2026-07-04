@@ -191,6 +191,7 @@ docker compose up -d
 
 | Secret 名 | 说明 |
 |---|---|
+| `GHCR_TOKEN` | **推荐**：GitHub Personal Access Token（classic），勾选 `write:packages` 和 `repo`。当 `GITHUB_TOKEN` 因 `insufficient_scope` 无法推送时使用。若未设置，则回退到 `GITHUB_TOKEN`。 |
 | `ALIYUN_ACR_REGISTRY` | ACR 地址，如 `registry.cn-hangzhou.aliyuncs.com` |
 | `ALIYUN_ACR_NAMESPACE` | ACR 命名空间，如 `jiey616` |
 | `ALIYUN_ACR_USERNAME` | 阿里云账号 |
