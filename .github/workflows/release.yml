@@ -83,16 +83,11 @@ jobs:
             echo "has_aliyun=false" >> $GITHUB_OUTPUT
           fi
 
-      # ── GHCR (optional, only if GHCR_TOKEN PAT is set) ──
-      - name: Log in to GitHub Container Registry
-        if: steps.check.outputs.has_ghcr == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+      - name: Extract version (strip v prefix)
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      # ── Aliyun ACR (optional) ──
+      # ── Aliyun ACR push (primary, China-friendly) ──
       - name: Log in to Aliyun ACR
         if: steps.check.outputs.has_aliyun == 'true'
         uses: docker/login-action@v3
@@ -101,55 +96,103 @@ jobs:
           username: ${{ secrets.ALIYUN_ACR_USERNAME }}
           password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
 
-      # ── Compute tags based on which registries are configured ──
-      - name: Extract version (strip v prefix)
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Compute image tags
-        id: tags
+      - name: Validate Aliyun ACR config
+        if: steps.check.outputs.has_aliyun == 'true'
+        id: aliyun
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          REPO="${{ github.repository }}"
-          TAGS=""
+          ALIYUN_REGISTRY=$(printf '%s' "${{ secrets.ALIYUN_ACR_REGISTRY }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          ALIYUN_NAMESPACE=$(printf '%s' "${{ secrets.ALIYUN_ACR_NAMESPACE }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
-          if [ "${{ steps.check.outputs.has_ghcr }}" == "true" ]; then
-            TAGS="ghcr.io/${REPO}:latest,ghcr.io/${REPO}:${VERSION}"
+          echo "Aliyun registry: [${ALIYUN_REGISTRY}]"
+          echo "Aliyun namespace: [${ALIYUN_NAMESPACE}]"
+
+          if [ -z "$ALIYUN_REGISTRY" ] || [ -z "$ALIYUN_NAMESPACE" ]; then
+            echo "::error::ALIYUN_ACR_REGISTRY and ALIYUN_ACR_NAMESPACE must be set"
+            exit 1
           fi
 
-          if [ "${{ steps.check.outputs.has_aliyun }}" == "true" ]; then
-            ALIYUN_REGISTRY=$(printf '%s' "${{ secrets.ALIYUN_ACR_REGISTRY }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-            ALIYUN_NAMESPACE=$(printf '%s' "${{ secrets.ALIYUN_ACR_NAMESPACE }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-
-            echo "Aliyun registry: [${ALIYUN_REGISTRY}]"
-            echo "Aliyun namespace: [${ALIYUN_NAMESPACE}]"
-
-            if [ -z "$ALIYUN_REGISTRY" ] || [ -z "$ALIYUN_NAMESPACE" ]; then
-              echo "::error::ALIYUN_ACR_REGISTRY and ALIYUN_ACR_NAMESPACE must be set"
-              exit 1
-            fi
-
-            if [[ ! "$ALIYUN_REGISTRY" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$ ]]; then
-              echo "::error::Invalid ALIYUN_ACR_REGISTRY format: [$ALIYUN_REGISTRY]. It should be a registry host like 97x2s2mq7h52n6m.cn-hangzhou.personal.cr.aliyuncs.com"
-              exit 1
-            fi
-
-            if [ -n "$TAGS" ]; then TAGS="${TAGS},"; fi
-            TAGS="${TAGS}${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/clawsynapse:latest"
-            TAGS="${TAGS},${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/clawsynapse:${VERSION}"
+          if [[ ! "$ALIYUN_REGISTRY" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$ ]]; then
+            echo "::error::Invalid ALIYUN_ACR_REGISTRY format: [$ALIYUN_REGISTRY]"
+            exit 1
           fi
 
-          echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
-          echo "Will push tags: $TAGS"
+          ALIYUN_IMAGE="${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/clawsynapse"
+          echo "IMAGE=$ALIYUN_IMAGE" >> $GITHUB_OUTPUT
+          echo "Aliyun image: ${ALIYUN_IMAGE}"
 
-      - name: Build and push multi-arch image
+      - name: Build and push to Aliyun ACR
+        if: steps.check.outputs.has_aliyun == 'true'
+        id: aliyun_push
+        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.tags.outputs.TAGS }}
+          tags: |
+            ${{ steps.aliyun.outputs.IMAGE }}:latest
+            ${{ steps.aliyun.outputs.IMAGE }}:${{ steps.version.outputs.VERSION }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.version.outputs.VERSION }}
+
+      - name: Report Aliyun push failure
+        if: steps.check.outputs.has_aliyun == 'true' && steps.aliyun_push.outcome == 'failure'
+        run: |
+          echo "::warning::Aliyun ACR push failed, but continuing to ghcr.io step"
+
+      # ── GHCR push (optional, only if GHCR_TOKEN PAT is set) ──
+      - name: Log in to GitHub Container Registry
+        if: steps.check.outputs.has_ghcr == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push to GHCR
+        if: steps.check.outputs.has_ghcr == 'true'
+        id: ghcr_push
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.VERSION }}
+
+      - name: Report GHCR push failure
+        if: steps.check.outputs.has_ghcr == 'true' && steps.ghcr_push.outcome == 'failure'
+        run: |
+          echo "::warning::GHCR push failed — check that GHCR_TOKEN PAT has write:packages scope"
+
+      # ── Fail the job only if BOTH registries failed (or neither was configured) ──
+      - name: Check overall result
+        if: always
+        run: |
+          ALIYUN_OK="${{ steps.check.outputs.has_aliyun == 'true' && steps.aliyun_push.outcome == 'success' }}"
+          GHCR_OK="${{ steps.check.outputs.has_ghcr == 'true' && steps.ghcr_push.outcome == 'success' }}"
+          HAS_ALIYUN="${{ steps.check.outputs.has_aliyun }}"
+          HAS_GHCR="${{ steps.check.outputs.has_ghcr }}"
+
+          echo "Aliyun configured: $HAS_ALIYUN, push result: ${{ steps.aliyun_push.outcome }}"
+          echo "GHCR configured: $HAS_GHCR, push result: ${{ steps.ghcr_push.outcome }}"
+
+          if [ "$HAS_ALIYUN" != "true" ] && [ "$HAS_GHCR" != "true" ]; then
+            echo "::error::No registry secrets configured (ALIYUN_ACR_USERNAME or GHCR_TOKEN)"
+            exit 1
+          fi
+
+          if [ "$ALIYUN_OK" != "true" ] && [ "$GHCR_OK" != "true" ]; then
+            echo "::error::All configured registry pushes failed"
+            exit 1
+          fi
+
+          echo "At least one registry push succeeded"
