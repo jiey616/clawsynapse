@@ -43,12 +43,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install PyYAML so docker-entrypoint can safely rewrite Hermes config.yaml
 RUN pip install --no-cache-dir PyYAML
 
-# ── Install Hermes Agent (Chinese mirror) ──
-# Mirror script may contain ANSI color codes; strip them before bash execution.
+# ── Install Hermes Agent (official server) ──
 # --skip-setup: skip interactive API key configuration
-RUN curl -fsSL https://res1.hermesagent.org.cn/install.sh -o /tmp/install.sh && \
-    python3 -c "import re; s=open('/tmp/install.sh').read(); s=re.sub(r'\033\[[0-9;]*m', '', s); open('/tmp/install.sh','w').write(s)" && \
-    bash /tmp/install.sh --skip-setup
+RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup
 
 # Make the hermes symlink (created by install script in ~/.local/bin) discoverable
 ENV PATH="/root/.local/bin:${PATH}"
