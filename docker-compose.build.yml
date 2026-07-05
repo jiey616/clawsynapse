@@ -1,24 +1,19 @@
-# docker-compose.yml — ClawSynapse + Hermes Agent
-# 同一个容器运行 clawsynapsed + hermes CLI
+# docker-compose.build.yml — 本地构建 ClawSynapse Docker 镜像
+# 当需要本地修改源码并构建时使用，默认部署请用 docker-compose.yml
 #
-# 默认从 Registry 拉取预构建镜像（推荐，速度快）:
-#   cp .env.example .env && vim .env     # 填写 API Key 并确认 CLAWSYNAPSE_IMAGE
-#   docker-compose pull                  # 拉取镜像
-#   docker-compose up -d                 # 启动
-#
-# 如需本地构建，使用 docker-compose.build.yml:
+# 用法:
 #   docker-compose -f docker-compose.build.yml build
 #   docker-compose -f docker-compose.build.yml up -d
-#
-#   1. docker-compose logs -f            # 查看日志
-#   2. docker-compose down               # 停止
 # ────────────────────────────────────────────
 
 version: '3.3'
 
 services:
   clawsynapse:
-    image: ${CLAWSYNAPSE_IMAGE:-clawsynapse:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: clawsynapse:latest
     container_name: clawsynapse
     hostname: clawsynapse
     restart: unless-stopped
@@ -29,17 +24,13 @@ services:
 
     # ── Environment variables ──
     environment:
-      # ClawSynapse identity (init 时使用，留空则自动生成)
       - CLAWSYNAPSE_NODE_ID=${CLAWSYNAPSE_NODE_ID}
       - CLAWSYNAPSE_NODE_KEY=${CLAWSYNAPSE_NODE_KEY}
       - CLAWSYNAPSE_AGENT_ROLE=${CLAWSYNAPSE_AGENT_ROLE}
       - CLAWSYNAPSE_API_LISTEN=${CLAWSYNAPSE_API_LISTEN}
 
-      # Hermes LLM provider (entrypoint 写入 ~/.hermes/.env)
-      # TokenFlow — 默认 provider (OpenAI 兼容)
       - TOKENFLOW_API_KEY=${TOKENFLOW_API_KEY}
       - TOKENFLOW_BASE_URL=${TOKENFLOW_BASE_URL}
-      # 其他 provider (可选)
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -50,25 +41,19 @@ services:
       - NOVITA_BASE_URL=${NOVITA_BASE_URL}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY}
 
-      # Hermes 模型配置 (entrypoint 写入 ~/.hermes/config.yaml)
       - HERMES_MODEL=${HERMES_MODEL}
       - HERMES_PROVIDER=${HERMES_PROVIDER}
       - HERMES_BASE_URL=${HERMES_BASE_URL}
 
-      # Hermes 自定义 Provider (entrypoint 注册到 ~/.hermes/config.yaml)
       - HERMES_CUSTOM_PROVIDER_NAME=${HERMES_CUSTOM_PROVIDER_NAME}
       - HERMES_CUSTOM_PROVIDER_BASE_URL=${HERMES_CUSTOM_PROVIDER_BASE_URL}
       - HERMES_CUSTOM_PROVIDER_API_KEY=${HERMES_CUSTOM_PROVIDER_API_KEY}
       - HERMES_CUSTOM_PROVIDER_MODEL=${HERMES_CUSTOM_PROVIDER_MODEL}
 
-    # ── Volumes (data persistence across restarts) ──
     volumes:
-      # ClawSynapse: config, identity, store
       - clawsynapse-data:/root/.clawsynapse
-      # Hermes: config, .env, skills, history, auth
       - hermes-data:/root/.hermes
 
-    # ── Logging ──
     logging:
       driver: "json-file"
       options:
