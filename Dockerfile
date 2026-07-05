@@ -17,7 +17,7 @@
 # variant on some hosts (especially arm64) can hit a runtime panic in the
 # Go compiler during the build, which manifests as an obscure GC stack trace
 # and a non-zero build exit code.
-FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+FROM golang:1.25 AS builder
 
 ARG TARGETARCH
 WORKDIR /build
