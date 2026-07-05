@@ -14,7 +14,7 @@ SKILL_SRC="${SKILL_SRC:-/usr/local/share/clawsynapse/SKILL.md}"
 HERMES_ENV_FILE="$HERMES_HOME/.env"
 
 # In Docker, the API must bind to all interfaces and match the exposed port.
-CLAWSYNAPSE_API_LISTEN="${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:8080}"
+CLAWSYNAPSE_API_LISTEN="${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:18080}"
 
 log() { echo "[entrypoint] $*"; }
 

@@ -8,7 +8,7 @@
 #           -v hermes-data:/root/.hermes \
 #           -e CLAWSYNAPSE_AGENT_ROLE=pm \
 #           -e DEEPSEEK_API_KEY=sk-xxx \
-#           -p 8080:8080 \
+#           -p 18080:18080 \
 #           clawsynapse:latest
 # ─────────────────────────────────────────────
 
