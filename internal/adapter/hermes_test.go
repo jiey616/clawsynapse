@@ -2,662 +2,415 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"clawsynapse/internal/store"
 )
 
-func TestNewHermesAdapter(t *testing.T) {
-	cfg := HermesConfig{
-		NodeID:       "n1-test",
-		Logger:       nil,
-		SessionStore: nil,
-	}
+// fakeGateway is an in-memory Hermes Gateway API mock.
+type fakeGateway struct {
+	mu sync.Mutex
 
-	a, err := NewHermesAdapter(cfg)
+	responsesPrev []string // previous_response_id received on each /v1/responses call
+	runsSessionID []string // session_id received on each /v1/runs call
+
+	runStatusIdx map[string]int
+
+	healthCode int
+
+	unknownResponses bool // simulate unknown-session on first continuation (responses)
+	unknownRuns      bool // simulate unknown-session on first continuation (runs)
+	urDone           bool
+	urRunsDone       bool
+}
+
+func (fg *fakeGateway) handler() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		code := fg.healthCode
+		if code == 0 {
+			code = 200
+		}
+		w.WriteHeader(code)
+	})
+
+	mux.HandleFunc("/v1/responses", func(w http.ResponseWriter, r *http.Request) {
+		var req responsesRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		fg.mu.Lock()
+		fg.responsesPrev = append(fg.responsesPrev, req.PreviousResponseID)
+		id := fmt.Sprintf("resp-%d", len(fg.responsesPrev))
+		fg.mu.Unlock()
+
+		if fg.unknownResponses && !fg.urDone && req.PreviousResponseID != "" {
+			fg.urDone = true
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"session not found"}`))
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(responsesResponse{
+			ID:         id,
+			Status:     "completed",
+			OutputText: "hello",
+		})
+	})
+
+	mux.HandleFunc("/v1/runs", func(w http.ResponseWriter, r *http.Request) {
+		var req runCreateRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		fg.mu.Lock()
+		fg.runsSessionID = append(fg.runsSessionID, req.SessionID)
+		fg.mu.Unlock()
+
+		if fg.unknownRuns && !fg.urRunsDone && req.SessionID != "" {
+			fg.urRunsDone = true
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"session not found"}`))
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(runCreateResponse{
+			RunID:     "run-1",
+			SessionID: "sess-1",
+		})
+	})
+
+	mux.HandleFunc("/v1/runs/", func(w http.ResponseWriter, r *http.Request) {
+		seq := []string{"running", "completed"}
+		fg.mu.Lock()
+		if fg.runStatusIdx == nil {
+			fg.runStatusIdx = map[string]int{}
+		}
+		i := fg.runStatusIdx["run-1"]
+		fg.runStatusIdx["run-1"]++
+		fg.mu.Unlock()
+		st := "completed"
+		if i < len(seq) {
+			st = seq[i]
+		}
+		_ = json.NewEncoder(w).Encode(runStatusResponse{
+			RunID:  "run-1",
+			Status: st,
+			Output: "task done",
+		})
+	})
+
+	return mux
+}
+
+func newTestAdapter(t *testing.T, fg *fakeGateway) *HermesAdapter {
+	t.Helper()
+	srv := httptest.NewServer(fg.handler())
+	t.Cleanup(srv.Close)
+
+	a, err := NewHermesAdapter(HermesConfig{
+		NodeID:       "n1",
+		BaseURL:      srv.URL + "/v1",
+		Model:        "hermes-agent",
+		SessionStore: store.NewFSStore(t.TempDir()),
+	})
 	if err != nil {
 		t.Fatalf("NewHermesAdapter failed: %v", err)
 	}
-	if a == nil {
-		t.Fatal("expected non-nil adapter")
+	return a
+}
+
+func testCtx(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(context.Background(), 10*time.Second)
+}
+
+// ── Routing ──────────────────────────────────────────────────────
+
+func TestIsTaskMessage(t *testing.T) {
+	cases := map[string]bool{
+		"chat.message":        false,
+		"task.message":        true,
+		"todo.assigned":       true,
+		"task.context.result": true,
+		"":                    false,
+		"chat.response":       false,
 	}
-	if a.nodeID != "n1-test" {
-		t.Errorf("expected nodeID 'n1-test', got '%s'", a.nodeID)
+	for msgType, want := range cases {
+		if got := isTaskMessage(msgType); got != want {
+			t.Errorf("isTaskMessage(%q) = %v, want %v", msgType, got, want)
+		}
 	}
 }
 
-func TestHermesAdapter_GetStatus_NoHermesCLI(t *testing.T) {
-	a := &HermesAdapter{
-		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			// Simulate hermes not installed
-			return nil, context.DeadlineExceeded
-		},
-	}
+// ── Dialogue: Responses API ──────────────────────────────────────
 
-	status, err := a.GetStatus(context.Background())
-	if err == nil {
-		t.Error("expected error when hermes is not available")
+func TestDeliverViaResponses_FirstTurn(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	req := DeliverMessageRequest{Type: "chat.message", From: "alice", SessionKey: "c1", Message: "hi"}
+	res, err := a.DeliverMessage(ctx, req)
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
 	}
-	if status != nil && status.Healthy {
-		t.Error("expected unhealthy status when hermes is not available")
+	if !res.Success || res.Reply != "hello" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if len(fg.responsesPrev) != 1 || fg.responsesPrev[0] != "" {
+		t.Errorf("first turn should send no previous_response_id, got %v", fg.responsesPrev)
+	}
+	if got := a.loadMappedSessionID("chat:c1"); got != "resp-1" {
+		t.Errorf("expected chat:c1 -> resp-1, got %q", got)
 	}
 }
+
+func TestDeliverViaResponses_Continuation(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	// First turn establishes mapping chat:c1 -> resp-1
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", SessionKey: "c1", Message: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	// Second turn should continue with previous_response_id = resp-1
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", SessionKey: "c1", Message: "again"})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if res.Reply != "hello" {
+		t.Fatalf("unexpected reply: %q", res.Reply)
+	}
+	if len(fg.responsesPrev) != 2 {
+		t.Fatalf("expected 2 responses calls, got %d", len(fg.responsesPrev))
+	}
+	if fg.responsesPrev[1] != "resp-1" {
+		t.Errorf("expected continuation with previous_response_id=resp-1, got %q", fg.responsesPrev[1])
+	}
+}
+
+func TestDeliverViaResponses_NewSessionIsolated(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", SessionKey: "c1", Message: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	// Different SessionKey => independent conversation (no previous_response_id)
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", SessionKey: "c2", Message: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fg.responsesPrev) != 2 {
+		t.Fatalf("expected 2 responses calls, got %d", len(fg.responsesPrev))
+	}
+	if fg.responsesPrev[1] != "" {
+		t.Errorf("new session should not carry previous_response_id, got %q", fg.responsesPrev[1])
+	}
+}
+
+func TestDeliverViaResponses_FallbackKey(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	// No SessionKey => fallback key cs-<from>-<nodeID> = cs-alice-n1
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", From: "alice", Message: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", From: "alice", Message: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fg.responsesPrev) != 2 {
+		t.Fatalf("expected 2 responses calls, got %d", len(fg.responsesPrev))
+	}
+	if fg.responsesPrev[1] != "resp-1" {
+		t.Errorf("fallback key should continue same sender, got prevID %q", fg.responsesPrev[1])
+	}
+	if got := a.loadMappedSessionID("chat:cs-alice-n1"); got != "resp-2" {
+		t.Errorf("expected fallback mapping updated to resp-2 after continuation, got %q", got)
+	}
+}
+
+func TestDeliverViaResponses_UnknownSessionRetry(t *testing.T) {
+	fg := &fakeGateway{unknownResponses: true}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	// Establish mapping chat:c1 -> resp-1
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", SessionKey: "c1", Message: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	// Next turn carries prevID=resp-1 which is now "unknown" on the gateway;
+	// adapter should drop the mapping and retry without it.
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", SessionKey: "c1", Message: "again"})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if res.Reply != "hello" {
+		t.Fatalf("expected successful retry reply, got %+v", res)
+	}
+	// prevID sequence: first-turn(""), retry-turn(prevID resp-1 -> 404), retry("")
+	if len(fg.responsesPrev) != 3 {
+		t.Fatalf("expected 3 responses calls (first + retry-with + retry-without), got %d: %v", len(fg.responsesPrev), fg.responsesPrev)
+	}
+	if fg.responsesPrev[1] != "resp-1" {
+		t.Errorf("retry attempt should carry stale prevID, got %q", fg.responsesPrev[1])
+	}
+	if fg.responsesPrev[2] != "" {
+		t.Errorf("final retry should drop prevID, got %q", fg.responsesPrev[2])
+	}
+	if got := a.loadMappedSessionID("chat:c1"); got != "resp-3" {
+		t.Errorf("mapping should be rebuilt after retry, got %q", got)
+	}
+}
+
+// ── Task flow: Runs API ──────────────────────────────────────────
+
+func TestDeliverViaRuns_Polling(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "do it"})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if !res.Success || res.Reply != "task done" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if res.RunID != "run-1" {
+		t.Errorf("expected RunID run-1, got %q", res.RunID)
+	}
+	if fg.runsSessionID[0] != "" {
+		t.Errorf("first run should not carry session_id, got %q", fg.runsSessionID[0])
+	}
+	if got := a.loadMappedSessionID("task:t1"); got != "sess-1" {
+		t.Errorf("expected task:t1 -> sess-1, got %q", got)
+	}
+}
+
+func TestDeliverViaRuns_Continuation(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "do it"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fg.runsSessionID) != 2 {
+		t.Fatalf("expected 2 runs calls, got %d", len(fg.runsSessionID))
+	}
+	if fg.runsSessionID[1] != "sess-1" {
+		t.Errorf("task continuation should carry session_id=sess-1, got %q", fg.runsSessionID[1])
+	}
+}
+
+func TestDeliverViaRuns_UnknownSessionRetry(t *testing.T) {
+	fg := &fakeGateway{unknownRuns: true}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "do it"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "continue"})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if res.Reply != "task done" {
+		t.Fatalf("expected successful retry reply, got %+v", res)
+	}
+	if len(fg.runsSessionID) != 3 {
+		t.Fatalf("expected 3 runs calls, got %d: %v", len(fg.runsSessionID), fg.runsSessionID)
+	}
+	if fg.runsSessionID[1] != "sess-1" {
+		t.Errorf("retry attempt should carry stale session_id, got %q", fg.runsSessionID[1])
+	}
+	if fg.runsSessionID[2] != "" {
+		t.Errorf("final retry should drop session_id, got %q", fg.runsSessionID[2])
+	}
+}
+
+// ── GetStatus ────────────────────────────────────────────────────
 
 func TestHermesAdapter_GetStatus_Healthy(t *testing.T) {
-	a := &HermesAdapter{
-		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			return []byte("hermes v1.0.0"), nil
-		},
-	}
-
+	fg := &fakeGateway{healthCode: 200}
+	a := newTestAdapter(t, fg)
 	status, err := a.GetStatus(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !status.Healthy {
-		t.Error("expected healthy status")
+		t.Error("expected healthy")
 	}
 }
 
-func TestHermesAdapter_GetStatus_EmptyOutput(t *testing.T) {
-	a := &HermesAdapter{
-		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			return []byte("   "), nil
-		},
-	}
-
+func TestHermesAdapter_GetStatus_Unhealthy(t *testing.T) {
+	fg := &fakeGateway{healthCode: 500}
+	a := newTestAdapter(t, fg)
 	status, err := a.GetStatus(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if status.Healthy {
-		t.Error("expected unhealthy status for empty output")
+		t.Error("expected unhealthy for 500")
 	}
 }
 
-func TestHermesAdapter_DeliverMessage_Format(t *testing.T) {
-	var capturedPrompt string
-	a := &HermesAdapter{
-		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			// Capture the -q prompt argument
-			for i, arg := range args {
-				if arg == "-q" && i+1 < len(args) {
-					capturedPrompt = args[i+1]
-					break
-				}
-			}
-			return []byte("reply from hermes"), nil
-		},
-	}
+// ── Header format preserved (bare, no system prompt) ─────────────
 
-	req := DeliverMessageRequest{
-		Type:       "chat.message",
-		From:       "n1-sender",
-		SessionKey: "sess-123",
-		Message:    "Hello!",
-	}
+func TestDeliverViaResponses_HeaderFormat(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
 
-	result, err := a.DeliverMessage(context.Background(), req)
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success")
-	}
-
-	// Verify prompt contains the structured header from formatDeliverMessage (bare, no system prompt)
-	if !strings.HasPrefix(capturedPrompt, "[clawsynapse") {
-		t.Errorf("expected prompt to start with [clawsynapse, got: %s", capturedPrompt[:min(50, len(capturedPrompt))])
-	}
-	if !strings.Contains(capturedPrompt, "type=chat.message") {
-		t.Error("expected prompt to contain message type")
-	}
-	if !strings.Contains(capturedPrompt, "from=n1-sender") {
-		t.Error("expected prompt to contain sender")
-	}
-	if !strings.Contains(capturedPrompt, "session=sess-123") {
-		t.Error("expected prompt to contain session key")
-	}
-	if !strings.Contains(capturedPrompt, "Hello!") {
-		t.Error("expected prompt to contain message body")
-	}
-}
-
-func TestHermesAdapter_DeliverMessage_NoSystemPrompt(t *testing.T) {
-	var capturedPrompt string
-	a := &HermesAdapter{
-		nodeID: "n1-test",
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			for i, arg := range args {
-				if arg == "-q" && i+1 < len(args) {
-					capturedPrompt = args[i+1]
-					break
-				}
-			}
-			return []byte("ok"), nil
-		},
-	}
-
-	req := DeliverMessageRequest{
-		Type:    "task.message",
-		From:    "n1-boss",
-		Message: "Do something",
-	}
-
-	result, err := a.DeliverMessage(context.Background(), req)
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success")
-	}
-
-	// Verify no system prompt — prompt starts directly with protocol header
-	if !strings.HasPrefix(capturedPrompt, "[clawsynapse") {
-		t.Errorf("expected prompt to start with [clawsynapse (no system prompt), got: %s",
-			capturedPrompt[:min(60, len(capturedPrompt))])
-	}
-	if !strings.Contains(capturedPrompt, "type=task.message") {
-		t.Error("expected structured header with message type")
-	}
-}
-
-func TestHermesAdapter_DeliverMessage_SessionRetry(t *testing.T) {
-	// Set up a real session store with a stale session ID so the
-	// retry-on-unknown-session path actually executes.
-	dir := t.TempDir()
-	fsStore := store.NewFSStore(dir)
-	// Pre-save a stale session mapping for our test key.
-	if err := fsStore.SaveSessionState(store.SessionState{
-		Adapter:    "hermes",
-		SessionKey: "sess-old",
-		SessionID:  "stale-session-123",
-	}); err != nil {
-		t.Fatalf("save session state: %v", err)
-	}
-
-	callCount := 0
-	a := &HermesAdapter{
-		nodeID:       "n1-test",
-		sessionStore: fsStore,
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			callCount++
-			// First call fails with unknown session error (stale ID)
-			if callCount == 1 {
-				return nil, &testError{msg: "unknown session id"}
-			}
-			return []byte("session_id: fresh-session-456\n\nretry success"), nil
-		},
-	}
-
-	req := DeliverMessageRequest{
-		Type:       "chat.message",
-		From:       "n1-sender",
-		SessionKey: "sess-old",
-		Message:    "test",
-	}
-
-	result, err := a.DeliverMessage(context.Background(), req)
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success after retry")
-	}
-	if callCount != 2 {
-		t.Errorf("expected 2 calls (initial + retry), got %d", callCount)
-	}
-}
-
-func TestBuildCommandArgs_SkillAndFlags(t *testing.T) {
-	// Verify that -Q, --resume are correct, -s clawsynapse IS present (protocol skill),
-	// and -s tm-task-plan / -s tm-task-exec are NOT present when agentRole is empty.
-	a := &HermesAdapter{
-		nodeID:    "n1-test",
-		agentRole: "",
-	}
-	var capturedArgs []string
-	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
-		capturedArgs = args
-		return []byte("ok"), nil
-	}
-
-	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
-		Type:    "chat.message",
-		From:    "n1-sender",
-		Message: "test",
-	})
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-
-	// Check that required flags are present
-	if !containsArg(capturedArgs, "-q") {
-		t.Error("expected -q flag")
-	}
-	if !containsArg(capturedArgs, "-Q") {
-		t.Error("expected -Q (quiet mode) flag")
-	}
-	if !containsArg(capturedArgs, "-t") {
-		t.Error("expected -t flag for toolsets")
-	}
-	if !containsArg(capturedArgs, "--yolo") {
-		t.Error("expected --yolo flag")
-	}
-
-	// Protocol skill clawsynapse is always loaded
-	if !containsArg(capturedArgs, "clawsynapse") {
-		t.Error("expected -s clawsynapse (protocol skill always loaded)")
-	}
-
-	// Business skills should NOT be present when agentRole is empty
-	if containsArg(capturedArgs, "tm-task-plan") {
-		t.Error("tm-task-plan should NOT be present when agentRole is empty")
-	}
-	if containsArg(capturedArgs, "tm-task-exec") {
-		t.Error("tm-task-exec should NOT be present when agentRole is empty")
-	}
-
-	// Check that --max-turns is NOT present
-	if containsArg(capturedArgs, "--max-turns") {
-		t.Error("--max-turns should not be present")
-	}
-
-	// Without a session, --resume should NOT be present
-	if containsArg(capturedArgs, "--resume") {
-		t.Error("--resume should not be present without a session")
-	}
-}
-
-func TestBuildCommandArgs_Skill_PM(t *testing.T) {
-	a := &HermesAdapter{
-		nodeID:    "n1-pm",
-		agentRole: "pm",
-	}
-	var capturedArgs []string
-	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
-		capturedArgs = args
-		return []byte("ok"), nil
-	}
-
-	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
-		Type:    "task.message",
-		From:    "n1-sender",
-		Message: "test",
-	})
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-
-	if !containsArg(capturedArgs, "clawsynapse") {
-		t.Error("expected -s clawsynapse (protocol skill)")
-	}
-	if !containsArg(capturedArgs, "tm-task-plan") {
-		t.Error("expected -s tm-task-plan for PM role")
-	}
-	if containsArg(capturedArgs, "tm-task-exec") {
-		t.Error("tm-task-exec should NOT be present for PM role")
-	}
-}
-
-func TestBuildCommandArgs_Skill_Executor(t *testing.T) {
-	a := &HermesAdapter{
-		nodeID:    "n1-exec",
-		agentRole: "executor",
-	}
-	var capturedArgs []string
-	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
-		capturedArgs = args
-		return []byte("ok"), nil
-	}
-
-	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
-		Type:    "todo.assigned",
-		From:    "n1-sender",
-		Message: "test",
-	})
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-
-	if !containsArg(capturedArgs, "clawsynapse") {
-		t.Error("expected -s clawsynapse (protocol skill)")
-	}
-	if !containsArg(capturedArgs, "tm-task-exec") {
-		t.Error("expected -s tm-task-exec for executor role")
-	}
-	if containsArg(capturedArgs, "tm-task-plan") {
-		t.Error("tm-task-plan should NOT be present for executor role")
-	}
-}
-
-func TestBuildCommandArgs_ResumeWithSession(t *testing.T) {
-	// When a session mapping exists, --resume <id> should be present
-	dir := t.TempDir()
-	fsStore := store.NewFSStore(dir)
-	if err := fsStore.SaveSessionState(store.SessionState{
-		Adapter:    "hermes",
-		SessionKey: "sess-resume-test",
-		SessionID:  "20260619_100000_abc",
-	}); err != nil {
-		t.Fatalf("save session state: %v", err)
-	}
-
-	a := &HermesAdapter{
-		nodeID:       "n1-test",
-		sessionStore: fsStore,
-	}
-	var capturedArgs []string
-	a.execCmd = func(ctx context.Context, args ...string) ([]byte, error) {
-		capturedArgs = args
-		return []byte("session_id: 20260619_100000_abc\n\nok"), nil
-	}
-
-	_, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
-		Type:       "chat.message",
-		From:       "n1-sender",
-		SessionKey: "sess-resume-test",
-		Message:    "test",
-	})
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-
-	if !containsArg(capturedArgs, "--resume") {
-		t.Error("expected --resume flag when session mapping exists")
-	}
-
-	// Verify the session ID is the value after --resume
-	foundResume := false
-	for i, arg := range capturedArgs {
-		if arg == "--resume" && i+1 < len(capturedArgs) {
-			if capturedArgs[i+1] == "20260619_100000_abc" {
-				foundResume = true
-			}
-			break
+	// Capture the formatted prompt passed to the gateway by inspecting the
+	// request body via a spy server.
+	spy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req responsesRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if !strings.HasPrefix(req.Input, "[clawsynapse") {
+			t.Errorf("expected gateway input to start with [clawsynapse, got %q", req.Input[:min(40, len(req.Input))])
 		}
-	}
-	if !foundResume {
-		t.Error("expected --resume 20260619_100000_abc")
-	}
-}
-
-func TestParseHermesResult(t *testing.T) {
-	// Quiet mode output: session_id line + blank line + reply
-	input := "session_id: 20260619_120000_abc123\n\nHermes completed the task successfully."
-	result, err := parseHermesResult([]byte(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success")
-	}
-	if !result.Accepted {
-		t.Error("expected accepted")
-	}
-	if result.SessionID != "20260619_120000_abc123" {
-		t.Errorf("expected session ID '20260619_120000_abc123', got '%s'", result.SessionID)
-	}
-	if result.Reply != "Hermes completed the task successfully." {
-		t.Errorf("expected clean reply, got '%s'", result.Reply)
-	}
-}
-
-func TestParseHermesResult_NoSessionID(t *testing.T) {
-	// Output without session_id line (e.g., older hermes version)
-	result, err := parseHermesResult([]byte("plain reply without session id"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success")
-	}
-	if result.SessionID != "" {
-		t.Errorf("expected empty session ID, got '%s'", result.SessionID)
-	}
-	if result.Reply != "plain reply without session id" {
-		t.Errorf("expected full output as reply, got '%s'", result.Reply)
-	}
-}
-
-func TestParseHermesResult_MultiLineReply(t *testing.T) {
-	input := "session_id: sess-xyz\n\nLine 1 of reply\nLine 2 of reply\nLine 3"
-	result, err := parseHermesResult([]byte(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success")
-	}
-	if result.SessionID != "sess-xyz" {
-		t.Errorf("expected session ID 'sess-xyz', got '%s'", result.SessionID)
-	}
-	expected := "Line 1 of reply\nLine 2 of reply\nLine 3"
-	if result.Reply != expected {
-		t.Errorf("expected multi-line reply, got '%s'", result.Reply)
-	}
-}
-
-func TestParseHermesResult_Empty(t *testing.T) {
-	result, err := parseHermesResult([]byte("   "))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Success {
-		t.Error("expected failure for empty output")
-	}
-	if result.Error != "hermes returned empty output" {
-		t.Errorf("expected empty output error, got '%s'", result.Error)
-	}
-}
-
-func TestParseHermesResult_LongOutput(t *testing.T) {
-	// Output longer than 4000 characters — should NOT be truncated
-	longText := strings.Repeat("A", 5000)
-	input := "session_id: sess-long\n\n" + longText
-	result, err := parseHermesResult([]byte(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success for long output")
-	}
-	if result.SessionID != "sess-long" {
-		t.Errorf("expected session ID 'sess-long', got '%s'", result.SessionID)
-	}
-	if result.Reply != longText {
-		t.Errorf("expected full untruncated output (%d chars), got %d chars", len(longText), len(result.Reply))
-	}
-}
-
-func TestFormatHermesCommandForLog(t *testing.T) {
-	longPrompt := strings.Repeat("A", 500)
-	args := []string{"chat", "-q", longPrompt}
-	logStr := formatHermesCommandForLog(args)
-	if !strings.Contains(logStr, "hermes") {
-		t.Error("expected log to contain 'hermes'")
-	}
-	if !strings.Contains(logStr, "...(truncated") {
-		t.Errorf("expected log to truncate long prompt, got: %s", logStr)
-	}
-}
-
-func TestIsHermesUnknownSessionError(t *testing.T) {
-	tests := []struct {
-		errMsg   string
-		expected bool
-	}{
-		{"session not found", true},
-		{"unknown session id", true},
-		{"no such session", true},
-		{"no recorded session for key", true},
-		{"connection refused", false},
-		{"timeout", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		var err error
-		if tt.errMsg != "" {
-			err = &testError{msg: tt.errMsg}
+		if !strings.Contains(req.Input, "type=chat.message") {
+			t.Error("expected header to contain type=chat.message")
 		}
-		result := isHermesUnknownSessionError(err)
-		if result != tt.expected {
-			t.Errorf("isHermesUnknownSessionError(%q) = %v, want %v", tt.errMsg, result, tt.expected)
+		if !strings.Contains(req.Input, "from=alice") {
+			t.Error("expected header to contain from=alice")
 		}
-	}
-}
+		if !strings.Contains(req.Input, "session=c1") {
+			t.Error("expected header to contain session=c1")
+		}
+		if !strings.Contains(req.Input, "Hello!") {
+			t.Error("expected header to contain message body")
+		}
+		_ = json.NewEncoder(w).Encode(responsesResponse{ID: "resp-1", Status: "completed", OutputText: "ok"})
+	}))
+	defer spy.Close()
 
-func TestExtractTaskID(t *testing.T) {
-	tests := []struct {
-		name     string
-		metadata map[string]any
-		want     string
-	}{
-		{"nil metadata", nil, ""},
-		{"no taskId", map[string]any{"other": "value"}, ""},
-		{"taskId present", map[string]any{"taskId": "task-001"}, "task-001"},
-		{"taskId whitespace", map[string]any{"taskId": "  task-002  "}, "task-002"},
-		{"taskId not string", map[string]any{"taskId": 123}, ""},
-		{"empty taskId", map[string]any{"taskId": ""}, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractTaskID(tt.metadata)
-			if got != tt.want {
-				t.Errorf("extractTaskID() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDeliverMessage_TaskIdFallback(t *testing.T) {
-	// Scenario: todo.assigned with SK1 creates Hermes session HS1.
-	// Later, task.context.result arrives with SK2 (generated by agent's publish).
-	// The adapter should fallback to taskId to find HS1 and resume it.
-	dir := t.TempDir()
-	fsStore := store.NewFSStore(dir)
-
-	// Pre-save a session mapping keyed by taskId (simulating first round)
-	if err := fsStore.SaveSessionState(store.SessionState{
-		Adapter:    "hermes",
-		SessionKey: "task-001",
-		SessionID:  "hermes-session-hs1",
-	}); err != nil {
-		t.Fatalf("save session state: %v", err)
-	}
-
-	var capturedArgs []string
-	callCount := 0
-	a := &HermesAdapter{
-		nodeID:       "n1-exec",
-		sessionStore: fsStore,
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			callCount++
-			capturedArgs = args
-			return []byte("session_id: hermes-session-hs1\n\nTask result processed."), nil
-		},
-	}
-
-	// Second message: different SessionKey but same taskId in Metadata
-	result, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
-		Type:       "task.context.result",
-		From:       "n1-trustmesh",
-		SessionKey: "SK2-different-key",
-		Message:    "query result data",
-		Metadata:   map[string]any{"taskId": "task-001"},
-	})
-	if err != nil {
+	a.baseURL = spy.URL + "/v1"
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", From: "alice", SessionKey: "c1", Message: "Hello!"}); err != nil {
 		t.Fatalf("DeliverMessage failed: %v", err)
 	}
-	if !result.Success {
-		t.Error("expected success with taskId fallback")
-	}
-
-	// Verify --resume was used (found session via taskId fallback)
-	if !containsArg(capturedArgs, "--resume") {
-		t.Error("expected --resume flag when session resolved via taskId fallback")
-	}
-	foundResume := false
-	for i, arg := range capturedArgs {
-		if arg == "--resume" && i+1 < len(capturedArgs) {
-			if capturedArgs[i+1] == "hermes-session-hs1" {
-				foundResume = true
-			}
-			break
-		}
-	}
-	if !foundResume {
-		t.Error("expected --resume hermes-session-hs1")
-	}
-
-	// Verify BOTH keys are now mapped
-	st1, ok1, _ := fsStore.LoadSessionState("hermes", "SK2-different-key")
-	if !ok1 || st1.SessionID != "hermes-session-hs1" {
-		t.Error("SessionKey mapping not saved")
-	}
-	st2, ok2, _ := fsStore.LoadSessionState("hermes", "task-001")
-	if !ok2 || st2.SessionID != "hermes-session-hs1" {
-		t.Error("taskId mapping not preserved")
-	}
-}
-
-func TestDeliverMessage_TaskIdFallback_NoTaskId(t *testing.T) {
-	// Without taskId in metadata, adapter should create a new session (normal behavior)
-	dir := t.TempDir()
-	fsStore := store.NewFSStore(dir)
-
-	var capturedArgs []string
-	a := &HermesAdapter{
-		nodeID:       "n1-exec",
-		sessionStore: fsStore,
-		execCmd: func(ctx context.Context, args ...string) ([]byte, error) {
-			capturedArgs = args
-			return []byte("session_id: new-hermes-session\n\nDone."), nil
-		},
-	}
-
-	result, err := a.DeliverMessage(context.Background(), DeliverMessageRequest{
-		Type:       "chat.message",
-		From:       "n1-sender",
-		SessionKey: "unknown-key",
-		Message:    "hello",
-		// No Metadata → no taskId fallback
-	})
-	if err != nil {
-		t.Fatalf("DeliverMessage failed: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success even without taskId")
-	}
-
-	// Should NOT use --resume (no session found)
-	if containsArg(capturedArgs, "--resume") {
-		t.Error("--resume should NOT be present without existing session")
-	}
-}
-
-// containsArg checks if a slice of strings contains a specific argument value.
-func containsArg(args []string, target string) bool {
-	for _, a := range args {
-		if a == target {
-			return true
-		}
-	}
-	return false
-}
-
-// testError is a simple error type for testing.
-type testError struct {
-	msg string
-}
-
-func (e *testError) Error() string {
-	return e.msg
 }

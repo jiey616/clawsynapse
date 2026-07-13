@@ -1,4 +1,4 @@
-﻿package app
+package app
 
 import (
 	"context"
@@ -208,6 +208,9 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 			Logger:       log.With(slog.String("component", "adapter"), slog.String("adapter", "hermes")),
 			SessionStore: fs,
 			AgentRole:    cfg.AgentRole,
+			BaseURL:      cfg.HermesGatewayURL,
+			APIKey:       cfg.HermesGatewayKey,
+			Model:        cfg.HermesModel,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported agent adapter: %s", cfg.AgentAdapter)

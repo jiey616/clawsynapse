@@ -1,4 +1,4 @@
-﻿package config
+package config
 
 import (
 	"errors"
@@ -44,6 +44,9 @@ type Config struct {
 	AgentAdapter        string   `json:"agentAdapter"`
 	AgentAdapterTimeout string   `json:"agentAdapterTimeout"`
 	AgentRole           string   `json:"agentRole"`
+	HermesGatewayURL    string   `json:"hermesGatewayUrl"`
+	HermesGatewayKey    string   `json:"hermesGatewayKey"`
+	HermesModel         string   `json:"hermesModel"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
@@ -171,6 +174,9 @@ type configValues struct {
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
 	AgentRole           string
+	HermesGatewayURL    string
+	HermesGatewayKey    string
+	HermesModel         string
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -244,6 +250,17 @@ func LoadFromOS(args []string) (Config, error) {
 
 	fs := flag.NewFlagSet("clawsynapsed", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+
+	hermesGatewayURLDef := envOr("HERMES_GATEWAY_URL", merged.HermesGatewayURL)
+	if hermesGatewayURLDef == "" {
+		hermesGatewayURLDef = "http://127.0.0.1:8642/v1"
+	}
+	hermesGatewayKeyDef := envOr("HERMES_GATEWAY_KEY", merged.HermesGatewayKey)
+	hermesModelDef := envOr("HERMES_MODEL", merged.HermesModel)
+	if hermesModelDef == "" {
+		hermesModelDef = "hermes-agent"
+	}
+
 	var (
 		natsServers         = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
 		apiAddr             = fs.String("local-api-addr", merged.LocalAPIAddr, "http api address")
@@ -257,6 +274,9 @@ func LoadFromOS(args []string) (Config, error) {
 		agentAdapter        = fs.String("agent-adapter", merged.AgentAdapter, "agent adapter: default|openclaw|opencode|codex|webhook|hermes")
 		agentAdapterTimeout = fs.Duration("agent-adapter-timeout", merged.AgentAdapterTimeout, "timeout for delivering a message to the agent adapter")
 		agentRole           = fs.String("agent-role", merged.AgentRole, "agent role: pm|executor (for hermes adapter)")
+		hermesGatewayURL    = fs.String("hermes-gateway-url", hermesGatewayURLDef, "hermes gateway base URL (env HERMES_GATEWAY_URL)")
+		hermesGatewayKey    = fs.String("hermes-gateway-key", hermesGatewayKeyDef, "hermes gateway API key (env HERMES_GATEWAY_KEY)")
+		hermesModel         = fs.String("hermes-model", hermesModelDef, "hermes gateway model name (env HERMES_MODEL)")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -357,6 +377,9 @@ func LoadFromOS(args []string) (Config, error) {
 		AgentAdapter:        adapterName,
 		AgentAdapterTimeout: agentAdapterTimeout.String(),
 		AgentRole:           agentRoleVal,
+		HermesGatewayURL:    strings.TrimSpace(*hermesGatewayURL),
+		HermesGatewayKey:    strings.TrimSpace(*hermesGatewayKey),
+		HermesModel:         strings.TrimSpace(*hermesModel),
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
@@ -439,6 +462,15 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.AgentRole) != "" {
 		base.AgentRole = strings.TrimSpace(override.AgentRole)
+	}
+	if strings.TrimSpace(override.HermesGatewayURL) != "" {
+		base.HermesGatewayURL = strings.TrimSpace(override.HermesGatewayURL)
+	}
+	if strings.TrimSpace(override.HermesGatewayKey) != "" {
+		base.HermesGatewayKey = strings.TrimSpace(override.HermesGatewayKey)
+	}
+	if strings.TrimSpace(override.HermesModel) != "" {
+		base.HermesModel = strings.TrimSpace(override.HermesModel)
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)

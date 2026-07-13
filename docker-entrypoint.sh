@@ -166,6 +166,24 @@ else:
         model_section["base_url"] = legacy_base
         print(f"[entrypoint]   model.base_url = {legacy_base}")
 
+# Gateway: auto-approve (yolo) so task runs never block on tool approvals.
+if "approvals" not in config or config["approvals"] is None:
+    config["approvals"] = {}
+config["approvals"]["mode"] = "off"
+
+# Skills are loaded at the profile level (the gateway API has no per-request
+# -s flag). Mount only the skills for this agent's role.
+role = os.environ.get("CLAWSYNAPSE_AGENT_ROLE", "").strip().lower()
+skills_base = os.environ.get("HERMES_SKILL_DIR", "/root/.hermes/skills/clawsynapse")
+skills_root = os.path.dirname(skills_base)
+role_skills = {
+    "pm": ["clawsynapse", "tm-task-plan", "tm-meeting"],
+    "executor": ["clawsynapse", "tm-task-exec"],
+}
+names = role_skills.get(role, ["clawsynapse"])
+config["external_dirs"] = [os.path.join(skills_root, n) for n in names]
+print(f"[entrypoint] external_dirs = {config['external_dirs']}")
+
 with open(config_path, "w", encoding="utf-8") as f:
     yaml.dump(config, f, Dumper=IndentedDumper, default_flow_style=False,
               sort_keys=False, allow_unicode=True, indent=2)
@@ -175,6 +193,50 @@ PY
 }
 
 configure_hermes_yaml
+
+# ─────────────────────────────────────────────────
+# Step 1c: Ensure Gateway API Server config in .env (idempotent)
+# ─────────────────────────────────────────────────
+ensure_api_server_env() {
+    python3 - << 'PY'
+import os, sys
+p = os.environ.get("HERMES_ENV_FILE")
+if not p or not os.path.exists(p):
+    sys.exit(0)
+with open(p) as f:
+    lines = f.read().splitlines()
+present = {l.split("=", 1)[0].strip(): i for i, l in enumerate(lines) if "=" in l}
+changed = False
+
+def ensure(key, val):
+    global changed, lines, present
+    if key in present:
+        idx = present[key]
+        if lines[idx].split("=", 1)[1].strip() != val:
+            lines[idx] = f"{key}={val}"
+            changed = True
+    else:
+        lines.append(f"{key}={val}")
+        present[key] = len(lines) - 1
+        changed = True
+
+ensure("API_SERVER_ENABLED", "true")
+ensure("API_SERVER_HOST", "127.0.0.1")
+ensure("API_SERVER_PORT", "8642")
+gw_key = os.environ.get("HERMES_GATEWAY_KEY", "").strip()
+if gw_key:
+    ensure("API_SERVER_KEY", gw_key)
+elif "API_SERVER_KEY" not in present:
+    import subprocess
+    ensure("API_SERVER_KEY", subprocess.check_output(["openssl", "rand", "-hex", "16"]).decode().strip())
+
+if changed:
+    with open(p, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print("[entrypoint] Hermes .env API_SERVER config ensured.")
+PY
+}
+ensure_api_server_env
 
 # ─────────────────────────────────────────────────
 # Step 2: First-time clawsynapse init
@@ -224,6 +286,46 @@ fi
 if [ -f "$CLAWSYNAPSE_CONFIG" ]; then
     sed -i "s|^localApiAddr:.*|localApiAddr: ${CLAWSYNAPSE_API_LISTEN}|" "$CLAWSYNAPSE_CONFIG" 2>/dev/null || true
     sed -i "s|^logFilePath:.*|logFilePath: \"\"|" "$CLAWSYNAPSE_CONFIG" 2>/dev/null || true
+fi
+
+# ─────────────────────────────────────────────────
+# Step 4.5: Start Hermes Gateway (API Server) in background, wait for /health
+# ─────────────────────────────────────────────────
+export HERMES_HOME
+GATEWAY_PORT="${HERMES_GATEWAY_PORT:-8642}"
+GATEWAY_HOST="${HERMES_GATEWAY_HOST:-127.0.0.1}"
+export HERMES_HEALTH_URL="http://${GATEWAY_HOST}:${GATEWAY_PORT}/health"
+
+log "Starting hermes gateway (API server) on ${GATEWAY_HOST}:${GATEWAY_PORT}..."
+hermes gateway run > /var/log/hermes-gateway.log 2>&1 &
+GATEWAY_PID=$!
+
+health_ok() {
+    python3 - << 'PY'
+import os, urllib.request, sys
+url = os.environ.get("HERMES_HEALTH_URL", "")
+try:
+    with urllib.request.urlopen(url, timeout=2) as r:
+        sys.exit(0 if r.status == 200 else 1)
+except Exception:
+    sys.exit(1)
+PY
+}
+
+for i in $(seq 1 60); do
+    if health_ok; then
+        log "Hermes gateway is healthy."
+        break
+    fi
+    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+        log "ERROR: hermes gateway exited prematurely. Last log lines:"
+        tail -n 20 /var/log/hermes-gateway.log 2>/dev/null || true
+        exit 1
+    fi
+    sleep 1
+done
+if ! health_ok; then
+    log "WARN: hermes gateway not healthy after 60s — proceeding anyway. Check /var/log/hermes-gateway.log"
 fi
 
 # ─────────────────────────────────────────────────
