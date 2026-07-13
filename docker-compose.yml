@@ -61,6 +61,10 @@ services:
       - HERMES_CUSTOM_PROVIDER_API_KEY=${HERMES_CUSTOM_PROVIDER_API_KEY}
       - HERMES_CUSTOM_PROVIDER_MODEL=${HERMES_CUSTOM_PROVIDER_MODEL}
 
+      # Hermes Gateway (v1.0.20+ 适配器走 Gateway HTTP API，必填，需固定值)
+      # 与 Gateway 的 API_SERVER_KEY 一致；适配器以此值鉴权调用 Gateway
+      - HERMES_GATEWAY_KEY=${HERMES_GATEWAY_KEY}
+
     # ── Volumes (data persistence across restarts) ──
     volumes:
       # ClawSynapse: config, identity, store
