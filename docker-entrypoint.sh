@@ -296,6 +296,22 @@ GATEWAY_PORT="${HERMES_GATEWAY_PORT:-8642}"
 GATEWAY_HOST="${HERMES_GATEWAY_HOST:-127.0.0.1}"
 export HERMES_HEALTH_URL="http://${GATEWAY_HOST}:${GATEWAY_PORT}/health"
 
+# Preflight: the API Server platform needs aiohttp inside Hermes's venv.
+# If it's missing the gateway will "run" but nothing listens on 8642, and the
+# adapter health check fails with no obvious reason. Surface it early.
+HERMES_BIN="$(command -v hermes 2>/dev/null || true)"
+if [ -n "$HERMES_BIN" ]; then
+    HERMES_REAL="$(readlink -f "$HERMES_BIN" 2>/dev/null || echo "$HERMES_BIN")"
+    HERMES_VENV_PY="$(dirname "$HERMES_REAL")/python"
+    if [ -x "$HERMES_VENV_PY" ]; then
+        if "$HERMES_VENV_PY" -c "import aiohttp" 2>/dev/null; then
+            log "Preflight OK: aiohttp available in hermes venv ($HERMES_VENV_PY)."
+        else
+            log "WARN: aiohttp NOT importable in hermes venv ($HERMES_VENV_PY) — API Server may fail to start on 8642."
+        fi
+    fi
+fi
+
 log "Starting hermes gateway (API server) on ${GATEWAY_HOST}:${GATEWAY_PORT}..."
 hermes gateway run > /var/log/hermes-gateway.log 2>&1 &
 GATEWAY_PID=$!
@@ -325,7 +341,9 @@ for i in $(seq 1 60); do
     sleep 1
 done
 if ! health_ok; then
-    log "WARN: hermes gateway not healthy after 60s — proceeding anyway. Check /var/log/hermes-gateway.log"
+    log "ERROR: hermes gateway not healthy after 60s — aborting container. Last gateway log lines:"
+    tail -n 30 /var/log/hermes-gateway.log 2>/dev/null || true
+    exit 1
 fi
 
 # ─────────────────────────────────────────────────

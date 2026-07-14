@@ -49,6 +49,26 @@ RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --s
 
 # Make the hermes symlink (created by install script in ~/.local/bin) discoverable
 ENV PATH="/root/.local/bin:${PATH}"
+
+# Gateway API Server depends on aiohttp, which is NOT always installed by the
+# default hermes setup (it is an optional dependency). Without it the API
+# Server platform is silently skipped at gateway startup and nothing listens
+# on 8642 — which makes the adapter health check fail.
+# Hermes runs from its own venv, so install aiohttp INTO THAT VENV (resolve
+# through the ~/.local/bin/hermes symlink) rather than the system python.
+RUN HERMES_BIN="$(command -v hermes 2>/dev/null || true)" \
+    && if [ -z "$HERMES_BIN" ]; then \
+         HERMES_BIN="$(ls -d /root/.hermes/*/venv/bin/hermes 2>/dev/null | head -n1)"; \
+       fi \
+    && HERMES_REAL="$(readlink -f "$HERMES_BIN" 2>/dev/null || echo "$HERMES_BIN")" \
+    && HERMES_VENV_PY="$(dirname "$HERMES_REAL")/python" \
+    && if [ -x "$HERMES_VENV_PY" ]; then \
+         echo "[docker] installing aiohttp into hermes venv: $HERMES_VENV_PY"; \
+         "$HERMES_VENV_PY" -m pip install --no-cache-dir aiohttp; \
+       else \
+         echo "[docker] WARN: hermes venv python not found at $HERMES_VENV_PY; installing aiohttp into system python"; \
+         pip install --no-cache-dir aiohttp; \
+       fi
 # ── Copy clawsynapse binaries ──
 COPY --from=builder /build/clawsynapse /usr/local/bin/clawsynapse
 COPY --from=builder /build/clawsynapsed /usr/local/bin/clawsynapsed
