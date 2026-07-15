@@ -133,18 +133,19 @@ func testCtx(t *testing.T) (context.Context, context.CancelFunc) {
 
 // ── Routing ──────────────────────────────────────────────────────
 
-func TestIsTaskMessage(t *testing.T) {
+func TestIsRunsMessage(t *testing.T) {
 	cases := map[string]bool{
 		"chat.message":        false,
-		"task.message":        true,
+		"task.message":        false,
 		"todo.assigned":       true,
-		"task.context.result": true,
+		"task.context.result": false,
+		"todo.response":       true,
 		"":                    false,
 		"chat.response":       false,
 	}
 	for msgType, want := range cases {
-		if got := isTaskMessage(msgType); got != want {
-			t.Errorf("isTaskMessage(%q) = %v, want %v", msgType, got, want)
+		if got := isRunsMessage(msgType); got != want {
+			t.Errorf("isRunsMessage(%q) = %v, want %v", msgType, got, want)
 		}
 	}
 }
@@ -286,7 +287,7 @@ func TestDeliverViaRuns_Polling(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
-	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "do it"})
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.message", SessionKey: "t1", Message: "do it"})
 	if err != nil {
 		t.Fatalf("DeliverMessage failed: %v", err)
 	}
@@ -310,10 +311,10 @@ func TestDeliverViaRuns_Continuation(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
-	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "do it"}); err != nil {
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.message", SessionKey: "t1", Message: "do it"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "continue"}); err != nil {
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.message", SessionKey: "t1", Message: "continue"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(fg.runsSessionID) != 2 {
@@ -330,10 +331,10 @@ func TestDeliverViaRuns_UnknownSessionRetry(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
-	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "do it"}); err != nil {
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.message", SessionKey: "t1", Message: "do it"}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "t1", Message: "continue"})
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.message", SessionKey: "t1", Message: "continue"})
 	if err != nil {
 		t.Fatalf("DeliverMessage failed: %v", err)
 	}

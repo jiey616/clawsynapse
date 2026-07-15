@@ -31,7 +31,8 @@ type HermesConfig struct {
 //
 // Message routing:
 //   - chat.message            -> POST /v1/responses (stateful, previous_response_id continuation)
-//   - task.* / todo.*         -> POST /v1/runs      (long-running, polled to terminal state)
+//   - task.*                 -> POST /v1/responses (same dialogue/stateful flow as chat)
+//   - todo.*                 -> POST /v1/runs      (long-running, polled to terminal state)
 type HermesAdapter struct {
 	nodeID       string
 	log          *slog.Logger
@@ -77,7 +78,7 @@ func (a *HermesAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRe
 	// Use the standard structured header format (same as openclaw/opencode/codex)
 	formatted := formatDeliverMessage(a.nodeID, req)
 
-	if isTaskMessage(req.Type) {
+	if isRunsMessage(req.Type) {
 		return a.deliverViaRuns(ctx, formatted, req)
 	}
 	return a.deliverViaResponses(ctx, formatted, req)
@@ -102,12 +103,12 @@ func (a *HermesAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
 
 // ── Routing helpers ───────────────────────────────────────────────
 
-// isTaskMessage reports whether the message type belongs to the task flow
-// (which goes through the long-running Runs API) versus a chat message
-// (which goes through the stateful Responses API).
-func isTaskMessage(msgType string) bool {
+// isRunsMessage reports whether the message type belongs to the long-running
+// Runs flow (polled to a terminal state). Only `todo.*` messages take this path;
+// `task.*` and `chat.*` both go through the stateful Responses API.
+func isRunsMessage(msgType string) bool {
 	t := strings.TrimSpace(msgType)
-	return strings.HasPrefix(t, "task.") || strings.HasPrefix(t, "todo.")
+	return strings.HasPrefix(t, "todo.")
 }
 
 // chatSessionKey derives the stable mapping key for chat (dialogue) messages.
