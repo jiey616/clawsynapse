@@ -9,6 +9,13 @@ permissions:
   contents: write
   packages: write
 
+# Serialize release runs so overlapping tag pushes don't hit Tencent TCR's
+# concurrent-login throttling. Queue (don't cancel) so an in-progress build
+# finishes before the next one logs in.
+concurrency:
+  group: release-${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -88,8 +95,12 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       # ── Tencent TCR push (primary, China-friendly) ──
+      # continue-on-error so a TCR login failure (e.g. personal-edition
+      # concurrent-login throttling) does NOT short-circuit the GHCR path.
       - name: Log in to Tencent TCR
         if: steps.check.outputs.has_tcr == 'true'
+        id: tcr_login
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.TCR_REGISTRY }}
@@ -97,7 +108,7 @@ jobs:
           password: ${{ secrets.TCR_PASSWORD }}
 
       - name: Validate TCR config
-        if: steps.check.outputs.has_tcr == 'true'
+        if: steps.check.outputs.has_tcr == 'true' && steps.tcr_login.outcome == 'success'
         id: tcr
         run: |
           TCR_REGISTRY=$(printf '%s' "${{ secrets.TCR_REGISTRY }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
@@ -121,7 +132,7 @@ jobs:
           echo "TCR image: ${TCR_IMAGE}"
 
       - name: Build and push to Tencent TCR
-        if: steps.check.outputs.has_tcr == 'true'
+        if: steps.check.outputs.has_tcr == 'true' && steps.tcr_login.outcome == 'success'
         id: tcr_push
         continue-on-error: true
         uses: docker/build-push-action@v6
@@ -140,13 +151,17 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Report TCR push failure
-        if: steps.check.outputs.has_tcr == 'true' && steps.tcr_push.outcome == 'failure'
+        if: steps.check.outputs.has_tcr == 'true' && (steps.tcr_login.outcome == 'failure' || steps.tcr_push.outcome == 'failure')
         run: |
-          echo "::warning::Tencent TCR push failed, but continuing to ghcr.io step"
+          echo "::warning::Tencent TCR login/push failed (login=${{ steps.tcr_login.outcome }}, push=${{ steps.tcr_push.outcome }}), but continuing to ghcr.io step"
 
       # ── GHCR push (optional, only if GHCR_TOKEN PAT is set) ──
+      # continue-on-error so a GHCR login failure does NOT short-circuit the job
+      # when TCR already succeeded.
       - name: Log in to GitHub Container Registry
         if: steps.check.outputs.has_ghcr == 'true'
+        id: ghcr_login
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -154,7 +169,7 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Build and push to GHCR
-        if: steps.check.outputs.has_ghcr == 'true'
+        if: steps.check.outputs.has_ghcr == 'true' && steps.ghcr_login.outcome == 'success'
         id: ghcr_push
         continue-on-error: true
         uses: docker/build-push-action@v6
@@ -173,9 +188,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Report GHCR push failure
-        if: steps.check.outputs.has_ghcr == 'true' && steps.ghcr_push.outcome == 'failure'
+        if: steps.check.outputs.has_ghcr == 'true' && (steps.ghcr_login.outcome == 'failure' || steps.ghcr_push.outcome == 'failure')
         run: |
-          echo "::warning::GHCR push failed — check that GHCR_TOKEN PAT has write:packages scope"
+          echo "::warning::GHCR login/push failed (login=${{ steps.ghcr_login.outcome }}, push=${{ steps.ghcr_push.outcome }}) — check that GHCR_TOKEN PAT has write:packages scope"
 
       # ── Fail the job only if ALL configured registries failed ──
       - name: Check overall result
@@ -186,8 +201,8 @@ jobs:
           HAS_TCR="${{ steps.check.outputs.has_tcr }}"
           HAS_GHCR="${{ steps.check.outputs.has_ghcr }}"
 
-          echo "TCR configured: $HAS_TCR, push result: ${{ steps.tcr_push.outcome }}"
-          echo "GHCR configured: $HAS_GHCR, push result: ${{ steps.ghcr_push.outcome }}"
+          echo "TCR configured: $HAS_TCR, login: ${{ steps.tcr_login.outcome }}, push: ${{ steps.tcr_push.outcome }}"
+          echo "GHCR configured: $HAS_GHCR, login: ${{ steps.ghcr_login.outcome }}, push: ${{ steps.ghcr_push.outcome }}"
 
           if [ "$HAS_TCR" != "true" ] && [ "$HAS_GHCR" != "true" ]; then
             echo "::error::No registry secrets configured (TCR_USERNAME or GHCR_TOKEN)"
