@@ -113,9 +113,17 @@ legacy_provider = os.environ.get("HERMES_PROVIDER", "").strip()
 legacy_base = os.environ.get("HERMES_BASE_URL", "").strip()
 
 if not os.path.exists(config_path):
-    print(f"WARN: {config_path} not found yet — model config skipped.")
-    print("      Run 'hermes setup' inside the container after first start.")
-    sys.exit(0)
+    # 首次启动（hermes-data 卷挂载后卷内尚无 config.yaml）时，不要跳过：
+    # 先写入最小骨架，再走下方统一合并逻辑补全 provider/model/skills。
+    # 旧逻辑此处 sys.exit(0) 会导致 provider 永不写入，gateway 虽健康却无可用模型。
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump({"model": {}}, f, Dumper=IndentedDumper,
+                           sort_keys=False, default_flow_style=False, allow_unicode=True)
+        print(f"[entrypoint] {config_path} not found — created initial skeleton.")
+    except OSError as e:
+        print(f"WARN: cannot create {config_path}: {e}")
+        sys.exit(0)
 
 with open(config_path, "r", encoding="utf-8") as f:
     config = yaml.safe_load(f) or {}
@@ -182,7 +190,7 @@ role = os.environ.get("CLAWSYNAPSE_AGENT_ROLE", "").strip().lower()
 skills_base = os.environ.get("HERMES_SKILL_DIR", "/root/.hermes/skills/clawsynapse")
 skills_root = os.path.dirname(skills_base)
 role_skills = {
-    "pm": ["clawsynapse", "tm-task-plan", "tm-meeting"],
+    "pm": ["clawsynapse", "tm-task-plan"],
     "executor": ["clawsynapse", "tm-task-exec"],
 }
 names = role_skills.get(role, ["clawsynapse"])

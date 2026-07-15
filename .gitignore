@@ -5,3 +5,11 @@ dist/
 .env
 /clawsynapse
 .gocache/
+
+# ── Local build artifacts (not tracked) ──
+.go/
+*.exe
+.hermes_install_tmp.sh
+
+# ── WorkBuddy workspace (dev only) ──
+.workbuddy/
