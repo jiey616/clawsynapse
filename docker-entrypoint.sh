@@ -7,11 +7,16 @@
 # ───────────────────────────────────────────────────
 set -e
 
-CLAWSYNAPSE_CONFIG="${CLAWSYNAPSE_CONFIG:-/root/.clawsynapse/config.yaml}"
-HERMES_HOME="${HERMES_HOME:-/root/.hermes}"
-HERMES_SKILL_DIR="${HERMES_SKILL_DIR:-$HERMES_HOME/skills/clawsynapse}"
-SKILL_SRC="${SKILL_SRC:-/usr/local/share/clawsynapse/SKILL.md}"
-HERMES_ENV_FILE="$HERMES_HOME/.env"
+# These must be exported: the python heredocs below (hermes yaml config,
+# ensure_api_server_env) read them from os.environ. Without export they are
+# shell-local and invisible to the child python process, which silently
+# skips writing API_SERVER_* — leaving the gateway API server disabled and
+# the /health probe failing in a restart loop.
+export CLAWSYNAPSE_CONFIG="${CLAWSYNAPSE_CONFIG:-/root/.clawsynapse/config.yaml}"
+export HERMES_HOME="${HERMES_HOME:-/root/.hermes}"
+export HERMES_SKILL_DIR="${HERMES_SKILL_DIR:-$HERMES_HOME/skills/clawsynapse}"
+export SKILL_SRC="${SKILL_SRC:-/usr/local/share/clawsynapse/SKILL.md}"
+export HERMES_ENV_FILE="$HERMES_HOME/.env"
 
 # In Docker, the API must bind to all interfaces and match the exposed port.
 CLAWSYNAPSE_API_LISTEN="${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:18080}"
