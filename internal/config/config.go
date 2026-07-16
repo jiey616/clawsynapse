@@ -26,7 +26,7 @@ const (
 	defaultLogRotateMaxSizeMB  = 10
 	defaultLogRotateMaxBackups = 3
 	defaultLogRotateMaxAgeDays = 7
-	defaultDeliverablePrefixes = "chat,task,todo"
+	defaultDeliverablePrefixes = "chat,task,todo,meeting"
 	defaultTransferMaxFileSize = 104857600 // 100MB
 	defaultTransferTTL         = "24h"
 )

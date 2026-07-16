@@ -466,12 +466,13 @@ type Envelope struct {
 
 ### `Envelope.type` 预留值
 
-可投递类型（会被转发给本地 Agent handler，由 `deliverablePrefixes` 配置项控制，默认 `chat,task`）：
+可投递类型（会被转发给本地 Agent handler，由 `deliverablePrefixes` 配置项控制，默认 `chat,task,todo,meeting`）：
 
 - `chat.message` — 聊天消息
 - `chat.stream` — 流式聊天
 - `task.assign` — 任务分配
 - `task.result` — 任务结果
+- `meeting.*` — 会议类消息（邀请、纪要等），经 Hermes 适配器时走 `/v1/responses` 有状态对话流
 
 非投递类型（仅存入 inbox，不转发）：
 

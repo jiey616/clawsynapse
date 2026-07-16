@@ -137,6 +137,8 @@ func TestIsRunsMessage(t *testing.T) {
 	cases := map[string]bool{
 		"chat.message":        false,
 		"task.message":        false,
+		"meeting.invite":      false,
+		"meeting.message":     false,
 		"todo.assigned":       true,
 		"task.context.result": false,
 		"todo.response":       true,
@@ -276,6 +278,34 @@ func TestDeliverViaResponses_UnknownSessionRetry(t *testing.T) {
 	}
 	if got := a.loadMappedSessionID("chat:c1"); got != "resp-3" {
 		t.Errorf("mapping should be rebuilt after retry, got %q", got)
+	}
+}
+
+func TestDeliverViaResponses_Meeting(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	// meeting.* must route to the stateful Responses API (not Runs), and
+	// continue the same dialogue via previous_response_id like chat.
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "meeting.invite", SessionKey: "m1", Message: "standup"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "meeting.message", SessionKey: "m1", Message: "notes"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fg.responsesPrev) != 2 {
+		t.Fatalf("expected 2 /v1/responses calls for meeting, got %d: %v", len(fg.responsesPrev), fg.responsesPrev)
+	}
+	if fg.responsesPrev[1] != "resp-1" {
+		t.Errorf("meeting continuation should carry previous_response_id=resp-1, got %q", fg.responsesPrev[1])
+	}
+	if len(fg.runsSessionID) != 0 {
+		t.Errorf("meeting must NOT hit /v1/runs, got %d runs calls", len(fg.runsSessionID))
+	}
+	if got := a.loadMappedSessionID("chat:m1"); got != "resp-2" {
+		t.Errorf("expected meeting:m1 -> resp-2 mapping, got %q", got)
 	}
 }
 

@@ -1,0 +1,68 @@
+# docker-compose.third.yml — 第三个 ClawSynapse 实例（agent_role=pm）
+# 与 docker-compose.yml / docker-compose.second.yml 平行运行，刻意错开端口与数据卷：
+#   - 容器名:      clawsynapse3
+#   - 宿主机端口:  18082 -> 容器内 18080
+#   - 数据卷:      clawsynapse3-data / hermes3-data（互不复用，身份独立）
+#   - agent_role:  pm（字面量覆盖 .env，让 entrypoint 按 pm 角色部署 external_dirs）
+#   - 镜像/其他变量: 复用主 .env（agnes 自定义 provider 自动注入）
+#
+# 启动:  docker compose -p clawsynapse3 -f docker-compose.third.yml up -d
+# 停止:  docker compose -p clawsynapse3 -f docker-compose.third.yml down
+#   ⚠ 必须带 -p clawsynapse3 指定独立项目名，否则会与已有实例(项目 clawsynapse / clawsynapse2)
+#     冲突，compose 会误把已有容器 recreate/删除。
+
+services:
+  clawsynapse:
+    image: ${CLAWSYNAPSE_IMAGE:-clawsynapse:latest}
+    container_name: clawsynapse3
+    hostname: clawsynapse3
+    restart: unless-stopped
+
+    # ── Ports（宿主机 18082，避开 18080 / 18081）──
+    ports:
+      - "18082:18080"
+
+    # ── Environment variables ──
+    environment:
+      - CLAWSYNAPSE_NODE_ID=${CLAWSYNAPSE_NODE_ID}
+      - CLAWSYNAPSE_NODE_KEY=${CLAWSYNAPSE_NODE_KEY}
+      # agent_role 强制为 pm（不引用 .env，避免影响其他实例）
+      - CLAWSYNAPSE_AGENT_ROLE=pm
+      - CLAWSYNAPSE_API_LISTEN=${CLAWSYNAPSE_API_LISTEN}
+      - TOKENFLOW_API_KEY=${TOKENFLOW_API_KEY}
+      - TOKENFLOW_BASE_URL=${TOKENFLOW_BASE_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NOVITA_API_KEY=${NOVITA_API_KEY}
+      - NOVITA_BASE_URL=${NOVITA_BASE_URL}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - HERMES_MODEL=${HERMES_MODEL}
+      - HERMES_PROVIDER=${HERMES_PROVIDER}
+      - HERMES_BASE_URL=${HERMES_BASE_URL}
+      - HERMES_CUSTOM_PROVIDER_NAME=${HERMES_CUSTOM_PROVIDER_NAME}
+      - HERMES_CUSTOM_PROVIDER_BASE_URL=${HERMES_CUSTOM_PROVIDER_BASE_URL}
+      - HERMES_CUSTOM_PROVIDER_API_KEY=${HERMES_CUSTOM_PROVIDER_API_KEY}
+      - HERMES_CUSTOM_PROVIDER_MODEL=${HERMES_CUSTOM_PROVIDER_MODEL}
+      - HERMES_GATEWAY_KEY=${HERMES_GATEWAY_KEY}
+
+    # ── Volumes（独立卷，身份/配置互不干扰）──
+    volumes:
+      - clawsynapse3-data:/root/.clawsynapse
+      - hermes3-data:/root/.hermes
+
+    # ── Logging ──
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  clawsynapse3-data:
+    driver: local
+  hermes3-data:
+    driver: local

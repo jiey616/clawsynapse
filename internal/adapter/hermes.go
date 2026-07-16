@@ -32,6 +32,7 @@ type HermesConfig struct {
 // Message routing:
 //   - chat.message            -> POST /v1/responses (stateful, previous_response_id continuation)
 //   - task.*                 -> POST /v1/responses (same dialogue/stateful flow as chat)
+//   - meeting.*              -> POST /v1/responses (dialogue/stateful flow, like chat)
 //   - todo.*                 -> POST /v1/runs      (long-running, polled to terminal state)
 type HermesAdapter struct {
 	nodeID       string
@@ -105,7 +106,7 @@ func (a *HermesAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
 
 // isRunsMessage reports whether the message type belongs to the long-running
 // Runs flow (polled to a terminal state). Only `todo.*` messages take this path;
-// `task.*` and `chat.*` both go through the stateful Responses API.
+// `chat.*`, `task.*` and `meeting.*` all go through the stateful Responses API.
 func isRunsMessage(msgType string) bool {
 	t := strings.TrimSpace(msgType)
 	return strings.HasPrefix(t, "todo.")

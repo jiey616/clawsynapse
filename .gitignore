@@ -13,3 +13,9 @@ dist/
 
 # ── WorkBuddy workspace (dev only) ──
 .workbuddy/
+
+# ── Local-only Dockerfile (tencent mirror, for local docker build only) ──
+Dockerfile.local
+
+# ── Benchmark test artifacts (not part of the release) ──
+bench_*

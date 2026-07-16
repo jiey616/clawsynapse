@@ -6,7 +6,7 @@ trustAutoApprove: false
 # Agent adapter: default|openclaw|opencode|codex|webhook|hermes
 # hermes: AI agent backed by hermes chat CLI (sync mode, requires hermes in PATH)
 agentAdapter: default
-# Agent role for hermes adapter: pm (loads tm-task-plan) | executor (loads tm-task-exec)
+# Agent role for hermes adapter: pm (loads tm-task-plan, tm-meeting-host) | executor (loads tm-task-exec, tm-meeting-participant)
 # Leave empty to only load the protocol skill (clawsynapse).
 agentRole: ""
 heartbeatInterval: 15s

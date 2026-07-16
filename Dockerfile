@@ -75,6 +75,14 @@ COPY --from=builder /build/clawsynapsed /usr/local/bin/clawsynapsed
 # ── Embed SKILL.md (belt & suspenders: also deployed by init --agent-adapter hermes) ──
 COPY cmd/clawsynapse/skill_assets/clawsynapse/SKILL.md /usr/local/share/clawsynapse/SKILL.md
 
+# ── Embed TrustMesh business skills (tm-*) for hermes external_dirs loading ──
+# These are copied verbatim into hermes's skills dir by docker-entrypoint.sh so
+# they load for the matching agent role (pm / executor). They live under a
+# non-volume path here and are materialized into /root/.hermes/skills at runtime.
+COPY cmd/clawsynapse/skill_assets/tm-task-plan/SKILL.md /usr/local/share/clawsynapse/skills/tm-task-plan/SKILL.md
+COPY cmd/clawsynapse/skill_assets/tm-meeting-host/SKILL.md /usr/local/share/clawsynapse/skills/tm-meeting-host/SKILL.md
+COPY cmd/clawsynapse/skill_assets/tm-meeting-participant/SKILL.md /usr/local/share/clawsynapse/skills/tm-meeting-participant/SKILL.md
+
 # ── Entrypoint ──
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

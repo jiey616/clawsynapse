@@ -21,6 +21,13 @@ export HERMES_ENV_FILE="$HERMES_HOME/.env"
 # In Docker, the API must bind to all interfaces and match the exposed port.
 CLAWSYNAPSE_API_LISTEN="${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:18080}"
 
+# Deliverable message prefixes forwarded to the local agent handler.
+# Must stay in sync with internal/config/config.go defaultDeliverablePrefixes.
+# Re-applied on every start (see Step 3.5) because clawsynapse init only writes
+# it on first run and the config is persisted in a named volume.
+DELIVERABLE_PREFIXES="${DELIVERABLE_PREFIXES:-chat,task,todo,meeting}"
+export DELIVERABLE_PREFIXES
+
 log() { echo "[entrypoint] $*"; }
 
 # ─────────────────────────────────────────────────
@@ -190,8 +197,8 @@ role = os.environ.get("CLAWSYNAPSE_AGENT_ROLE", "").strip().lower()
 skills_base = os.environ.get("HERMES_SKILL_DIR", "/root/.hermes/skills/clawsynapse")
 skills_root = os.path.dirname(skills_base)
 role_skills = {
-    "pm": ["clawsynapse", "tm-task-plan"],
-    "executor": ["clawsynapse", "tm-task-exec"],
+    "pm": ["clawsynapse", "tm-task-plan", "tm-meeting-host"],
+    "executor": ["clawsynapse", "tm-task-exec", "tm-meeting-participant"],
 }
 names = role_skills.get(role, ["clawsynapse"])
 config["external_dirs"] = [os.path.join(skills_root, n) for n in names]
@@ -260,7 +267,7 @@ if [ ! -f "$CLAWSYNAPSE_CONFIG" ]; then
     INIT_ARGS=(
         --agent-adapter hermes
         --local-api-addr "$CLAWSYNAPSE_API_LISTEN"
-        --deliverable-prefixes chat,task,todo
+        --deliverable-prefixes "$DELIVERABLE_PREFIXES"
         --non-interactive
         --overwrite
     )
@@ -292,6 +299,73 @@ if [ ! -f "$HERMES_SKILL_DIR/SKILL.md" ] && [ -f "$SKILL_SRC" ]; then
     cp "$SKILL_SRC" "$HERMES_SKILL_DIR/SKILL.md"
     log "Deployed SKILL.md → $HERMES_SKILL_DIR/ (post-init fixup)"
 fi
+
+# Materialize TrustMesh business skills (tm-*) referenced by external_dirs into
+# hermes's skills dir. Source lives at a non-volume path baked by the Dockerfile;
+# we copy only when missing so a user-customized skill in the volume is preserved.
+skills_root="$(dirname "$HERMES_SKILL_DIR")"
+TM_SKILLS_SRC="${TM_SKILLS_SRC:-/usr/local/share/clawsynapse/skills}"
+if [ -d "$TM_SKILLS_SRC" ]; then
+    for skill_dir in "$TM_SKILLS_SRC"/*/; do
+        name="$(basename "$skill_dir")"
+        src_skill="$skill_dir/SKILL.md"
+        dst_dir="$skills_root/$name"
+        if [ -f "$src_skill" ] && [ ! -f "$dst_dir/SKILL.md" ]; then
+            mkdir -p "$dst_dir"
+            cp "$src_skill" "$dst_dir/SKILL.md"
+            log "Deployed tm skill → $dst_dir/SKILL.md (post-init fixup)"
+        fi
+    done
+fi
+
+# ─────────────────────────────────────────────────
+# Step 3.5: Ensure deliverablePrefixes is current (idempotent, every start)
+# ─────────────────────────────────────────────────
+# clawsynapse init only writes deliverablePrefixes on first run; the config is
+# persisted in a named volume, so a prefix added later (e.g. `meeting`) would
+# never take effect on existing deployments. Re-apply the canonical set here.
+ensure_deliverable_prefixes() {
+    python3 - << 'PY'
+import os, sys
+p = os.environ.get("CLAWSYNAPSE_CONFIG")
+raw = os.environ.get("DELIVERABLE_PREFIXES", "")
+need = [x.strip() for x in raw.split(",") if x.strip()]
+if not p or not os.path.exists(p) or not need:
+    sys.exit(0)
+with open(p) as f:
+    lines = f.readlines()
+out = []
+i = 0
+n = len(lines)
+changed = False
+while i < n:
+    line = lines[i]
+    if line.strip() == "deliverablePrefixes:":
+        out.append(line)
+        j = i + 1
+        existing = []
+        while j < n and (lines[j].startswith("  - ") or lines[j].strip() == ""):
+            item = lines[j].strip()
+            if item.startswith("- "):
+                existing.append(item[2:].strip())
+            out.append(lines[j])
+            j += 1
+        missing = [x for x in need if x not in existing]
+        if missing:
+            for m in missing:
+                out.append(f"  - {m}\n")
+            changed = True
+        i = j
+        continue
+    out.append(line)
+    i += 1
+if changed:
+    with open(p, "w") as f:
+        f.writelines(out)
+    print(f"[entrypoint] deliverablePrefixes ensured -> {need}")
+PY
+}
+ensure_deliverable_prefixes
 
 # ─────────────────────────────────────────────────
 # Step 4: Runtime config overrides from env
