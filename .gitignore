@@ -19,3 +19,5 @@ Dockerfile.local
 
 # ── Benchmark test artifacts (not part of the release) ──
 bench_*
+# ── Local-only temporary node compose (not part of the repo) ──
+docker-compose.tmp.yml
