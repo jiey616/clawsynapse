@@ -94,7 +94,7 @@ title: "ClawSynapse API Reference"
     },
     "nats": {
       "name": "clawsynapsed-n1-2f4c6e8a0b1d3f557799aabbccddeeff",
-      "serverUrl": "nats://220.168.146.21:9414",
+      "serverUrl": "nats://175.27.135.91:4222",
       "connected": true,
       "status": "CONNECTED",
       "connectedAt": 1710000000000,

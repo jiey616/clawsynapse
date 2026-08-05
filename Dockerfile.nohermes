@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────
+# ClawSynapse 轻量镜像（不安装 hermes agent）
+# 用于 TrustMesh 平台 webhook adapter 场景：clawsynapse 仅作为网关/传输层，
+# 无需 hermes 运行时。从本地源码构建，包含全部未提交改动。
+# Build:  docker build -f Dockerfile.nohermes -t clawsynapse:local .
+# ─────────────────────────────────────────────
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /src
+
+# 使用本地源码（build context 必须指向 clawsynapse 源码根目录）
+COPY . .
+
+# 下载 Go 依赖并编译 clawsynapse 守护进程
+RUN go env -w GOPROXY=https://goproxy.cn,direct \
+ && go mod download \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/clawsynapsed ./cmd/clawsynapsed \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/clawsynapse ./cmd/clawsynapse
+
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates tzdata su-exec bash \
+  && addgroup -S clawsynapse \
+  && adduser -S -G clawsynapse clawsynapse \
+  && mkdir -p /var/lib/clawsynapse \
+  && mkdir -p /var/lib/trustmesh-transfers \
+  && chown -R clawsynapse:clawsynapse /var/lib/clawsynapse \
+  && chown -R clawsynapse:clawsynapse /var/lib/trustmesh-transfers
+
+WORKDIR /app
+
+COPY --from=builder /out/clawsynapsed /usr/local/bin/clawsynapsed
+COPY --from=builder /out/clawsynapse /usr/local/bin/clawsynapse
+
+# 极简 entrypoint：不依赖 hermes，直接以 clawsynapse 用户启动
+COPY docker-entrypoint.nohermes.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+
+VOLUME ["/var/lib/clawsynapse"]
+VOLUME ["/var/lib/trustmesh-transfers"]
+
+EXPOSE 18080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD clawsynapse version || exit 1
+
+ENTRYPOINT ["docker-entrypoint.sh"]

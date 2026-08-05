@@ -82,7 +82,14 @@ fi
 # Step 1b: Set hermes model config (config.yaml)
 #   Uses Python + PyYAML for robust multi-line editing.
 #
-#   Custom provider mode (recommended):
+#   IMPORTANT (idempotent init + user-first):
+#   The model section is only written when model.default / model.provider are
+#   NOT set yet (first boot after the volume is mounted). Once the user has
+#   configured or changed the model (e.g. added a provider and switched the
+#   default model), restarts will PRESERVE the user's settings and skip the
+#   .env override. This prevents "model resets to .env default on every boot".
+#
+#   Custom provider mode (recommended, used on first boot):
 #     HERMES_CUSTOM_PROVIDER_NAME=tokenflow
 #     HERMES_CUSTOM_PROVIDER_BASE_URL=http://...
 #     HERMES_CUSTOM_PROVIDER_API_KEY=sk-...
@@ -139,52 +146,60 @@ if "model" not in config or config["model"] is None:
     config["model"] = {}
 model_section = config["model"]
 
-if name:
-    print(f"[entrypoint] Configuring custom provider: {name}")
-
-    if "custom_providers" not in config or config["custom_providers"] is None:
-        config["custom_providers"] = []
-    providers = config["custom_providers"]
-    if not isinstance(providers, list):
-        providers = []
-        config["custom_providers"] = providers
-
-    provider_entry = None
-    for p in providers:
-        if isinstance(p, dict) and p.get("name") == name:
-            provider_entry = p
-            break
-
-    if provider_entry is None:
-        provider_entry = {}
-        providers.append(provider_entry)
-
-    provider_entry["name"] = name
-    if base_url:
-        provider_entry["base_url"] = base_url
-    if api_key:
-        provider_entry["api_key"] = api_key
-    if model:
-        provider_entry["model"] = model
-
-    if model:
-        model_section["default"] = model
-        print(f"[entrypoint]   model.default = {model}")
-    model_section["provider"] = name
-    print(f"[entrypoint]   model.provider = {name}")
-    # base_url lives on the provider entry now
-    model_section.pop("base_url", None)
+# Model override protection: initialize the model only on first boot (when no
+# default model is set yet). Once the user has configured/changed the model
+# (e.g. added another provider and switched model.default), preserve it across
+# restarts — do NOT re-apply the .env default on every container start.
+model_already_set = bool(model_section.get("default")) and bool(model_section.get("provider"))
+if model_already_set:
+    print("[entrypoint] model.default/provider already set — preserving user model config, skipping .env override.")
 else:
-    print("[entrypoint] Configuring hermes model (legacy provider mode)...")
-    if legacy_model:
-        model_section["default"] = legacy_model
-        print(f"[entrypoint]   model.default = {legacy_model}")
-    if legacy_provider:
-        model_section["provider"] = legacy_provider
-        print(f"[entrypoint]   model.provider = {legacy_provider}")
-    if legacy_base:
-        model_section["base_url"] = legacy_base
-        print(f"[entrypoint]   model.base_url = {legacy_base}")
+    if name:
+        print(f"[entrypoint] Configuring custom provider: {name}")
+
+        if "custom_providers" not in config or config["custom_providers"] is None:
+            config["custom_providers"] = []
+        providers = config["custom_providers"]
+        if not isinstance(providers, list):
+            providers = []
+            config["custom_providers"] = providers
+
+        provider_entry = None
+        for p in providers:
+            if isinstance(p, dict) and p.get("name") == name:
+                provider_entry = p
+                break
+
+        if provider_entry is None:
+            provider_entry = {}
+            providers.append(provider_entry)
+
+        provider_entry["name"] = name
+        if base_url:
+            provider_entry["base_url"] = base_url
+        if api_key:
+            provider_entry["api_key"] = api_key
+        if model:
+            provider_entry["model"] = model
+
+        if model:
+            model_section["default"] = model
+            print(f"[entrypoint]   model.default = {model}")
+        model_section["provider"] = name
+        print(f"[entrypoint]   model.provider = {name}")
+        # base_url lives on the provider entry now
+        model_section.pop("base_url", None)
+    else:
+        print("[entrypoint] Configuring hermes model (legacy provider mode)...")
+        if legacy_model:
+            model_section["default"] = legacy_model
+            print(f"[entrypoint]   model.default = {legacy_model}")
+        if legacy_provider:
+            model_section["provider"] = legacy_provider
+            print(f"[entrypoint]   model.provider = {legacy_provider}")
+        if legacy_base:
+            model_section["base_url"] = legacy_base
+            print(f"[entrypoint]   model.base_url = {legacy_base}")
 
 # Gateway: auto-approve (yolo) so task runs never block on tool approvals.
 if "approvals" not in config or config["approvals"] is None:
@@ -272,8 +287,8 @@ if [ ! -f "$CLAWSYNAPSE_CONFIG" ]; then
         --overwrite
     )
 
-    [ -n "$CLAWSYNAPSE_NODE_ID" ]     && INIT_ARGS+=(--node-id "$CLAWSYNAPSE_NODE_ID")
-    [ -n "$CLAWSYNAPSE_NODE_KEY" ]    && INIT_ARGS+=(--node-key "$CLAWSYNAPSE_NODE_KEY")
+    # Note: `clawsynapse init` has no --node-id/--node-key flags; the identity
+    # keypair (and thus nodeId) is auto-generated into the data dir.
     [ -n "$CLAWSYNAPSE_AGENT_ROLE" ]  && INIT_ARGS+=(--agent-role "$CLAWSYNAPSE_AGENT_ROLE")
 
     clawsynapse init "${INIT_ARGS[@]}"
@@ -300,15 +315,22 @@ if [ ! -f "$HERMES_SKILL_DIR/SKILL.md" ] && [ -f "$SKILL_SRC" ]; then
     log "Deployed SKILL.md → $HERMES_SKILL_DIR/ (post-init fixup)"
 fi
 
-# Materialize TrustMesh business skills (tm-*) referenced by external_dirs into
-# hermes's skills dir. Source lives at a non-volume path baked by the Dockerfile;
-# we copy only when missing so a user-customized skill in the volume is preserved.
+# Materialize ONLY the tm-* skills referenced by this role's external_dirs into
+# hermes's skills dir (mirrors the role_skills map in configure_hermes_yaml).
+# Source lives at a non-volume path baked by the Dockerfile; we copy only when
+# missing so a user-customized skill in the volume is preserved. Existing
+# deployments keep any previously materialized skills (nothing is deleted).
 skills_root="$(dirname "$HERMES_SKILL_DIR")"
 TM_SKILLS_SRC="${TM_SKILLS_SRC:-/usr/local/share/clawsynapse/skills}"
+role_lower="$(printf '%s' "${CLAWSYNAPSE_AGENT_ROLE:-}" | tr '[:upper:]' '[:lower:]')"
+case "$role_lower" in
+    pm)       ROLE_TM_SKILLS="tm-task-plan tm-meeting-host" ;;
+    executor) ROLE_TM_SKILLS="tm-task-exec tm-meeting-participant" ;;
+    *)        ROLE_TM_SKILLS="" ;;
+esac
 if [ -d "$TM_SKILLS_SRC" ]; then
-    for skill_dir in "$TM_SKILLS_SRC"/*/; do
-        name="$(basename "$skill_dir")"
-        src_skill="$skill_dir/SKILL.md"
+    for name in $ROLE_TM_SKILLS; do
+        src_skill="$TM_SKILLS_SRC/$name/SKILL.md"
         dst_dir="$skills_root/$name"
         if [ -f "$src_skill" ] && [ ! -f "$dst_dir/SKILL.md" ]; then
             mkdir -p "$dst_dir"

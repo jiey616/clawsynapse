@@ -80,6 +80,7 @@ COPY cmd/clawsynapse/skill_assets/clawsynapse/SKILL.md /usr/local/share/clawsyna
 # they load for the matching agent role (pm / executor). They live under a
 # non-volume path here and are materialized into /root/.hermes/skills at runtime.
 COPY cmd/clawsynapse/skill_assets/tm-task-plan/SKILL.md /usr/local/share/clawsynapse/skills/tm-task-plan/SKILL.md
+COPY cmd/clawsynapse/skill_assets/tm-task-exec/SKILL.md /usr/local/share/clawsynapse/skills/tm-task-exec/SKILL.md
 COPY cmd/clawsynapse/skill_assets/tm-meeting-host/SKILL.md /usr/local/share/clawsynapse/skills/tm-meeting-host/SKILL.md
 COPY cmd/clawsynapse/skill_assets/tm-meeting-participant/SKILL.md /usr/local/share/clawsynapse/skills/tm-meeting-participant/SKILL.md
 

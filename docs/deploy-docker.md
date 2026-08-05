@@ -42,7 +42,10 @@ CLAWSYNAPSE_AGENT_ROLE=pm
 # Hermes LLM API Key (TokenFlow 默认)
 TOKENFLOW_API_KEY=sk-your-tokenflow-key
 
-# Hermes Gateway API Key（可选；留空则 entrypoint 随机生成并持久化到 ~/.hermes/.env）
+# Hermes Gateway API Key（必填！）
+# 留空时 entrypoint 会给 Gateway 随机生成 API_SERVER_KEY，但 Adapter 读不到该值，
+# 两边 key 不一致 → 401 circle_jwt_error 调用失败（见 .env.example 第 51 行警告）。
+# 请生成固定值填入：  openssl rand -hex 16
 # 同一容器内的 ClawSynapse 默认通过 127.0.0.1:8642 调用 Gateway
 HERMES_GATEWAY_KEY=
 ```
@@ -201,7 +204,7 @@ docker compose exec clawsynapse bash
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `HERMES_GATEWAY_URL` | `http://127.0.0.1:8642/v1` | Gateway base URL（同容器可保持默认） |
-| `HERMES_GATEWAY_KEY` | 随机生成并持久化 | Gateway API Server Key（写入 `~/.hermes/.env` 的 `API_SERVER_KEY`） |
+| `HERMES_GATEWAY_KEY` | 留空则随机生成（不推荐） | Gateway API Server Key（写入 `~/.hermes/.env` 的 `API_SERVER_KEY`）。必须与 Adapter 读取的值一致，否则 401；建议显式生成固定值 |
 | `HERMES_MODEL` | `hermes-agent` | `GET /v1/models` 广告的 agent 名 |
 
 Gateway 启动前，entrypoint 会自动写入 `~/.hermes/.env`（`API_SERVER_ENABLED=true` 等）与 `~/.hermes/config.yaml`（`approvals.mode: off` 等效 `--yolo`、`external_dirs` 按 `CLAWSYNAPSE_AGENT_ROLE` 挂载对应 skills），并等待 `/health` 就绪后再启动 `clawsynapsed`。
