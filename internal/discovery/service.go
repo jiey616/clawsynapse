@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +44,7 @@ type Service struct {
 	ttl                time.Duration
 	heartbeat          time.Duration
 	trustMode          string
+	agentProduct       string
 	autoAuth           func(context.Context, string) error
 	authMu             sync.Mutex
 	authing            map[string]struct{}
@@ -50,7 +52,7 @@ type Service struct {
 	legacyAnnounceSeen map[string]time.Time
 }
 
-func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *store.FSStore, nodeID string, did string, publicKey string, heartbeat, ttl time.Duration, trustMode string) *Service {
+func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *store.FSStore, nodeID string, did string, publicKey string, heartbeat, ttl time.Duration, trustMode string, agentProduct string) *Service {
 	return &Service{
 		log:                log,
 		bus:                bus,
@@ -62,6 +64,7 @@ func NewService(log *slog.Logger, bus *natsbus.Client, peers *Registry, fs *stor
 		ttl:                ttl,
 		heartbeat:          heartbeat,
 		trustMode:          trustMode,
+		agentProduct:       agentProduct,
 		authing:            map[string]struct{}{},
 		legacyAnnounceSeen: map[string]time.Time{},
 	}
@@ -108,13 +111,17 @@ func (s *Service) Start(ctx context.Context) error {
 }
 
 func (s *Service) publishAnnounce() error {
+	product := strings.TrimSpace(s.agentProduct)
+	if product == "" {
+		product = "clawsynapse"
+	}
 	msg := protocol.DiscoveryAnnounce{
 		MessageID:    randID(),
 		MessageType:  "discovery.announce",
 		NodeID:       s.nodeID,
 		DID:          s.did,
 		Version:      "v0.1.0",
-		AgentProduct: "clawsynapse",
+		AgentProduct: product,
 		Capabilities: []string{"chat", "tools"},
 		Inbox:        "clawsynapse.msg." + s.nodeID + ".inbox",
 		PublicKey:    s.publicKey,
@@ -162,7 +169,13 @@ func (s *Service) handleAnnounce(_ string, data []byte) {
 	existing, ok := s.peers.Get(msg.NodeID)
 	if ok {
 		authStatus = existing.AuthStatus
-		trustStatus = existing.TrustStatus
+		// 持久化信任优先：若 trust.json 中已信任该节点，覆盖内存中的 none/pending 状态，
+		// 避免节点重启后（registry 重建）信任状态丢失（capability 转发会拒绝 untrusted peer）。
+		if persisted := s.persistedTrustStatus(msg.NodeID); persisted != types.TrustNone {
+			trustStatus = persisted
+		} else {
+			trustStatus = existing.TrustStatus
+		}
 		if existing.Metadata != nil {
 			if known, ok := existing.Metadata["publicKey"].(string); ok && known != "" {
 				if s.trustMode == "tofu" || s.trustMode == "explicit" {

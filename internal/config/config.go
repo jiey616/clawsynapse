@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultNATSServers         = "nats://220.168.146.21:9414"
+	defaultNATSServers         = "nats://175.27.135.91:4222"
 	defaultLocalAPIAddr        = "127.0.0.1:18080"
 	defaultHeartbeatInterval   = 15 * time.Second
 	defaultAnnounceTTL         = 30 * time.Second
@@ -47,6 +47,7 @@ type Config struct {
 	HermesGatewayURL    string   `json:"hermesGatewayUrl"`
 	HermesGatewayKey    string   `json:"hermesGatewayKey"`
 	HermesModel         string   `json:"hermesModel"`
+	HermesConfigPath    string   `json:"hermesConfigPath"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
@@ -177,6 +178,7 @@ type configValues struct {
 	HermesGatewayURL    string
 	HermesGatewayKey    string
 	HermesModel         string
+	HermesConfigPath    string
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -260,6 +262,7 @@ func LoadFromOS(args []string) (Config, error) {
 	if hermesModelDef == "" {
 		hermesModelDef = "hermes-agent"
 	}
+	hermesConfigPathDef := envOr("HERMES_CONFIG_PATH", merged.HermesConfigPath)
 
 	var (
 		natsServers         = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
@@ -277,6 +280,7 @@ func LoadFromOS(args []string) (Config, error) {
 		hermesGatewayURL    = fs.String("hermes-gateway-url", hermesGatewayURLDef, "hermes gateway base URL (env HERMES_GATEWAY_URL)")
 		hermesGatewayKey    = fs.String("hermes-gateway-key", hermesGatewayKeyDef, "hermes gateway API key (env HERMES_GATEWAY_KEY)")
 		hermesModel         = fs.String("hermes-model", hermesModelDef, "hermes gateway model name (env HERMES_MODEL)")
+		hermesConfigPath    = fs.String("hermes-config-path", hermesConfigPathDef, "hermes config.yaml path used by capability read/write (env HERMES_CONFIG_PATH)")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -380,6 +384,7 @@ func LoadFromOS(args []string) (Config, error) {
 		HermesGatewayURL:    strings.TrimSpace(*hermesGatewayURL),
 		HermesGatewayKey:    strings.TrimSpace(*hermesGatewayKey),
 		HermesModel:         strings.TrimSpace(*hermesModel),
+		HermesConfigPath:    strings.TrimSpace(*hermesConfigPath),
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,

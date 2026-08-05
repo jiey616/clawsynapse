@@ -26,7 +26,7 @@ func TestHandleAnnouncePreservesAuthAndTrustStatus(t *testing.T) {
 		LastSeenMs:  1,
 	})
 
-	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 
 	b, err := json.Marshal(msg)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestHandleAnnounceRestoresPersistedTrustStatusForNewPeer(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 
 	b, err := json.Marshal(msg)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestHandleAnnounceAutoAuthenticatesTrustedPeer(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 	called := make(chan string, 1)
 	svc.SetAutoAuthenticator(func(_ context.Context, nodeID string) error {
 		called <- nodeID
@@ -146,7 +146,7 @@ func TestHandleAnnounceDeduplicatesAutoAuthentication(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var calls atomic.Int32
@@ -183,7 +183,7 @@ func TestHandleAnnounceRejectsDIDMismatch(t *testing.T) {
 	msg.DID = "did:key:zinvalid"
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 
 	b, err := json.Marshal(msg)
 	if err != nil {
@@ -203,7 +203,7 @@ func TestHandleAnnounceRejectsNodeIDMismatch(t *testing.T) {
 	msg.Inbox = "clawsynapse.msg." + msg.NodeID + ".inbox"
 
 	r := NewRegistry()
-	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, r, nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 
 	b, err := json.Marshal(msg)
 	if err != nil {
@@ -218,7 +218,7 @@ func TestHandleAnnounceRejectsNodeIDMismatch(t *testing.T) {
 }
 
 func TestShouldLogLegacyAnnounceRateLimitsByPeer(t *testing.T) {
-	svc := NewService(slog.Default(), nil, NewRegistry(), nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu")
+	svc := NewService(slog.Default(), nil, NewRegistry(), nil, "node-alpha", "", "", 5*time.Second, 10*time.Second, "tofu", "test-agent")
 	now := time.Now()
 
 	if !svc.shouldLogLegacyAnnounce("node-test-005", now) {
@@ -258,5 +258,47 @@ func testAnnounce(t *testing.T, marker byte) protocol.DiscoveryAnnounce {
 		PublicKey:    base64.RawURLEncoding.EncodeToString(pub),
 		Ts:           time.Now().UnixMilli(),
 		TTLms:        30000,
+	}
+}
+
+// 持久化信任恢复：即使 registry 中该 peer 已是 none（节点重启后内存态丢失），
+// 只要 trust.json 持久化 trusted，announce 时应恢复为 trusted（否则 capability 转发拒绝）。
+func TestHandleAnnounceRestoresPersistedTrust(t *testing.T) {
+	msg := testAnnounce(t, 2)
+	fs := store.NewFSStore(t.TempDir())
+	if err := fs.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := fs.SaveTrustState(store.TrustState{
+		SchemaVersion: 1,
+		Trusted: []store.TrustPeerState{
+			{NodeID: msg.NodeID, AtMs: time.Now().UnixMilli(), Reason: "test"},
+		},
+	}); err != nil {
+		t.Fatalf("save trust: %v", err)
+	}
+
+	r := NewRegistry()
+	// 模拟节点重启后内存态丢失：registry 中 peer 是 none
+	r.Upsert(types.Peer{
+		NodeID:      msg.NodeID,
+		AuthStatus:  types.AuthAuthenticated,
+		TrustStatus: types.TrustNone,
+		LastSeenMs:  1,
+	})
+
+	svc := NewService(slog.Default(), nil, r, fs, "node-alpha", "", "", 5*time.Second, 10*time.Second, "open", "test-agent")
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	svc.handleAnnounce("", b)
+
+	peer, ok := r.Get(msg.NodeID)
+	if !ok {
+		t.Fatalf("peer not found")
+	}
+	if peer.TrustStatus != types.TrustTrusted {
+		t.Errorf("trustStatus = %q, want trusted (persisted trust restored)", peer.TrustStatus)
 	}
 }

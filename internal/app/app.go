@@ -12,6 +12,7 @@ import (
 	"clawsynapse/internal/adapter"
 	"clawsynapse/internal/api"
 	"clawsynapse/internal/auth"
+	"clawsynapse/internal/capability"
 	"clawsynapse/internal/config"
 	"clawsynapse/internal/discovery"
 	"clawsynapse/internal/identity"
@@ -33,6 +34,7 @@ type App struct {
 	trust     *trust.Service
 	messaging *messaging.Service
 	transfer  *transfer.Service
+	capability *capability.Service
 	bus       *natsbus.Client
 	peers     *discovery.Registry
 	identity  *identity.Identity
@@ -75,7 +77,16 @@ func New(cfg config.Config, version string) (*App, error) {
 	)
 
 	peers := discovery.NewRegistry()
-	peers.Upsert(types.Peer{NodeID: nodeID, DID: nodeDID, AuthStatus: types.AuthAuthenticated, TrustStatus: types.TrustTrusted, Inbox: "clawsynapse.msg." + nodeID + ".inbox"})
+	peers.Upsert(types.Peer{
+		NodeID:      nodeID,
+		DID:         nodeDID,
+		AuthStatus:  types.AuthAuthenticated,
+		TrustStatus: types.TrustTrusted,
+		Inbox:       "clawsynapse.msg." + nodeID + ".inbox",
+		Metadata: map[string]any{
+			"publicKey": base64.RawURLEncoding.EncodeToString(id.PublicKey),
+		},
+	})
 
 	hb, err := time.ParseDuration(cfg.HeartbeatInterval)
 	if err != nil {
@@ -96,7 +107,7 @@ func New(cfg config.Config, version string) (*App, error) {
 		return nil, fmt.Errorf("init replay guard: %w", err)
 	}
 
-	discoverySvc := discovery.NewService(log.With(slog.String("component", "discovery")), bus, peers, fs, nodeID, nodeDID, base64.RawURLEncoding.EncodeToString(id.PublicKey), hb, ttl, cfg.TrustMode)
+	discoverySvc := discovery.NewService(log.With(slog.String("component", "discovery")), bus, peers, fs, nodeID, nodeDID, base64.RawURLEncoding.EncodeToString(id.PublicKey), hb, ttl, cfg.TrustMode, cfg.AgentAdapter)
 	authSvc := auth.NewService(log.With(slog.String("component", "auth")), peers, bus, nodeID, id, replay, cfg.TrustMode)
 	discoverySvc.SetAutoAuthenticator(authSvc.StartChallenge)
 	trustSvc, err := trust.NewService(log.With(slog.String("component", "trust")), peers, bus, fs, nodeID, id, cfg.TrustAutoApprove)
@@ -153,7 +164,12 @@ func New(cfg config.Config, version string) (*App, error) {
 		}
 	})
 
-	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, bus, agentAdapter, cfg.AgentAdapter, api.SelfInfo{
+	capabilitySvc := capability.NewService(
+		log.With(slog.String("component", "capability")),
+		bus, peers, transferSvc, agentAdapter, nodeID, id,
+	)
+
+	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, capabilitySvc, bus, agentAdapter, cfg.AgentAdapter, api.SelfInfo{
 		NodeID:              nodeID,
 		DID:                 nodeDID,
 		IdentityFingerprint: identity.Fingerprint(id.PublicKey),
@@ -169,6 +185,7 @@ func New(cfg config.Config, version string) (*App, error) {
 		trust:     trustSvc,
 		messaging: messagingSvc,
 		transfer:  transferSvc,
+		capability: capabilitySvc,
 		bus:       bus,
 		peers:     peers,
 		identity:  id,
@@ -211,6 +228,7 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 			BaseURL:      cfg.HermesGatewayURL,
 			APIKey:       cfg.HermesGatewayKey,
 			Model:        cfg.HermesModel,
+			ConfigPath:   cfg.HermesConfigPath,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported agent adapter: %s", cfg.AgentAdapter)
@@ -257,6 +275,10 @@ func (a *App) Run(ctx context.Context) error {
 	if a.transfer.Enabled() {
 		a.log.Info("transfer service ready")
 	}
+	if err := a.capability.Start(); err != nil {
+		return fmt.Errorf("start capability service: %w", err)
+	}
+	a.log.Info("capability subscriptions ready")
 	if err := a.bus.FlushTimeout(3 * time.Second); err != nil {
 		a.log.Warn("nats flush timeout after control subscriptions", slog.String("error", err.Error()))
 	}

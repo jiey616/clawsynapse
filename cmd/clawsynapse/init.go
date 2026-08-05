@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	initDefaultNATSServers         = "nats://220.168.146.21:9414"
+	initDefaultNATSServers         = "nats://175.27.135.91:4222"
 	initDefaultLocalAPIAddr        = "127.0.0.1:18080"
 	initDefaultTrustMode           = "tofu"
 	initDefaultAgentAdapter        = "default"
