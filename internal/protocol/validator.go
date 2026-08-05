@@ -6,14 +6,15 @@ import (
 )
 
 var supportedModules = map[string]struct{}{
-	"auth":      {},
-	"trust":     {},
-	"discovery": {},
-	"control":   {},
-	"msg":       {},
-	"events":    {},
-	"pubsub":    {},
-	"transfer":  {},
+	"auth":       {},
+	"trust":      {},
+	"discovery":  {},
+	"control":    {},
+	"msg":        {},
+	"events":     {},
+	"pubsub":     {},
+	"transfer":   {},
+	"capability": {},
 }
 
 type ValidateOptions struct {

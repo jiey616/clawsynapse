@@ -8,6 +8,7 @@ import (
 
 	"clawsynapse/internal/adapter"
 	"clawsynapse/internal/auth"
+	"clawsynapse/internal/capability"
 	"clawsynapse/internal/config"
 	"clawsynapse/internal/discovery"
 	"clawsynapse/internal/messaging"
@@ -23,6 +24,7 @@ type Server struct {
 	trust       *trust.Service
 	messaging   *messaging.Service
 	transfer    *transfer.Service
+	capability  *capability.Service
 	nats        *natsbus.Client
 	adapter     adapter.AgentAdapter
 	adapterName string
@@ -39,13 +41,14 @@ type SelfInfo struct {
 	TrustMode           string
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, version string, cfg config.Config) *Server {
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, capabilitySvc *capability.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, version string, cfg config.Config) *Server {
 	s := &Server{
 		peers:       peers,
 		auth:        authSvc,
 		trust:       trustSvc,
 		messaging:   messagingSvc,
 		transfer:    transferSvc,
+		capability:  capabilitySvc,
 		nats:        natsClient,
 		adapter:     agentAdapter,
 		adapterName: agentAdapterName,
@@ -57,6 +60,9 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/peers", s.handlePeers)
+	mux.HandleFunc("GET /v1/peers/{nodeId}/capabilities", s.handlePeerCapabilities)
+	mux.HandleFunc("POST /v1/peers/{nodeId}/capabilities", s.handlePeerCapabilitySet)
+	mux.HandleFunc("GET /v1/peers/{nodeId}/cron/executions", s.handlePeerCronExecutions)
 	mux.HandleFunc("POST /v1/auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /v1/trust/request", s.handleTrustRequest)
 	mux.HandleFunc("POST /v1/trust/approve", s.handleTrustApprove)

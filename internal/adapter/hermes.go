@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"clawsynapse/internal/store"
@@ -24,6 +25,10 @@ type HermesConfig struct {
 	BaseURL string // e.g. http://127.0.0.1:8642/v1
 	APIKey  string // API_SERVER_KEY
 	Model   string // advertised agent name from GET /v1/models
+	// ConfigPath is the hermes config.yaml path used by capability read
+	// (custom_providers) and write-back (skills.external_dirs / model).
+	// Empty means "$HERMES_HOME/config.yaml" or "~/.hermes/config.yaml".
+	ConfigPath string
 }
 
 // HermesAdapter delivers messages to a local Hermes agent via the Gateway
@@ -44,6 +49,14 @@ type HermesAdapter struct {
 	baseURL    string
 	apiKey     string
 	model      string
+	configPath string
+
+	capMu    sync.Mutex
+	capCache *capabilitiesSnapshot
+
+	// restartGatewayFn is the gateway restart implementation. Overridable in
+	// tests to avoid spawning real processes; defaults to restartGateway.
+	restartGatewayFn func(ctx context.Context) error
 }
 
 // NewHermesAdapter creates a Hermes adapter instance backed by the Gateway API.
@@ -69,6 +82,7 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		baseURL:    baseURL,
 		apiKey:     strings.TrimSpace(cfg.APIKey),
 		model:      model,
+		configPath: strings.TrimSpace(cfg.ConfigPath),
 	}, nil
 }
 
@@ -172,6 +186,41 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 		}, nil
 	}
 
+	// The model provider rejected the conversation history (e.g. deepseek's
+	// strict "empty tool_calls array" check). Hermes digests the 400 into the
+	// reply text; rather than leaking the raw error to the user, drop the
+	// session mapping and retry once on a fresh conversation (which has no
+	// poisoned history). If the retry also fails, degrade gracefully.
+	if isModelProviderError(reply) && prevID != "" {
+		a.deleteMappedSession(chatKey)
+		body.PreviousResponseID = ""
+		a.logGateway("responses-retry-fresh", chatKey, false)
+		var resp2 responsesResponse
+		if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp2); err2 == nil {
+			reply2 := extractResponseText(resp2)
+			if strings.TrimSpace(reply2) != "" && !isModelProviderError(reply2) {
+				if resp2.ID != "" {
+					a.saveMappedSession(chatKey, resp2.ID)
+				}
+				return &DeliverMessageResult{
+					Success:  true,
+					Accepted: true,
+					Reply:    reply2,
+				}, nil
+			}
+		}
+		return &DeliverMessageResult{
+			Success: false,
+			Error:   "对话上下文被模型服务拒绝，已自动重开会话，请重新发送该消息",
+		}, nil
+	}
+	if isModelProviderError(reply) {
+		return &DeliverMessageResult{
+			Success: false,
+			Error:   "模型服务暂时不可用，请稍后重试",
+		}, nil
+	}
+
 	if resp.ID != "" {
 		a.saveMappedSession(chatKey, resp.ID)
 	}
@@ -231,10 +280,58 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 
 	switch final.Status {
 	case "failed", "stopped", "cancelled", "error":
+		runText := extractRunText(*final)
+		// Model-provider rejection (e.g. deepseek empty tool_calls) is a
+		// session-history problem — drop the task mapping and retry once on a
+		// fresh run instead of surfacing the raw 400 to the user.
+		if isModelProviderError(runText) && prevID != "" {
+			a.deleteMappedSession(taskKey)
+			a.logGateway("runs-retry-fresh", taskKey, false)
+			fresh := runCreateRequest{Input: formatted}
+			var created2 runCreateResponse
+			if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created2); err2 == nil {
+				runID2 := strings.TrimSpace(created2.RunID)
+				if runID2 == "" {
+					runID2 = strings.TrimSpace(created2.ID)
+				}
+				if runID2 != "" {
+					if sid := strings.TrimSpace(created2.SessionID); sid != "" {
+						a.saveMappedSession(taskKey, sid)
+					}
+					if final2, err2 := a.pollRun(ctx, runID2); err2 == nil && final2 != nil {
+						switch final2.Status {
+						case "failed", "stopped", "cancelled", "error":
+							return &DeliverMessageResult{
+								Success: false,
+								RunID:   runID2,
+								Error:   "任务上下文被模型服务拒绝，已自动重开任务，请重新提交",
+							}, nil
+						}
+						reply2 := extractRunText(*final2)
+						if strings.TrimSpace(reply2) != "" {
+							if sessionID := strings.TrimSpace(final2.SessionID); sessionID != "" {
+								a.saveMappedSession(taskKey, sessionID)
+							}
+							return &DeliverMessageResult{
+								Success:  true,
+								Accepted: true,
+								RunID:    runID2,
+								Reply:    reply2,
+							}, nil
+						}
+					}
+				}
+			}
+			return &DeliverMessageResult{
+				Success: false,
+				RunID:   runID,
+				Error:   "任务上下文被模型服务拒绝，已自动重开任务，请重新提交",
+			}, nil
+		}
 		return &DeliverMessageResult{
 			Success: false,
 			RunID:   runID,
-			Error:   "hermes run " + final.Status + ": " + extractRunText(*final),
+			Error:   "hermes run " + final.Status + ": " + runText,
 		}, nil
 	}
 
@@ -471,6 +568,21 @@ func isGatewayUnknownSessionError(statusCode int, body string) bool {
 		strings.Contains(b, "no recorded session") ||
 		strings.Contains(b, "session not found") ||
 		strings.Contains(b, "invalid session")
+}
+
+// isModelProviderError reports whether a reply text is a model-provider
+// rejection that hermes digested into the response (e.g. deepseek's strict
+// "empty tool_calls array" 400). These are session-history problems, not user
+// input problems — the adapter recovers by starting a fresh conversation.
+func isModelProviderError(text string) bool {
+	b := strings.ToLower(text)
+	return strings.Contains(b, "tool_calls") ||
+		strings.Contains(b, "invalid_request_error") ||
+		strings.Contains(b, "badrequesterror") ||
+		strings.Contains(b, "http 400") ||
+		strings.Contains(b, "non-retryable client error") ||
+		strings.Contains(b, "api call failed") ||
+		strings.Contains(b, "context_length_exceeded")
 }
 
 // ── Request / response types ───────────────────────────────────────

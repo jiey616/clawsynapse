@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var subjectRe = regexp.MustCompile(`^clawsynapse\.(auth|trust|discovery|control|msg|events|pubsub|transfer)\.[a-z0-9-]+(\.[a-z0-9-]+){1,4}$`)
+var subjectRe = regexp.MustCompile(`^clawsynapse\.(auth|trust|discovery|control|msg|events|pubsub|transfer|capability)\.[a-z0-9-]+(\.[a-z0-9_-]+){1,4}$`)
 
 func ValidateSubject(subject string) error {
 	if !subjectRe.MatchString(subject) {

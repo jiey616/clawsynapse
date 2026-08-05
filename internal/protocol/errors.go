@@ -22,6 +22,12 @@ const (
 	ErrTransferFailed        = "transfer.failed"
 	ErrTransferBucketError   = "transfer.bucket_error"
 	ErrTransferDisabled      = "transfer.disabled"
+	// Capability module error codes (docs/capability-contract.md §9.1).
+	ErrCapabilityDenied      = "capability.denied"
+	ErrCapabilityUnavailable = "capability.unavailable"
+	ErrCapabilityInvalid     = "capability.invalid"
+	ErrCapabilityRestartFail = "capability.restart_failed"
+	ErrCapabilityTimeout     = "capability.timeout"
 )
 
 type Error struct {
