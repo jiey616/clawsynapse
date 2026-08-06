@@ -63,6 +63,7 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 	mux.HandleFunc("GET /v1/peers/{nodeId}/capabilities", s.handlePeerCapabilities)
 	mux.HandleFunc("POST /v1/peers/{nodeId}/capabilities", s.handlePeerCapabilitySet)
 	mux.HandleFunc("GET /v1/peers/{nodeId}/cron/executions", s.handlePeerCronExecutions)
+	mux.HandleFunc("POST /v1/peers/{nodeId}/skills", s.handlePeerSkillUpload)
 	mux.HandleFunc("POST /v1/auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /v1/trust/request", s.handleTrustRequest)
 	mux.HandleFunc("POST /v1/trust/approve", s.handleTrustApprove)

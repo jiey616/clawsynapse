@@ -22,6 +22,9 @@ type SendFileRequest struct {
 	FilePath   string
 	MimeType   string
 	Metadata   map[string]any
+	// TransferID 可选；指定时目标节点会以该 ID 登记本地 transfer（用于
+	// 技能上传场景：上传方与目标节点共享同一 fileId），空则自动生成。
+	TransferID string
 }
 
 type SendFileResult struct {

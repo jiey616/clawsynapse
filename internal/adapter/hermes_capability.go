@@ -23,6 +23,15 @@ type capabilitiesSnapshot struct {
 	result *CapabilitiesResult
 }
 
+// invalidateCache drops the cached capabilities snapshot. Called after a
+// write-back (skill/model/cron set) so the next read reflects the new state
+// immediately instead of serving stale data for up to capabilityCacheTTL.
+func (a *HermesAdapter) invalidateCache() {
+	a.capMu.Lock()
+	defer a.capMu.Unlock()
+	a.capCache = nil
+}
+
 const capabilityCacheTTL = 30 * time.Second
 
 // ── CapabilityProvider: read ───────────────────────────────────────

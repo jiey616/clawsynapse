@@ -3,6 +3,7 @@ package transfer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -256,5 +257,67 @@ func TestTransferDirCreation(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatal("expected directory")
+	}
+}
+
+// RegisterLocalUpload 保存上传文件并登记到 transfer store（fileId -> LocalPath）。
+func TestRegisterLocalUploadStoresAndResolves(t *testing.T) {
+	dir := t.TempDir()
+	svc := &Service{
+		transferDir: filepath.Join(dir, "transfers"),
+		maxFileSize: 1 << 20,
+		transfers:   make(map[string]*TransferRecord),
+	}
+
+	fileID, err := svc.RegisterLocalUpload("my-skill.zip", strings.NewReader("zip-bytes"), "application/zip")
+	if err != nil {
+		t.Fatalf("RegisterLocalUpload: %v", err)
+	}
+	if fileID == "" {
+		t.Fatal("fileId is empty")
+	}
+
+	info, ok := svc.GetTransfer(fileID)
+	if !ok {
+		t.Fatalf("transfer %s not found", fileID)
+	}
+	if info.LocalPath == "" {
+		t.Fatal("LocalPath is empty")
+	}
+	if info.FileName != "my-skill.zip" {
+		t.Errorf("fileName = %q, want my-skill.zip", info.FileName)
+	}
+	data, err := os.ReadFile(info.LocalPath)
+	if err != nil {
+		t.Fatalf("read local file: %v", err)
+	}
+	if string(data) != "zip-bytes" {
+		t.Errorf("file content = %q, want zip-bytes", data)
+	}
+}
+
+// RegisterLocalUpload 拒绝路径穿越文件名。
+func TestRegisterLocalUploadRejectsBadName(t *testing.T) {
+	svc := &Service{
+		transferDir: t.TempDir(),
+		maxFileSize: 1 << 20,
+		transfers:   make(map[string]*TransferRecord),
+	}
+	for _, name := range []string{"", ".", "/"} {
+		if _, err := svc.RegisterLocalUpload(name, strings.NewReader("x"), "application/zip"); err == nil {
+			t.Errorf("expected error for name %q", name)
+		}
+	}
+}
+
+// RegisterLocalUpload 超限报错。
+func TestRegisterLocalUploadSizeLimit(t *testing.T) {
+	svc := &Service{
+		transferDir: t.TempDir(),
+		maxFileSize: 4,
+		transfers:   make(map[string]*TransferRecord),
+	}
+	if _, err := svc.RegisterLocalUpload("big.zip", strings.NewReader("12345"), "application/zip"); err == nil {
+		t.Fatal("expected error for oversized file")
 	}
 }

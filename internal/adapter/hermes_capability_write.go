@@ -1,8 +1,10 @@
 package adapter
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -44,13 +46,14 @@ func (a *HermesAdapter) ApplyCapabilitySet(ctx context.Context, req *CapabilityS
 	if req == nil {
 		return nil, fmt.Errorf("nil capability set request")
 	}
+	var res *CapabilitySetResult
 	switch req.Target {
 	case "skill":
-		return a.applySkillSet(ctx, req)
+		res, _ = a.applySkillSet(ctx, req)
 	case "model":
-		return a.applyModelSet(ctx, req)
+		res, _ = a.applyModelSet(ctx, req)
 	case "cron":
-		return a.applyCronSet(ctx, req)
+		res, _ = a.applyCronSet(ctx, req)
 	default:
 		return &CapabilitySetResult{
 			OK:            false,
@@ -60,6 +63,12 @@ func (a *HermesAdapter) ApplyCapabilitySet(ctx context.Context, req *CapabilityS
 			Error:         "capability.invalid: unknown target " + req.Target,
 		}, nil
 	}
+	// 写回成功后清缓存：下一次读立即反映新状态，避免 30s TTL 内读到旧值
+	// （曾导致"切换模型显示已同步但实际还是旧默认"）。
+	if res != nil && res.OK {
+		a.invalidateCache()
+	}
+	return res, nil
 }
 
 // ── skill ──────────────────────────────────────────────────────────
@@ -121,20 +130,27 @@ func skillFail(req *CapabilitySetRequest, msg string) (*CapabilitySetResult, err
 }
 
 // installSkillFiles copies the resolved local files into the managed skill
-// directory and validates the package has a SKILL.md.
+// directory and validates the package has a SKILL.md. A single .zip source is
+// extracted (with path-traversal protection); other files are copied as-is.
 func (a *HermesAdapter) installSkillFiles(skill string, localPaths []string) error {
 	destDir := filepath.Join(a.hermesHomeDir(), managedSkillsSubdir, skill)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
 	for _, src := range localPaths {
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", src, err)
-		}
 		name := filepath.Base(src)
 		if name == "" || name == "." || name == "/" || strings.Contains(name, "..") {
 			return fmt.Errorf("invalid file name from transfer: %s", name)
+		}
+		if strings.EqualFold(filepath.Ext(name), ".zip") {
+			if err := extractZip(src, destDir); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", src, err)
 		}
 		if err := os.WriteFile(filepath.Join(destDir, name), data, 0o644); err != nil {
 			return err
@@ -142,6 +158,52 @@ func (a *HermesAdapter) installSkillFiles(skill string, localPaths []string) err
 	}
 	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
 		return fmt.Errorf("skill package missing SKILL.md")
+	}
+	return nil
+}
+
+// extractZip safely extracts a zip skill package into destDir, rejecting
+// entries that escape the destination directory.
+func extractZip(zipPath, destDir string) error {
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("open zip %s: %w", zipPath, err)
+	}
+	defer zr.Close()
+
+	for _, f := range zr.File {
+		target := filepath.Join(destDir, f.Name)
+		// Reject path traversal and absolute paths.
+		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("zip entry escapes destination: %s", f.Name)
+		}
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("open zip entry %s: %w", f.Name, err)
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, err = io.Copy(out, rc)
+		rc.Close()
+		closeErr := out.Close()
+		if err != nil {
+			return fmt.Errorf("extract %s: %w", f.Name, err)
+		}
+		if closeErr != nil {
+			return closeErr
+		}
 	}
 	return nil
 }

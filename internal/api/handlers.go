@@ -331,6 +331,70 @@ type transferSendReq struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+// handlePeerSkillUpload receives an uploaded skill package (multipart "file")
+// for a peer node, stores it locally and forwards it to the target node over
+// the transfer channel, and returns a fileId that the subsequent
+// capability.set (skill add/update) can reference. The same fileId is used on
+// both sides so the target node can resolve it via its own transfer store.
+func (s *Server) handlePeerSkillUpload(w http.ResponseWriter, r *http.Request) {
+	if s.transfer == nil {
+		respondJSON(w, http.StatusServiceUnavailable, types.APIResult{
+			OK:      false,
+			Code:    "skill.upload_disabled",
+			Message: "transfer service not available",
+			TS:      time.Now().UnixMilli(),
+		})
+		return
+	}
+	targetNode := r.PathValue("nodeId")
+	if targetNode == "" {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{OK: false, Code: "invalid_argument", Message: "nodeId is required", TS: time.Now().UnixMilli()})
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{OK: false, Code: "invalid_argument", Message: "invalid multipart form: " + err.Error(), TS: time.Now().UnixMilli()})
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{OK: false, Code: "invalid_argument", Message: "file field required", TS: time.Now().UnixMilli()})
+		return
+	}
+	defer file.Close()
+
+	fileID, err := s.transfer.RegisterLocalUpload(header.Filename, file, header.Header.Get("Content-Type"))
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, types.APIResult{OK: false, Code: "skill.upload_failed", Message: err.Error(), TS: time.Now().UnixMilli()})
+		return
+	}
+
+	// Forward to the target node using the same fileId as transferID so both
+	// sides can resolve it. JetStream transfer failure is not fatal for the
+	// upload itself — capability.set will report "fileId not found" if the
+	// target never received it.
+	info, ok := s.transfer.GetTransfer(fileID)
+	if ok && info.LocalPath != "" {
+		_, _ = s.transfer.SendFile(transfer.SendFileRequest{
+			TargetNode: targetNode,
+			FilePath:   info.LocalPath,
+			MimeType:   header.Header.Get("Content-Type"),
+			TransferID: fileID,
+		})
+	}
+
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "skill.uploaded",
+		Message: "skill file uploaded",
+		Data: map[string]any{
+			"fileId":   fileID,
+			"fileName": header.Filename,
+		},
+		TS: time.Now().UnixMilli(),
+	})
+}
+
 func (s *Server) handleTransferSend(w http.ResponseWriter, r *http.Request) {
 	if s.transfer == nil || !s.transfer.Enabled() {
 		respondJSON(w, http.StatusServiceUnavailable, types.APIResult{
@@ -341,7 +405,6 @@ func (s *Server) handleTransferSend(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	var req transferSendReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, http.StatusBadRequest, types.APIResult{OK: false, Code: "invalid_argument", Message: "invalid json payload", TS: time.Now().UnixMilli()})

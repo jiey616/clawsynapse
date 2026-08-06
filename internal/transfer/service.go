@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,6 +74,77 @@ func (s *Service) OnReceived(fn ReceivedNotifier) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onReceived = fn
+}
+
+// RegisterLocalUpload stores an uploaded file locally (no cross-node send) and
+// registers it in the transfer store so capability.service can resolve the
+// returned fileId → LocalPath for skill add/update. Used by the daemon's
+// POST /v1/peers/{nodeId}/skills endpoint.
+func (s *Service) RegisterLocalUpload(fileName string, r io.Reader, mimeType string) (string, error) {
+	fileName = strings.TrimSpace(filepath.Base(fileName))
+	if fileName == "" || fileName == "." || fileName == "/" || strings.Contains(fileName, "..") {
+		return "", fmt.Errorf("invalid file name: %s", fileName)
+	}
+
+	if s.transferDir == "" {
+		return "", fmt.Errorf("transfer dir not configured")
+	}
+	if err := os.MkdirAll(s.transferDir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir transfer dir: %w", err)
+	}
+
+	// Stream into a temp file first so we can check size before registering.
+	tmp, err := os.CreateTemp(s.transferDir, "upload-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name()) // removed on error; renamed to final name below
+
+	written, err := io.Copy(tmp, r)
+	if err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("write upload: %w", err)
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		return "", fmt.Errorf("close temp file: %w", closeErr)
+	}
+	if s.maxFileSize > 0 && written > s.maxFileSize {
+		return "", protocol.NewError(protocol.ErrTransferFileTooLarge,
+			fmt.Sprintf("file size %d exceeds limit %d", written, s.maxFileSize))
+	}
+
+	transferID := newTransferID()
+	localName := transferID + "-" + fileName
+	localPath := filepath.Join(s.transferDir, localName)
+	if err := os.Rename(tmp.Name(), localPath); err != nil {
+		return "", fmt.Errorf("finalize upload: %w", err)
+	}
+
+	rec := &TransferRecord{
+		TransferID:  transferID,
+		Direction:   "inbound",
+		PeerNode:    s.nodeID,
+		FileName:    fileName,
+		FileSize:    written,
+		MimeType:    mimeType,
+		Status:      "completed",
+		LocalPath:   localPath,
+		Bucket:      "local-upload",
+		CreatedAt:   time.Now().UnixMilli(),
+		CompletedAt: time.Now().UnixMilli(),
+	}
+	s.mu.Lock()
+	s.transfers[transferID] = rec
+	s.mu.Unlock()
+
+	if s.log != nil {
+		s.log.Info("local upload registered",
+			slog.String("transferId", transferID),
+			slog.String("fileName", fileName),
+			slog.Int64("size", written),
+		)
+	}
+	return transferID, nil
 }
 
 func (s *Service) Enabled() bool {
@@ -177,7 +250,10 @@ func (s *Service) SendFile(req SendFileRequest) (SendFileResult, error) {
 		return SendFileResult{}, protocol.NewError(protocol.ErrTransferBucketError, err.Error())
 	}
 
-	transferID := newTransferID()
+	transferID := strings.TrimSpace(req.TransferID)
+	if transferID == "" {
+		transferID = newTransferID()
+	}
 	fileName := filepath.Base(req.FilePath)
 
 	f, err := os.Open(req.FilePath)

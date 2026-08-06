@@ -13,7 +13,14 @@ import (
 // capabilityQueryTimeout bounds the NATS round-trip for a capability query /
 // set. On timeout the handler degrades (available:false / ok:false) but keeps
 // HTTP 200 so the TrustMesh frontend can degrade gracefully.
-const capabilityQueryTimeout = 5 * time.Second
+// 8s: 覆盖 hermes gateway 重启窗口（重启 3-10s），让前端写回后的探测刷新
+// 更快拿到可用响应，避免 5s 太短导致连续降级。
+const (
+	capabilityQueryTimeout = 8 * time.Second
+	// Sets (skill/model write-back) can restart the hermes gateway, which takes
+	// several seconds — longer than a pure query.
+	capabilitySetTimeout = 30 * time.Second
+)
 
 // setCapabilityBody mirrors docs/capability-contract.md §3.5.
 type setCapabilityBody struct {
@@ -197,7 +204,7 @@ func (s *Server) handlePeerCapabilitySet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ctx, cancel := contextWithTimeout(r.Context(), capabilityQueryTimeout)
+	ctx, cancel := contextWithTimeout(r.Context(), capabilitySetTimeout)
 	defer cancel()
 
 	resp, err := s.capability.Set(ctx, nodeID, &adapter.CapabilitySetRequest{
