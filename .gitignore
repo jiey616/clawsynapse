@@ -21,3 +21,16 @@ Dockerfile.local
 bench_*
 # ── Local-only temporary node compose (not part of the repo) ──
 docker-compose.tmp.yml
+
+# ── Local build artifacts / backups (not part of the repo) ──
+bin-linux/
+roundtable/director-profile-backup-*/
+
+# ── Local-only roundtable add-on (kept out of the repo) ──
+roundtable/
+Dockerfile.roundtable
+Dockerfile.rt-patch
+docker-compose.roundtable.yml
+
+# ── Local git recovery backups ──
+.git-broken*/

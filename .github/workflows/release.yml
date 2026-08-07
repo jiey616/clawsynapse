@@ -61,6 +61,10 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: release
+    # First multi-arch build after a big dependency change (e.g. new pure-Go
+    # deps) has no gha cache and QEMU-emulated arm64 compilation is slow;
+    # allow up to 8h instead of the 6h default.
+    timeout-minutes: 480
     permissions:
       contents: read
       packages: write
