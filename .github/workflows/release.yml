@@ -61,9 +61,9 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: release
-    # First multi-arch build after a big dependency change (e.g. new pure-Go
-    # deps) has no gha cache and QEMU-emulated arm64 compilation is slow;
-    # allow up to 8h instead of the 6h default.
+    # QEMU-emulated arm64 in-image Go compilation (esp. modernc sqlite) exceeded
+    # the 6h default; the Dockerfile now consumes prebuilt binaries from the
+    # release job, so builds stay well under the limit.
     timeout-minutes: 480
     permissions:
       contents: read
@@ -72,6 +72,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      # The release job cross-compiles linux/amd64 + linux/arm64 on a native
+      # runner; download them and inject as the `prebuilt` build context below
+      # so the Dockerfile skips Go compilation entirely.
+      - name: Download linux release binaries (prebuilt build context)
+        run: |
+          mkdir -p bin-linux
+          gh release download "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" \
+            --pattern 'clawsynapse-linux-*' --pattern 'clawsynapsed-linux-*' --dir bin-linux
+          ls -la bin-linux/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -144,6 +156,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
+          build-contexts: prebuilt=${{ github.workspace }}/bin-linux
           push: true
           tags: |
             ${{ steps.tcr.outputs.IMAGE }}:latest
@@ -181,6 +194,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
+          build-contexts: prebuilt=${{ github.workspace }}/bin-linux
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:latest

@@ -12,7 +12,9 @@ services:
   clawsynapse:
     build:
       context: .
-      dockerfile: Dockerfile
+      # Dockerfile (CI) expects prebuilt binaries via buildx --build-context;
+      # local builds keep the in-image Go compiler stage via Dockerfile.local.
+      dockerfile: Dockerfile.local
     image: clawsynapse:latest
     container_name: clawsynapse
     hostname: clawsynapse
