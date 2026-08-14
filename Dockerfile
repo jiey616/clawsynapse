@@ -52,8 +52,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
        pip install --no-cache-dir aiohttp; \
     fi \
  && apt-get purge -y --auto-remove build-essential python3-dev libffi-dev \
- && rm -rf /var/lib/apt/lists/* /root/.cache/pip /tmp/* \
- && find /root/.hermes -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+ && rm -rf /var/lib/apt/lists/* /root/.cache/pip /root/.cache/uv /root/.cache/node-gyp /tmp/* \
+ && find /root/.hermes -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null \
+ && rm -rf /usr/local/lib/hermes-agent/tests /usr/local/lib/hermes-agent/website 2>/dev/null || true
 
 # ── Copy prebuilt clawsynapse binaries (from the `prebuilt` build context) ──
 COPY --from=prebuilt clawsynapse-linux-${TARGETARCH} /usr/local/bin/clawsynapse

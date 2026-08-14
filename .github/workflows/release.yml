@@ -80,7 +80,7 @@ jobs:
         run: |
           mkdir -p bin-linux
           gh release download "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" \
-            --pattern 'clawsynapse-linux-*' --pattern 'clawsynapsed-linux-*' --dir bin-linux
+            --pattern 'clawsynapse-linux-amd64' --pattern 'clawsynapsed-linux-amd64' --dir bin-linux
           ls -la bin-linux/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,7 +155,9 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # amd64-only: QEMU-emulated arm64 hermes install exceeded the 6h job
+          # timeout (Free plan); amd64 builds natively and stays well under.
+          platforms: linux/amd64
           build-contexts: prebuilt=${{ github.workspace }}/bin-linux
           push: true
           tags: |
@@ -193,7 +195,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # amd64-only (same rationale as the TCR push above)
+          platforms: linux/amd64
           build-contexts: prebuilt=${{ github.workspace }}/bin-linux
           push: true
           tags: |
