@@ -25,7 +25,7 @@ CLAWSYNAPSE_API_LISTEN="${CLAWSYNAPSE_API_LISTEN:-0.0.0.0:18080}"
 # Must stay in sync with internal/config/config.go defaultDeliverablePrefixes.
 # Re-applied on every start (see Step 3.5) because clawsynapse init only writes
 # it on first run and the config is persisted in a named volume.
-DELIVERABLE_PREFIXES="${DELIVERABLE_PREFIXES:-chat,task,todo,meeting}"
+DELIVERABLE_PREFIXES="${DELIVERABLE_PREFIXES:-chat,task,todo,meeting,knowledge}"
 export DELIVERABLE_PREFIXES
 
 log() { echo "[entrypoint] $*"; }
@@ -218,6 +218,34 @@ role_skills = {
 names = role_skills.get(role, ["clawsynapse"])
 config["external_dirs"] = [os.path.join(skills_root, n) for n in names]
 print(f"[entrypoint] external_dirs = {config['external_dirs']}")
+
+# --- kanban toolset (ensure-merge) ------------------------------------
+# MARKER: KANBAN_TOOLSET_ENSURE
+# api_server 的工具集来自 platform_toolsets.api_server，不是顶层 toolsets。
+# 保留默认复合集 hermes-api-server 再叠加 kanban，这样未来 Hermes 升级新增的
+# 默认 toolset 仍会自动继承。kanban_create 会自动写 task.session_id 并自动
+# 订阅完成通知 —— 这是「卡 done → 唤醒主控」闭环的唯一入口。
+_kanban_ts = "kanban"
+
+_ts = config.get("toolsets")
+if not isinstance(_ts, list):
+    _ts = []
+if _kanban_ts not in _ts:
+    _ts.append(_kanban_ts)
+config["toolsets"] = _ts
+
+_pts = config.get("platform_toolsets")
+if not isinstance(_pts, dict):
+    _pts = {}
+_api_ts = _pts.get("api_server")
+if not isinstance(_api_ts, list) or not _api_ts:
+    _api_ts = ["hermes-api-server"]
+if _kanban_ts not in _api_ts:
+    _api_ts.append(_kanban_ts)
+_pts["api_server"] = _api_ts
+config["platform_toolsets"] = _pts
+print("[entrypoint] platform_toolsets = %s" % (config["platform_toolsets"],))
+# --- end kanban toolset -----------------------------------------------
 
 with open(config_path, "w", encoding="utf-8") as f:
     yaml.dump(config, f, Dumper=IndentedDumper, default_flow_style=False,
@@ -456,6 +484,17 @@ if ! health_ok; then
 fi
 
 # ─────────────────────────────────────────────────
+# ─────────────────────────────────────────────────
+# Step 4.8: Start Hermes Dashboard (kanban web UI) — roundtable add-on
+#   Persisted across container restarts. UI on :9119, basic auth.
+# ─────────────────────────────────────────────────
+if [ -n "$HERMES_DASHBOARD_ENABLED" ] && [ "$HERMES_DASHBOARD_ENABLED" != "0" ]; then
+    log "Starting hermes dashboard (web kanban) on :9119..."
+    nohup hermes dashboard --host 0.0.0.0 --skip-build --no-open \
+        >> /var/log/hermes-dashboard.log 2>&1 &
+    log "Dashboard launched (pid $!)."
+fi
+
 # Step 5: Start clawsynapse daemon
 # ─────────────────────────────────────────────────
 log "Starting clawsynapsed..."
