@@ -24,6 +24,11 @@ type fileConfig struct {
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	AgentAdapterTimeout string   `yaml:"agentAdapterTimeout"`
 	AgentRole           string   `yaml:"agentRole"`
+	HermesGatewayURL    string   `yaml:"hermesGatewayUrl"`
+	HermesGatewayKey    string   `yaml:"hermesGatewayKey"`
+	HermesModel         string   `yaml:"hermesModel"`
+	HermesConfigPath    string   `yaml:"hermesConfigPath"`
+	HermesTodoMode      string   `yaml:"hermesTodoMode"`
 	WebhookURL          string   `yaml:"webhookUrl"`
 	LogFilePath         string   `yaml:"logFilePath"`
 	LogRotateMaxSizeMB  *int     `yaml:"logRotateMaxSizeMb"`
@@ -56,6 +61,11 @@ func toFileConfig(cfg Config) fileConfig {
 		AgentAdapter:        cfg.AgentAdapter,
 		AgentAdapterTimeout: cfg.AgentAdapterTimeout,
 		AgentRole:           cfg.AgentRole,
+		HermesGatewayURL:    cfg.HermesGatewayURL,
+		HermesGatewayKey:    cfg.HermesGatewayKey,
+		HermesModel:         cfg.HermesModel,
+		HermesConfigPath:    cfg.HermesConfigPath,
+		HermesTodoMode:      cfg.HermesTodoMode,
 		WebhookURL:          cfg.WebhookURL,
 		LogFilePath:         cfg.LogFilePath,
 		LogRotateMaxSizeMB:  &cfg.LogRotateMaxSizeMB,
@@ -101,6 +111,11 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 		AgentAdapter:        strings.TrimSpace(cfg.AgentAdapter),
 		AgentAdapterTimeout: parseDurationValue(cfg.AgentAdapterTimeout, 0),
 		AgentRole:           strings.TrimSpace(cfg.AgentRole),
+		HermesGatewayURL:    strings.TrimSpace(cfg.HermesGatewayURL),
+		HermesGatewayKey:    strings.TrimSpace(cfg.HermesGatewayKey),
+		HermesModel:         strings.TrimSpace(cfg.HermesModel),
+		HermesConfigPath:    strings.TrimSpace(cfg.HermesConfigPath),
+		HermesTodoMode:      strings.TrimSpace(cfg.HermesTodoMode),
 		WebhookURL:          strings.TrimSpace(cfg.WebhookURL),
 		LogFilePath:         strings.TrimSpace(cfg.LogFilePath),
 		DeliverablePrefixes: cloneStrings(cfg.DeliverablePrefixes),

@@ -229,6 +229,7 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 			APIKey:       cfg.HermesGatewayKey,
 			Model:        cfg.HermesModel,
 			ConfigPath:   cfg.HermesConfigPath,
+			TodoMode:     cfg.HermesTodoMode,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported agent adapter: %s", cfg.AgentAdapter)

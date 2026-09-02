@@ -9,6 +9,9 @@ agentAdapter: default
 # Agent role for hermes adapter: pm (loads tm-task-plan, tm-meeting-host) | executor (loads tm-task-exec, tm-meeting-participant)
 # Leave empty to only load the protocol skill (clawsynapse).
 agentRole: ""
+# Hermes todo message mode: runs (POST /v1/runs) or responses (POST /v1/responses with session_id)
+# Default: runs. Use "responses" for better context continuity with same task.
+hermesTodoMode: runs
 heartbeatInterval: 15s
 announceTtl: 30s
 dataDir: ~/.clawsynapse

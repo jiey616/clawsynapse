@@ -48,6 +48,7 @@ type Config struct {
 	HermesGatewayKey    string   `json:"hermesGatewayKey"`
 	HermesModel         string   `json:"hermesModel"`
 	HermesConfigPath    string   `json:"hermesConfigPath"`
+	HermesTodoMode      string   `json:"hermesTodoMode"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
@@ -145,6 +146,7 @@ type runtimeConfig struct {
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
 	AgentRole           string
+	HermesTodoMode      string
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -179,6 +181,7 @@ type configValues struct {
 	HermesGatewayKey    string
 	HermesModel         string
 	HermesConfigPath    string
+	HermesTodoMode      string
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -212,6 +215,7 @@ func (c Config) Runtime() runtimeConfig {
 		AgentAdapter:        c.AgentAdapter,
 		AgentAdapterTimeout: at,
 		AgentRole:           c.AgentRole,
+		HermesTodoMode:      c.HermesTodoMode,
 		WebhookURL:          c.WebhookURL,
 		LogFilePath:         c.LogFilePath,
 		LogRotateMaxSizeMB:  c.LogRotateMaxSizeMB,
@@ -263,6 +267,7 @@ func LoadFromOS(args []string) (Config, error) {
 		hermesModelDef = "hermes-agent"
 	}
 	hermesConfigPathDef := envOr("HERMES_CONFIG_PATH", merged.HermesConfigPath)
+	hermesTodoModeDef := envOr("HERMES_TODO_MODE", merged.HermesTodoMode)
 
 	var (
 		natsServers         = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
@@ -281,6 +286,7 @@ func LoadFromOS(args []string) (Config, error) {
 		hermesGatewayKey    = fs.String("hermes-gateway-key", hermesGatewayKeyDef, "hermes gateway API key (env HERMES_GATEWAY_KEY)")
 		hermesModel         = fs.String("hermes-model", hermesModelDef, "hermes gateway model name (env HERMES_MODEL)")
 		hermesConfigPath    = fs.String("hermes-config-path", hermesConfigPathDef, "hermes config.yaml path used by capability read/write (env HERMES_CONFIG_PATH)")
+		hermesTodoMode      = fs.String("hermes-todo-mode", hermesTodoModeDef, "hermes todo message mode: runs|responses (env HERMES_TODO_MODE)")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -385,6 +391,7 @@ func LoadFromOS(args []string) (Config, error) {
 		HermesGatewayKey:    strings.TrimSpace(*hermesGatewayKey),
 		HermesModel:         strings.TrimSpace(*hermesModel),
 		HermesConfigPath:    strings.TrimSpace(*hermesConfigPath),
+		HermesTodoMode:      strings.TrimSpace(*hermesTodoMode),
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
@@ -476,6 +483,9 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.HermesModel) != "" {
 		base.HermesModel = strings.TrimSpace(override.HermesModel)
+	}
+	if strings.TrimSpace(override.HermesTodoMode) != "" {
+		base.HermesTodoMode = strings.TrimSpace(override.HermesTodoMode)
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)

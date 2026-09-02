@@ -29,6 +29,10 @@ type HermesConfig struct {
 	// (custom_providers) and write-back (skills.external_dirs / model).
 	// Empty means "$HERMES_HOME/config.yaml" or "~/.hermes/config.yaml".
 	ConfigPath string
+	// TodoMode controls how todo.* messages are delivered:
+	//   - "runs" (default): POST /v1/runs, polled to terminal state
+	//   - "responses": POST /v1/responses with session_id continuation
+	TodoMode string
 }
 
 // HermesAdapter delivers messages to a local Hermes agent via the Gateway
@@ -38,7 +42,7 @@ type HermesConfig struct {
 //   - chat.message            -> POST /v1/responses (stateful, previous_response_id continuation)
 //   - task.*                 -> POST /v1/responses (same dialogue/stateful flow as chat)
 //   - meeting.*              -> POST /v1/responses (dialogue/stateful flow, like chat)
-//   - todo.*                 -> POST /v1/runs      (long-running, polled to terminal state)
+//   - todo.*                 -> POST /v1/runs or POST /v1/responses (configurable via TodoMode)
 type HermesAdapter struct {
 	nodeID       string
 	log          *slog.Logger
@@ -50,6 +54,7 @@ type HermesAdapter struct {
 	apiKey     string
 	model      string
 	configPath string
+	todoMode   string // "runs" or "responses"
 
 	capMu    sync.Mutex
 	capCache *capabilitiesSnapshot
@@ -72,6 +77,14 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		model = "hermes-agent"
 	}
 
+	todoMode := strings.ToLower(strings.TrimSpace(cfg.TodoMode))
+	if todoMode == "" {
+		todoMode = "runs"
+	}
+	if todoMode != "runs" && todoMode != "responses" {
+		todoMode = "runs"
+	}
+
 	return &HermesAdapter{
 		nodeID:       strings.TrimSpace(cfg.NodeID),
 		log:          cfg.Logger,
@@ -83,6 +96,7 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		apiKey:     strings.TrimSpace(cfg.APIKey),
 		model:      model,
 		configPath: strings.TrimSpace(cfg.ConfigPath),
+		todoMode:   todoMode,
 	}, nil
 }
 
@@ -93,8 +107,11 @@ func (a *HermesAdapter) DeliverMessage(ctx context.Context, req DeliverMessageRe
 	// Use the standard structured header format (same as openclaw/opencode/codex)
 	formatted := formatDeliverMessage(a.nodeID, req)
 
-	if isRunsMessage(req.Type) {
+	if isRunsMessage(req.Type) && a.todoMode == "runs" {
 		return a.deliverViaRuns(ctx, formatted, req)
+	}
+	if isRunsMessage(req.Type) || isTaskType(req.Type) {
+		return a.deliverTaskViaResponses(ctx, formatted, req)
 	}
 	return a.deliverViaResponses(ctx, formatted, req)
 }
@@ -126,6 +143,15 @@ func isRunsMessage(msgType string) bool {
 	return strings.HasPrefix(t, "todo.")
 }
 
+// isTaskType reports whether the message belongs to the task-collaboration
+// flow (`task.*`). These run through the Responses API but continue on the
+// task-level session (session_id = task id), sharing one hermes session with
+// the `todo.*` runs flow so execution and dialogue context stay connected.
+func isTaskType(msgType string) bool {
+	t := strings.TrimSpace(msgType)
+	return strings.HasPrefix(t, "task.")
+}
+
 // chatSessionKey derives the stable mapping key for chat (dialogue) messages.
 // Prefers the upstream-provided SessionKey (set by Trustmesh to a stable value
 // within a conversation); falls back to a per-source key so the same sender
@@ -141,8 +167,10 @@ func (a *HermesAdapter) chatSessionKey(req DeliverMessageRequest) string {
 	return "cs-" + from + "-" + a.nodeID
 }
 
-// taskSessionKey derives the stable mapping key for task messages.
-// Prefers SessionKey, then the stable taskId from metadata.
+// taskSessionKey derives the stable task identifier used for session
+// continuation. TrustMesh sets SessionKey to the task id, so this is the
+// task-level key. Falls back to the metadata taskId; returns "" (no
+// continuation) when neither is present.
 func (a *HermesAdapter) taskSessionKey(req DeliverMessageRequest) string {
 	if k := strings.TrimSpace(req.SessionKey); k != "" {
 		return k
@@ -150,7 +178,63 @@ func (a *HermesAdapter) taskSessionKey(req DeliverMessageRequest) string {
 	if t := extractTaskID(req.Metadata); t != "" {
 		return t
 	}
-	return "default"
+	return "" // no task identifier: start a fresh session, never share "default"
+}
+
+// ── Task dialogue: Responses API with session_id continuation ───────
+
+// deliverTaskViaResponses handles `task.*` (and, in TodoMode=responses,
+// `todo.*`) messages through the Responses API, chaining them onto one
+// task-scoped conversation.
+//
+// The task id is passed as the `conversation` field — hermes' named-conversation
+// mechanism, which links responses server-side. The adapter previously sent it
+// as `session_id`, but that is only an echo-back correlation label: verified
+// against a live gateway, `session_id` is ignored (every call created a fresh
+// random-UUID session and `response_store.conversations` stayed empty), while
+// `conversation` correctly chains calls into a single session.
+//
+// Unlike chat, there is no previous_response_id mapping to persist: hermes owns
+// the chaining once the conversation is named.
+func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted string, req DeliverMessageRequest) (*DeliverMessageResult, error) {
+	sid := a.taskSessionKey(req)
+
+	body := responsesRequest{Model: a.model, Input: formatted}
+	if sid != "" {
+		body.Conversation = sid
+	}
+
+	a.logGateway("responses-task", "task:"+sid, sid != "")
+
+	var resp responsesResponse
+	if _, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp); err != nil {
+		return nil, fmt.Errorf("hermes gateway responses(task): %w", err)
+	}
+
+	reply := extractResponseText(resp)
+	if strings.TrimSpace(reply) == "" {
+		return &DeliverMessageResult{
+			Success: false,
+			Error:   "hermes returned empty reply",
+		}, nil
+	}
+
+	if isModelProviderError(reply) {
+		// Feedback confirmation carries no new work; swallow it.
+		if isFeedbackLike(req.Type) {
+			return &DeliverMessageResult{Success: true, Accepted: true, Reply: "ok"}, nil
+		}
+		return &DeliverMessageResult{
+			Success: false,
+			Error:   "模型服务暂时不可用，请稍后重试",
+		}, nil
+	}
+
+	return &DeliverMessageResult{
+		Success:  true,
+		Accepted: true,
+		Reply:    reply,
+	}, nil
 }
 
 // ── Dialogue: Responses API (stateful, auto-continuation) ──────────
@@ -192,6 +276,14 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 	// session mapping and retry once on a fresh conversation (which has no
 	// poisoned history). If the retry also fails, degrade gracefully.
 	if isModelProviderError(reply) && prevID != "" {
+		// Feedback confirmation (a .response/.error ack of a message this node
+		// already sent — e.g. backend ack of todo.complete). The underlying
+		// task work is already done; a fresh-conversation retry would re-run
+		// the whole task and produce duplicate deliveries (extra review books,
+		// re-submitted todo.complete). Swallow the confirmation instead.
+		if isFeedbackLike(req.Type) {
+			return &DeliverMessageResult{Success: true, Accepted: true, Reply: "ok"}, nil
+		}
 		a.deleteMappedSession(chatKey)
 		body.PreviousResponseID = ""
 		a.logGateway("responses-retry-fresh", chatKey, false)
@@ -278,13 +370,17 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 		return nil, fmt.Errorf("hermes gateway runs poll: %w", err)
 	}
 
-	switch final.Status {
-	case "failed", "stopped", "cancelled", "error":
+	if runFailed(final.Status) {
 		runText := extractRunText(*final)
 		// Model-provider rejection (e.g. deepseek empty tool_calls) is a
 		// session-history problem — drop the task mapping and retry once on a
 		// fresh run instead of surfacing the raw 400 to the user.
 		if isModelProviderError(runText) && prevID != "" {
+			// Feedback confirmation: the underlying work is already done;
+			// a fresh run would re-execute the task and duplicate deliveries.
+			if isFeedbackLike(req.Type) {
+				return &DeliverMessageResult{Success: true, Accepted: true, RunID: runID, Reply: "ok"}, nil
+			}
 			a.deleteMappedSession(taskKey)
 			a.logGateway("runs-retry-fresh", taskKey, false)
 			fresh := runCreateRequest{Input: formatted}
@@ -299,8 +395,7 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 						a.saveMappedSession(taskKey, sid)
 					}
 					if final2, err2 := a.pollRun(ctx, runID2); err2 == nil && final2 != nil {
-						switch final2.Status {
-						case "failed", "stopped", "cancelled", "error":
+						if runFailed(final2.Status) {
 							return &DeliverMessageResult{
 								Success: false,
 								RunID:   runID2,
@@ -336,7 +431,12 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 	}
 
 	reply := extractRunText(*final)
-	if strings.TrimSpace(reply) == "" {
+	if strings.TrimSpace(reply) == "" || strings.TrimSpace(reply) == "(empty)" {
+		// Agent produced no usable text (hermes "(empty)" sentinel or blank).
+		// Retry once on a fresh run — the model often recovers on a retry.
+		if retried, ok := a.retryFreshRun(ctx, taskKey, formatted, runID); ok {
+			return retried, nil
+		}
 		return &DeliverMessageResult{
 			Success: false,
 			RunID:   runID,
@@ -356,6 +456,32 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 	}, nil
 }
 
+// runTerminalStatuses are the /v1/runs statuses that mean the run is finished.
+//
+// Verified against a live gateway, a healthy run goes started → running →
+// completed. The failure statuses come from the official API docs; "stopped"
+// and "error" are accepted defensively but have never been observed, so any
+// status not listed here is treated as in-progress rather than terminal.
+var runTerminalStatuses = map[string]bool{
+	"completed": true,
+	"failed":    true,
+	"cancelled": true,
+	"stopped":   true,
+	"error":     true,
+}
+
+// isTerminalRunStatus reports whether a /v1/runs status means the run is over.
+func isTerminalRunStatus(status string) bool {
+	return runTerminalStatuses[strings.ToLower(strings.TrimSpace(status))]
+}
+
+// runFailed reports whether a terminal run status represents a failure rather
+// than a successful completion.
+func runFailed(status string) bool {
+	s := strings.ToLower(strings.TrimSpace(status))
+	return isTerminalRunStatus(s) && s != "completed"
+}
+
 // pollRun polls GET /v1/runs/{id} until it reaches a terminal state or the
 // context is cancelled. Polling interval backs off from 1s to a 5s cap.
 func (a *HermesAdapter) pollRun(ctx context.Context, runID string) (*runStatusResponse, error) {
@@ -373,10 +499,7 @@ func (a *HermesAdapter) pollRun(ctx context.Context, runID string) (*runStatusRe
 			return nil, err
 		}
 
-		switch strings.ToLower(strings.TrimSpace(st.Status)) {
-		case "completed":
-			return &st, nil
-		case "failed", "stopped", "cancelled", "error":
+		if isTerminalRunStatus(st.Status) {
 			return &st, nil
 		}
 
@@ -391,6 +514,60 @@ func (a *HermesAdapter) pollRun(ctx context.Context, runID string) (*runStatusRe
 			interval = 5 * time.Second
 		}
 	}
+}
+
+// retryFreshRun retries a run once on a fresh session (no continuation
+// history), used when the previous run produced no usable text — e.g. the
+// hermes "(empty)" sentinel or a blank output. It returns (nil, false) when
+// the retry cannot produce a usable result, so the caller falls back to its
+// own error path.
+func (a *HermesAdapter) retryFreshRun(ctx context.Context, taskKey, formatted, prevRunID string) (*DeliverMessageResult, bool) {
+	a.deleteMappedSession(taskKey)
+	a.logGateway("runs-retry-fresh", taskKey, false)
+
+	fresh := runCreateRequest{Input: formatted}
+	var created runCreateResponse
+	if _, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created); err != nil {
+		return nil, false
+	}
+	runID := strings.TrimSpace(created.RunID)
+	if runID == "" {
+		runID = strings.TrimSpace(created.ID)
+	}
+	if runID == "" {
+		return nil, false
+	}
+	if sid := strings.TrimSpace(created.SessionID); sid != "" {
+		a.saveMappedSession(taskKey, sid)
+	}
+
+	final, err := a.pollRun(ctx, runID)
+	if err != nil || final == nil {
+		return nil, false
+	}
+
+	if runFailed(final.Status) {
+		return &DeliverMessageResult{
+			Success: false,
+			RunID:   runID,
+			Error:   "任务上下文被模型服务拒绝，已自动重开任务，请重新提交",
+		}, true
+	}
+
+	reply := extractRunText(*final)
+	if strings.TrimSpace(reply) == "" || strings.TrimSpace(reply) == "(empty)" {
+		return nil, false
+	}
+
+	if sessionID := strings.TrimSpace(final.SessionID); sessionID != "" {
+		a.saveMappedSession(taskKey, sessionID)
+	}
+	return &DeliverMessageResult{
+		Success:  true,
+		Accepted: true,
+		RunID:    runID,
+		Reply:    reply,
+	}, true
 }
 
 // ── HTTP transport ────────────────────────────────────────────────
@@ -585,17 +762,36 @@ func isModelProviderError(text string) bool {
 		strings.Contains(b, "context_length_exceeded")
 }
 
+// isFeedbackLike reports whether the incoming message is a confirmation/ACK
+// (message type ends in .response or .error) — i.e. the backend's reply to a
+// message this node already sent. These carry no new work; when a model-provider
+// history rejection hits such a message, retrying fresh would re-execute the
+// whole task (duplicate deliveries), so the adapter swallows the confirmation
+// instead of re-running.
+func isFeedbackLike(msgType string) bool {
+	return strings.HasSuffix(msgType, ".response") || strings.HasSuffix(msgType, ".error")
+}
+
 // ── Request / response types ───────────────────────────────────────
 
 type responsesRequest struct {
 	Model              string `json:"model"`
 	Input              string `json:"input"`
 	PreviousResponseID string `json:"previous_response_id,omitempty"`
+	// Conversation names a hermes conversation; the server chains responses
+	// that share the same name. This is the supported way to continue a
+	// task-scoped dialogue — `session_id` is only echoed back and does not
+	// drive continuation.
+	Conversation string `json:"conversation,omitempty"`
 }
 
 type responsesResponse struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	// OutputText is not returned by the gateway (verified against a live one:
+	// the top level carries id/model/object/output/status/usage/created_at
+	// only). It is kept purely as tolerance in case a future gateway adds it;
+	// extractResponseText always falls through to parsing Output below.
 	OutputText string `json:"output_text"`
 	Output     []struct {
 		Type    string `json:"type"`

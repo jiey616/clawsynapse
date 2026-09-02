@@ -18,8 +18,9 @@ import (
 type fakeGateway struct {
 	mu sync.Mutex
 
-	responsesPrev []string // previous_response_id received on each /v1/responses call
-	runsSessionID []string // session_id received on each /v1/runs call
+	responsesPrev         []string // previous_response_id received on each /v1/responses call
+	responsesConversation []string // conversation received on each /v1/responses call
+	runsSessionID         []string // session_id received on each /v1/runs call
 
 	runStatusIdx map[string]int
 
@@ -48,6 +49,7 @@ func (fg *fakeGateway) handler() http.Handler {
 
 		fg.mu.Lock()
 		fg.responsesPrev = append(fg.responsesPrev, req.PreviousResponseID)
+		fg.responsesConversation = append(fg.responsesConversation, req.Conversation)
 		id := fmt.Sprintf("resp-%d", len(fg.responsesPrev))
 		fg.mu.Unlock()
 
@@ -443,5 +445,120 @@ func TestDeliverViaResponses_HeaderFormat(t *testing.T) {
 	a.baseURL = spy.URL + "/v1"
 	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "chat.message", From: "alice", SessionKey: "c1", Message: "Hello!"}); err != nil {
 		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+}
+
+// ── TodoMode=responses ────────────────────────────────────────────
+
+func TestDeliverViaResponses_TodoMode(t *testing.T) {
+	fg := &fakeGateway{}
+	srv := httptest.NewServer(fg.handler())
+	t.Cleanup(srv.Close)
+
+	a, err := NewHermesAdapter(HermesConfig{
+		NodeID:       "n1",
+		BaseURL:      srv.URL + "/v1",
+		Model:        "hermes-agent",
+		SessionStore: store.NewFSStore(t.TempDir()),
+		TodoMode:     "responses",
+	})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter failed: %v", err)
+	}
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	// todo.* should use responses API instead of runs
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.message", SessionKey: "t1", Message: "do it"})
+	if err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	// The fake gateway's /v1/responses returns "hello"; "task done" is what the
+	// runs endpoint returns, so this also proves the responses path was taken.
+	if !res.Success || res.Reply != "hello" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	// Should NOT have created any runs
+	if len(fg.runsSessionID) > 0 {
+		t.Errorf("expected no runs calls in responses mode, got %d", len(fg.runsSessionID))
+	}
+	// Should have called responses API
+	if len(fg.responsesPrev) == 0 {
+		t.Errorf("expected responses API calls in responses mode, got 0")
+	}
+}
+
+// TestDeliverTaskUsesConversation guards the continuation contract: the task id
+// must be sent as `conversation`. hermes chains responses that share a
+// conversation name, whereas `session_id` is only echoed back and does not
+// drive continuation (verified against a live gateway).
+func TestDeliverTaskUsesConversation(t *testing.T) {
+	fg := &fakeGateway{}
+	srv := httptest.NewServer(fg.handler())
+	t.Cleanup(srv.Close)
+
+	a, err := NewHermesAdapter(HermesConfig{
+		NodeID:       "n1",
+		BaseURL:      srv.URL + "/v1",
+		Model:        "hermes-agent",
+		SessionStore: store.NewFSStore(t.TempDir()),
+		TodoMode:     "responses",
+	})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter failed: %v", err)
+	}
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	for _, msgType := range []string{"task.message", "todo.assigned"} {
+		if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{
+			Type: msgType, SessionKey: "task-abc", Message: "do it",
+		}); err != nil {
+			t.Fatalf("%s: DeliverMessage failed: %v", msgType, err)
+		}
+	}
+
+	// Both a task.* and a todo.* message must land on the same conversation so
+	// execution and dialogue share one hermes session.
+	if len(fg.responsesConversation) != 2 {
+		t.Fatalf("expected 2 conversation values, got %v", fg.responsesConversation)
+	}
+	for i, got := range fg.responsesConversation {
+		if got != "task-abc" {
+			t.Errorf("call %d: conversation = %q, want %q", i, got, "task-abc")
+		}
+	}
+}
+
+// TestDeliverTaskNoTaskIDOmitsConversation ensures a message with no task
+// identifier does not send an empty conversation field.
+func TestDeliverTaskNoTaskIDOmitsConversation(t *testing.T) {
+	fg := &fakeGateway{}
+	srv := httptest.NewServer(fg.handler())
+	t.Cleanup(srv.Close)
+
+	a, err := NewHermesAdapter(HermesConfig{
+		NodeID:       "n1",
+		BaseURL:      srv.URL + "/v1",
+		Model:        "hermes-agent",
+		SessionStore: store.NewFSStore(t.TempDir()),
+		TodoMode:     "responses",
+	})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter failed: %v", err)
+	}
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{
+		Type: "todo.assigned", Message: "do it",
+	}); err != nil {
+		t.Fatalf("DeliverMessage failed: %v", err)
+	}
+	if len(fg.responsesConversation) != 1 || fg.responsesConversation[0] != "" {
+		t.Errorf("expected empty conversation, got %v", fg.responsesConversation)
 	}
 }
