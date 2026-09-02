@@ -33,6 +33,14 @@ ENV PATH="/root/.local/bin:${PATH}"
 # build-essential / python3-dev / libffi-dev are ONLY needed to COMPILE hermes's
 # native python wheels (cffi, cryptography, ...). Once hermes is installed we
 # purge them so they never land in the final image (saves ~300-450MB).
+# Build-time pip via China mirror: hermes install.sh + aiohttp pull many wheels
+# from files.pythonhosted.org, whose read timeouts kill arm64/QEMU builds
+# (v1.0.32 first build attempt died this way). Same rationale as GOPROXY=goproxy.cn.
+# CI (overseas runners) can override with --build-arg PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_DEFAULT_TIMEOUT=120
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT}
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl git ca-certificates bash procps python3-venv \
       build-essential python3-dev libffi-dev \
