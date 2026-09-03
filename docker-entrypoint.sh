@@ -489,11 +489,152 @@ fi
 #   Persisted across container restarts. UI on :9119, basic auth.
 # ─────────────────────────────────────────────────
 if [ -n "$HERMES_DASHBOARD_ENABLED" ] && [ "$HERMES_DASHBOARD_ENABLED" != "0" ]; then
-    log "Starting hermes dashboard (web kanban) on :9119..."
-    # hermes 0.21.0 refuses to bind 0.0.0.0 without a registered auth provider
-    # ("auth gate engages on non-loopback binds"). Bind loopback instead so the
-    # dashboard actually listens; reach it from the host via `docker run -p 9119:9119`.
-    nohup hermes dashboard --host 127.0.0.1 --skip-build --no-open \
+    log "Preparing hermes dashboard (web kanban) on :9119..."
+
+    # ── dashboard auth provider (hermes >= 0.21.0) ────────────────────────
+    # The dashboard refuses to bind a non-loopback address unless an auth
+    # provider is registered ("auth gate engages on non-loopback binds").
+    # Historically we bound 127.0.0.1, which silently defeats `docker -p
+    # 9119:9119` (DNAT targets the container IP, the loopback-only listener
+    # never sees those packets) — forcing SSH tunnels or TCP bridges.
+    #
+    # Fix: register the bundled `basic` DashboardAuthProvider via environment
+    # variables. Env wins over config.yaml for this plugin, so we never
+    # clobber credentials the user keeps in their hermes-data volume. With a
+    # provider registered, binding 0.0.0.0 is legal and the published port
+    # just works.
+    #
+    # Supported env (both spellings accepted):
+    #   HERMES_DASHBOARD_USER / HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+    #   HERMES_DASHBOARD_PASSWORD / HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+    #   HERMES_DASHBOARD_PASSWORD_HASH / HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH
+    #   HERMES_DASHBOARD_SECRET / HERMES_DASHBOARD_BASIC_AUTH_SECRET
+    #   HERMES_DASHBOARD_HOST                    (default 0.0.0.0 when authed)
+    #
+    # If no credentials exist anywhere (fresh volume, no env), a random
+    # password is generated and printed to the container log once.
+    _dash_env_file="$(mktemp 2>/dev/null || echo "/tmp/.dash_env.$$")"
+    python3 - \
+        "${HERMES_DASHBOARD_USER:-${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}}" \
+        "${HERMES_DASHBOARD_PASSWORD:-${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}}" \
+        "${HERMES_DASHBOARD_PASSWORD_HASH:-${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH:-}}" \
+        "${HERMES_DASHBOARD_SECRET:-${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}}" \
+        "$HERMES_CONFIG" \
+        "$HERMES_HOME/.dashboard_secret" \
+        > "$_dash_env_file" << 'PY' || log "WARN: dashboard auth bootstrap failed (python error)"
+import base64
+import hashlib
+import os
+import secrets
+import shlex
+import sys
+
+import yaml
+
+user, password, password_hash, secret, config_path, secret_file = sys.argv[1:7]
+
+# scrypt params must match plugins/dashboard_auth/basic exactly.
+N, R, P, DKLEN, SALT_BYTES = 2 ** 14, 8, 1, 32, 16
+
+
+def hash_password(pw: str) -> str:
+    salt = secrets.token_bytes(SALT_BYTES)
+    dk = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=N, r=R, p=P,
+                        dklen=DKLEN, maxmem=0)
+    return "scrypt$%d$%d$%d$%s$%s" % (
+        N, R, P,
+        base64.b64encode(salt).decode(),
+        base64.b64encode(dk).decode(),
+    )
+
+
+# Existing credentials in the volume's config.yaml (user-managed, env wins).
+cfg_user, cfg_hash, cfg_password = "", "", ""
+try:
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    ba = (cfg.get("dashboard") or {}).get("basic_auth") or {}
+    cfg_user = str(ba.get("username") or "")
+    cfg_hash = str(ba.get("password_hash") or "")
+    cfg_password = str(ba.get("password") or "")
+except Exception:
+    pass
+
+if not user:
+    user = cfg_user or "clawsynapse"
+
+# Precedence: explicit hash > plaintext env password > config hash >
+# config plaintext password.
+final_hash = password_hash
+if not final_hash and password:
+    final_hash = hash_password(password)
+elif not final_hash and cfg_hash:
+    final_hash = cfg_hash
+elif not final_hash and cfg_password:
+    final_hash = hash_password(cfg_password)
+
+generated = False
+if not final_hash:
+    try:
+        generated_password = secrets.token_urlsafe(12)
+        final_hash = hash_password(generated_password)
+        generated = True
+    except Exception as e:  # scrypt unavailable (no OpenSSL)
+        print("DASHBOARD_AUTH_READY=0")
+        print("echo '[entrypoint] WARN: cannot hash dashboard password: %s'"
+              % shlex.quote(str(e)))
+        sys.exit(0)
+
+# Persist the token-signing secret so sessions survive restarts.
+if not secret:
+    try:
+        if os.path.exists(secret_file) and os.path.getsize(secret_file) > 0:
+            with open(secret_file, "r", encoding="utf-8") as f:
+                secret = f.read().strip()
+        else:
+            secret = secrets.token_urlsafe(48)
+            with open(secret_file, "w", encoding="utf-8") as f:
+                f.write(secret)
+            os.chmod(secret_file, 0o600)
+    except Exception as e:
+        print("echo '[entrypoint] WARN: dashboard secret persistence failed: %s'"
+              % shlex.quote(str(e)))
+
+print("export HERMES_DASHBOARD_BASIC_AUTH_USERNAME=%s" % shlex.quote(user))
+print("export HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH=%s" % shlex.quote(final_hash))
+if secret:
+    print("export HERMES_DASHBOARD_BASIC_AUTH_SECRET=%s" % shlex.quote(secret))
+print("DASHBOARD_AUTH_READY=1")
+if generated:
+    print("echo '[entrypoint] ============================================'")
+    print("echo '[entrypoint] dashboard: NO credentials found — generated a RANDOM password:'")
+    print("echo '[entrypoint] dashboard:   user     = %s'" % shlex.quote(user))
+    print("echo '[entrypoint] dashboard:   password = %s'" % shlex.quote(generated_password))
+    print("echo '[entrypoint] dashboard: set HERMES_DASHBOARD_PASSWORD to choose your own.'")
+    print("echo '[entrypoint] ============================================'")
+PY
+
+    DASHBOARD_AUTH_READY=0
+    if [ -s "$_dash_env_file" ]; then
+        # shellcheck disable=SC1090
+        . "$_dash_env_file"
+    fi
+    rm -f "$_dash_env_file" 2>/dev/null || true
+
+    if [ "$DASHBOARD_AUTH_READY" = "1" ]; then
+        # Authed → public bind is allowed by the gate.
+        _dash_host="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
+    else
+        # Fail closed: no auth provider, so stay on loopback rather than
+        # exposing an unauthenticated dashboard.
+        _dash_host="127.0.0.1"
+        log "WARN: no dashboard auth provider available — binding loopback only."
+    fi
+
+    log "Starting hermes dashboard on ${_dash_host}:9119 (auth=$DASHBOARD_AUTH_READY)..."
+    # Credentials are exported into the environment above; the `basic`
+    # DashboardAuthProvider reads them at startup and registers itself.
+    nohup hermes dashboard --host "$_dash_host" --skip-build --no-open \
         >> /var/log/hermes-dashboard.log 2>&1 &
     log "Dashboard launched (pid $!)."
 fi

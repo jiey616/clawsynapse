@@ -71,6 +71,10 @@ services:
       - clawsynapse-data:/root/.clawsynapse
       # Hermes: config, .env, skills, history, auth
       - hermes-data:/root/.hermes
+      # tm-task-plan skill：用仓库版覆盖镜像内置版。
+      # 镜像内置的 /usr/local/share/clawsynapse/skills 不在任何卷里，直接改容器
+      # 会在重建后丢失；挂载后以 D:\AIWorkspace\TrustMesh\skills\tm-task-plan 为源。
+      - ../TrustMesh/skills/tm-task-plan:/usr/local/share/clawsynapse/skills/tm-task-plan:ro
 
     # ── Logging ──
     logging:

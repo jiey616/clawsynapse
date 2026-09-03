@@ -1,0 +1,80 @@
+# docker-compose.claw4.yml — 第四个 ClawSynapse 实例（agent_role=executor，宿主机 18083）
+# 与 docker-compose.yml / second / third 平行运行，刻意错开端口与数据卷：
+#   - 容器名:      clawsynapse3
+#   - 宿主机端口:  18083 -> 容器内 18080
+#   - 数据卷:      clawsynapse3-data / hermes3-data（独立身份）
+#   - agent_role:  executor（执行智能体：external_dirs = clawsynapse/tm-task-exec/tm-meeting-participant）
+#   - 镜像:        本地 clawsynapse:latest（prebuilt Dockerfile 构建）
+#
+# 启动:  docker compose -p clawsynapse3 -f docker-compose.claw4.yml up -d
+# 停止:  docker compose -p clawsynapse3 -f docker-compose.claw4.yml down
+#   ⚠ 项目名已固定写入下方 name: 字段（clawsynapse3），docker compose 不再需要 -p。
+
+name: clawsynapse3
+
+services:
+  clawsynapse:
+    # 用 TCR 发布版 v1.0.34（含 hermes 二进制 + TodoMode + web_dist 预建 + 9119 loopback 绑定）。
+    # 旧本地镜像 local-claw5/local-rt4 已不再需要。
+    image: ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.35
+    container_name: clawsynapse3
+    hostname: clawsynapse3
+    restart: unless-stopped
+
+    # ── Ports（宿主机 18083，避开 18080 / 18081 / 18082）──
+    ports:
+      - "18083:18080"
+
+    # ── Environment variables ──
+    environment:
+      - CLAWSYNAPSE_NODE_ID=${CLAWSYNAPSE_NODE_ID}
+      - CLAWSYNAPSE_NODE_KEY=${CLAWSYNAPSE_NODE_KEY}
+      # agent_role 强制为 executor（执行智能体）
+      - CLAWSYNAPSE_AGENT_ROLE=executor
+      - CLAWSYNAPSE_API_LISTEN=${CLAWSYNAPSE_API_LISTEN}
+      - TOKENFLOW_API_KEY=${TOKENFLOW_API_KEY}
+      - TOKENFLOW_BASE_URL=${TOKENFLOW_BASE_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NOVITA_API_KEY=${NOVITA_API_KEY}
+      - NOVITA_BASE_URL=${NOVITA_BASE_URL}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - HERMES_MODEL=${HERMES_MODEL}
+      - HERMES_PROVIDER=${HERMES_PROVIDER}
+      - HERMES_BASE_URL=${HERMES_BASE_URL}
+      - HERMES_CUSTOM_PROVIDER_NAME=${HERMES_CUSTOM_PROVIDER_NAME}
+      - HERMES_CUSTOM_PROVIDER_BASE_URL=${HERMES_CUSTOM_PROVIDER_BASE_URL}
+      - HERMES_CUSTOM_PROVIDER_API_KEY=${HERMES_CUSTOM_PROVIDER_API_KEY}
+      - HERMES_CUSTOM_PROVIDER_MODEL=${HERMES_CUSTOM_PROVIDER_MODEL}
+      - HERMES_GATEWAY_KEY=${HERMES_GATEWAY_KEY}
+      # Hermes todo message mode: runs (POST /v1/runs) or responses (POST /v1/responses)
+      - HERMES_TODO_MODE=responses
+      # 单条消息投递给 agent 的超时（默认 10m）。
+      # 实测：编剧类任务常态 6-9 分钟，最慢 551s，10m 是临界值必然翻车。
+      # 主控在派发 kanban 工位途中被掐断 → 连带干掉 worker →
+      # 下一轮主控见 worker 失败便"自己动手补写" → 跳步、提前出剧本。
+      # 消息投递并发（每条消息一个 goroutine），调大不会阻塞其他消息。
+      # 优先级 defaults → config.yaml → .env → OS env，故此处可覆盖 config.yaml。
+      - AGENT_ADAPTER_TIMEOUT=30m
+
+    # ── Volumes（独立卷，身份/配置互不干扰）──
+    volumes:
+      - clawsynapse3-data:/root/.clawsynapse
+      - hermes3-data:/root/.hermes
+
+    # ── Logging ──
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  clawsynapse3-data:
+    driver: local
+  hermes3-data:
+    driver: local
