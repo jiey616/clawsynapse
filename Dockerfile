@@ -65,6 +65,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /usr/local/lib/hermes-agent/tests /usr/local/lib/hermes-agent/website 2>/dev/null \
  && (command -v hermes >/dev/null 2>&1 || { echo "[docker] ERROR: hermes binary not found after install"; exit 1; })
 
+# ── Prebuild the Hermes web dashboard (web_dist) ──
+# hermes dashboard --skip-build serves hermes_cli/web_dist directly (vite outDir is a
+# sibling of web/, NOT web/dist). If absent, the dashboard process launches but silently
+# binds nothing — observed on arm64/SZJT (9119=000 there while amd64 self-healed via a
+# runtime vite build). Build it deterministically for BOTH arches so --skip-build works
+# everywhere. node/npm + web/node_modules are already present (hermes install.sh git method).
+RUN cd /usr/local/lib/hermes-agent/web \
+ && npm run build
+
 # ── Copy prebuilt clawsynapse binaries (from the `prebuilt` build context) ──
 COPY --from=prebuilt clawsynapse-linux-${TARGETARCH} /usr/local/bin/clawsynapse
 COPY --from=prebuilt clawsynapsed-linux-${TARGETARCH} /usr/local/bin/clawsynapsed
