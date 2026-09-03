@@ -162,6 +162,13 @@ Remove everything, including local state:
 
 ## More Docs
 
+Deployment:
+
+- [Deploy a node on a new machine (Docker image, recommended)](./docs/install-mirror.md)
+- [Deploy from source + adapter architecture + image build](./docs/deploy-docker.md)
+
+Usage and protocol:
+
 - [Overview](./docs/overview.md)
 - [CLI](./docs/cli.md)
 - [Operations](./docs/operations.md)

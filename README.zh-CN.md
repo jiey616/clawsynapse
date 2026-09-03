@@ -162,6 +162,13 @@ clawsynapsed --check-config
 
 ## 更多文档
 
+部署：
+
+- [新机器部署节点（Docker 镜像，推荐）](./docs/install-mirror.md) — 拉镜像即跑，无需编译
+- [从源码部署 + 适配器架构 + 镜像构建](./docs/deploy-docker.md)
+
+使用与协议：
+
 - [总览](./docs/overview.md)
 - [CLI 使用](./docs/cli.md)
 - [运行与配置](./docs/operations.md)
