@@ -54,14 +54,11 @@ HERMES_GATEWAY_KEY=
 
 #### 模式 A：从 Registry 拉取（推荐，速度快）
 
-镜像已自动构建并推送到 GitHub Container Registry 和腾讯云 TCR，直接拉取即可：
+镜像由本地构建后推送到腾讯云 TCR，直接拉取即可：
 
 ```bash
-# 编辑 .env，设置镜像地址（二选一）
-# 国内推荐腾讯云 TCR:
-CLAWSYNAPSE_IMAGE=ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.19
-# 国外可用 ghcr.io:
-# CLAWSYNAPSE_IMAGE=ghcr.io/jiey616/clawsynapse:v1.0.19
+# 编辑 .env，设置镜像地址
+CLAWSYNAPSE_IMAGE=ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.35
 
 # 拉取镜像
 docker compose pull
@@ -74,10 +71,10 @@ docker compose up -d
 
 | Registry | 地址 | 适用场景 |
 |---|---|---|
-| 腾讯云 TCR | `ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.19` | 国内，速度快 |
-| ghcr.io | `ghcr.io/jiey616/clawsynapse:v1.0.19` | 国外/科学上网 |
+| 腾讯云 TCR | `ccr.ccs.tencentyun.com/jiey616/clawsynapse:v1.0.35` | 国内，速度快 |
 
-> 镜像支持 `linux/amd64` 和 `linux/arm64` 双架构，pull 时自动匹配。
+> 镜像为 `linux/amd64` + `linux/arm64` 双架构 manifest，pull 时自动匹配。
+> GHCR（`ghcr.io/jiey616/clawsynapse`）已停止同步，不再维护，请勿使用。
 
 #### 模式 B：本地构建
 
@@ -234,19 +231,32 @@ docker compose up -d
 
 ---
 
-## CI/CD：自动构建 Docker 镜像
+## CI/CD：发布分工
 
-每次推送 `v*` tag 时，GitHub Actions 自动：
-1. 运行测试 + 构建 CLI release 包
-2. 用 QEMU + Buildx 构建 `linux/amd64` + `linux/arm64` 双架构镜像
-3. 推送到 `ghcr.io` 和腾讯云 TCR（需配置 Secrets）
+**GitHub Actions（推送 `v*` tag 触发）** 只负责源码产物：
+1. 运行测试
+2. 交叉编译 6 平台 CLI/daemon 二进制 + checksums
+3. 发布 GitHub Release
 
-**所需 GitHub Secrets：**
+> Docker 镜像**不在 CI 构建/推送**。镜像由本地 buildx 双架构构建后直推腾讯云 TCR（`ccr.ccs.tencentyun.com/jiey616/clawsynapse`）。CI 侧不再需要 `GHCR_TOKEN` / `TCR_*` 等 registry secrets。
 
-| Secret 名 | 说明 |
-|---|---|
-| `GHCR_TOKEN` | **推荐**：GitHub Personal Access Token（classic），勾选 `write:packages` 和 `repo`。当 `GITHUB_TOKEN` 因 `insufficient_scope` 无法推送时使用。若未设置，则回退到 `GITHUB_TOKEN`。 |
-| `TCR_REGISTRY` | TCR 地址，如 `ccr.ccs.tencentyun.com` |
-| `TCR_NAMESPACE` | TCR 命名空间，如 `jiey616` |
-| `TCR_USERNAME` | 腾讯云账号 ID（数字格式） |
-| `TCR_PASSWORD` | TCR 登录密码（在控制台设置的固定密码） |
+### 本地构建与推送镜像
+
+```bash
+# 1) 交叉编译 prebuilt 二进制到 bin-linux/（Dockerfile 的 prebuilt build context）
+make release-prep VERSION=vX.Y.Z
+
+# 2) 双架构构建 + 推送（含 latest）
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --build-context prebuilt=./bin-linux \
+  -t ccr.ccs.tencentyun.com/jiey616/clawsynapse:vX.Y.Z \
+  -t ccr.ccs.tencentyun.com/jiey616/clawsynapse:latest \
+  --push .
+
+# 3) 验证 latest 指向新版本（manifest inspect 有缓存，务必 pull/run 比对 md5）
+docker run --rm --entrypoint sh ccr.ccs.tencentyun.com/jiey616/clawsynapse:latest -c \
+  'clawsynapsed --version; md5sum /usr/local/bin/clawsynapsed /usr/local/bin/docker-entrypoint.sh'
+```
+
+构建机在国内建议 `golang:1.25`（非 alpine）+ `GOPROXY=https://goproxy.cn,direct`；Dockerfile 已内置清华 PyPI 镜像与超时设置。
