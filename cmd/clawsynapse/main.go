@@ -182,6 +182,25 @@ func runPublish(ctx context.Context, client localAPIClient, args []string) (type
 	if strings.TrimSpace(*message) == "" {
 		return types.APIResult{}, fmt.Errorf("missing --message")
 	}
+	// curl-style @file expansion: --message @/path/to/payload.json reads the
+	// file content as the message body. Large structured payloads (task.reply
+	// with ui_blocks) are awkward to inline in a shell arg — agents repeatedly
+	// write the payload to a temp file and reference it with "@path"; without
+	// expansion the literal string was published as the message content.
+	if strings.HasPrefix(*message, "@") {
+		path := strings.TrimPrefix(*message, "@")
+		if strings.TrimSpace(path) == "" {
+			return types.APIResult{}, fmt.Errorf("--message @file: missing file path")
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return types.APIResult{}, fmt.Errorf("--message @file: read %s: %w", path, err)
+		}
+		if len(strings.TrimSpace(string(raw))) == 0 {
+			return types.APIResult{}, fmt.Errorf("--message @file: %s is empty", path)
+		}
+		*message = string(raw)
+	}
 	metadata, err := parseMetadata(metadataFlags)
 	if err != nil {
 		return types.APIResult{}, err
@@ -210,7 +229,7 @@ func printPublishHelp(stderr *os.File) {
 	fs.String("target", "", "target node id")
 	fs.String("type", "", "message type (e.g. chat.message, task.assign)")
 	fs.String("agent", "", "target agent id override")
-	fs.String("message", "", "message content")
+	fs.String("message", "", "message content, or @/path/to/file to read the payload from a file")
 	fs.String("session-key", "", "session key")
 	fs.Var(&stringList{}, "metadata", "metadata key=value; repeatable")
 	fs.PrintDefaults()

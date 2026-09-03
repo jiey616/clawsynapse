@@ -490,7 +490,10 @@ fi
 # ─────────────────────────────────────────────────
 if [ -n "$HERMES_DASHBOARD_ENABLED" ] && [ "$HERMES_DASHBOARD_ENABLED" != "0" ]; then
     log "Starting hermes dashboard (web kanban) on :9119..."
-    nohup hermes dashboard --host 0.0.0.0 --skip-build --no-open \
+    # hermes 0.21.0 refuses to bind 0.0.0.0 without a registered auth provider
+    # ("auth gate engages on non-loopback binds"). Bind loopback instead so the
+    # dashboard actually listens; reach it from the host via `docker run -p 9119:9119`.
+    nohup hermes dashboard --host 127.0.0.1 --skip-build --no-open \
         >> /var/log/hermes-dashboard.log 2>&1 &
     log "Dashboard launched (pid $!)."
 fi
