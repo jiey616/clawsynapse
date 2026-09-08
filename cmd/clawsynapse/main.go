@@ -151,6 +151,8 @@ func dispatch(ctx context.Context, client localAPIClient, args []string) (types.
 		return client.Get(ctx, "/v1/messages")
 	case "publish":
 		return runPublish(ctx, client, args[1:])
+	case "todo":
+		return runTodo(ctx, client, args[1:])
 	case "auth":
 		return runAuth(ctx, client, args[1:])
 	case "trust":
@@ -678,6 +680,7 @@ func printUsage(stderr *os.File) {
 	fmt.Fprintln(stderr, "  peers                list connected peers")
 	fmt.Fprintln(stderr, "  messages             list recent messages")
 	fmt.Fprintln(stderr, "  publish              publish a message to a peer")
+	fmt.Fprintln(stderr, "  todo                 task todo protocol commands (ask)")
 	fmt.Fprintln(stderr, "  auth                 authentication commands")
 	fmt.Fprintln(stderr, "  trust                trust management commands")
 	fmt.Fprintln(stderr, "  transfer             file transfer commands")
@@ -694,6 +697,7 @@ func printUsage(stderr *os.File) {
 	fmt.Fprintln(stderr, "  clawsynapse logs --lines 50")
 	fmt.Fprintln(stderr, "  clawsynapse upgrade check")
 	fmt.Fprintln(stderr, "  clawsynapse publish --target <node-id> --message \"hello\"")
+	fmt.Fprintln(stderr, "  clawsynapse todo ask --target <node-id> --session-key <task-id> --todo TD_01 --question \"...\"")
 	fmt.Fprintln(stderr, "  clawsynapse trust request --target <node-id>")
 	fmt.Fprintln(stderr, "  clawsynapse transfer send --target <node-id> --file <path>")
 	fmt.Fprintln(stderr, "")
