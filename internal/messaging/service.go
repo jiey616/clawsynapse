@@ -18,6 +18,7 @@ import (
 	"clawsynapse/internal/logging"
 	"clawsynapse/internal/natsbus"
 	"clawsynapse/internal/protocol"
+	"clawsynapse/internal/replay"
 	"clawsynapse/pkg/types"
 )
 
@@ -57,6 +58,9 @@ type Service struct {
 	// dispatcher (T2.1) serializes deliveries per session key; nil keeps
 	// the legacy fire-and-forget goroutine per delivery.
 	dispatcher *sessionDispatcher
+	// replay (T2.2) drops duplicate inbox envelopes by id; nil keeps the
+	// legacy at-most-once-by-luck behavior.
+	replay *replay.ReplayGuard
 }
 
 func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string, deliverablePrefixes []string) *Service {
@@ -76,6 +80,39 @@ func (s *Service) SetTransferHandler(h TransferHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.transferHandler = h
+}
+
+// EnableReplayGuard wires the shared replay guard (T2.2): envelopes whose
+// id was already accepted within the TTL are dropped with a warning before
+// delivery. Passing nil keeps the legacy behavior (tests).
+func (s *Service) EnableReplayGuard(g *replay.ReplayGuard) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replay == nil {
+		s.replay = g
+	}
+}
+
+// dedupInbox reports whether env is a duplicate delivery. The check runs
+// after trust verification so an unauthenticated sender cannot pre-register
+// ids of legitimate future messages.
+func (s *Service) dedupInbox(env protocol.MessageEnvelope) bool {
+	s.mu.Lock()
+	g := s.replay
+	s.mu.Unlock()
+	if g == nil || env.ID == "" {
+		return false
+	}
+	if !g.CheckAndRemember("msg:"+env.ID, 24*time.Hour) {
+		s.log.Warn("duplicate message dropped",
+			logging.Event("message.duplicate"),
+			logging.From(env.From),
+			logging.MessageID(env.ID),
+			logging.MessageType(env.Type),
+		)
+		return true
+	}
+	return false
 }
 
 func (s *Service) Start() error {
@@ -183,6 +220,9 @@ func (s *Service) handleInbox(subject string, data []byte) {
 			logging.ContentLength(env.Content),
 			logging.ContentPreview(env.Content, contentPreviewLimit),
 		)
+		if s.dedupInbox(env) {
+			return
+		}
 		s.acceptInbox(env)
 		s.maybeDeliver(env)
 		return
@@ -217,6 +257,9 @@ func (s *Service) handleInbox(subject string, data []byte) {
 		logging.ContentLength(env.Content),
 		logging.ContentPreview(env.Content, contentPreviewLimit),
 	)
+	if s.dedupInbox(env) {
+		return
+	}
 	s.acceptInbox(env)
 	s.maybeDeliver(env)
 }

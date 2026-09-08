@@ -17,6 +17,7 @@ import (
 	"clawsynapse/internal/logging"
 	"clawsynapse/internal/natsbus"
 	"clawsynapse/internal/protocol"
+	"clawsynapse/internal/replay"
 	"clawsynapse/pkg/types"
 )
 
@@ -43,7 +44,7 @@ type Service struct {
 	bus       *natsbus.Client
 	nodeID    string
 	identity  *identity.Identity
-	replay    *ReplayGuard
+	replay    *replay.ReplayGuard
 	trustMode string
 
 	mu      sync.Mutex
@@ -51,14 +52,14 @@ type Service struct {
 	acks    map[string]*pendingAck
 }
 
-func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, replay *ReplayGuard, trustMode string) *Service {
+func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, replayGuard *replay.ReplayGuard, trustMode string) *Service {
 	return &Service{
 		log:       log,
 		peers:     peers,
 		bus:       bus,
 		nodeID:    nodeID,
 		identity:  id,
-		replay:    replay,
+		replay:    replayGuard,
 		trustMode: trustMode,
 		pending:   map[string]*pendingChallenge{},
 		acks:      map[string]*pendingAck{},
@@ -187,13 +188,13 @@ func (s *Service) handleChallengeRequest(subject string, data []byte) {
 	)
 
 	if s.trustMode != "open" && s.replay != nil {
-		if err := s.replay.CheckAndRemember("auth:request:message:"+req.MessageID, req.Ts); err != nil {
-			s.log.Warn("replay blocked for challenge request", logging.From(req.From), logging.Error(err))
+		if !s.replay.CheckAndRemember("auth:request:message:"+req.MessageID, 0) {
+			s.log.Warn("replay blocked for challenge request", logging.From(req.From))
 			_ = s.peers.SetAuthStatus(req.From, types.AuthRejected)
 			return
 		}
-		if err := s.replay.CheckAndRemember("auth:request:nonce:"+req.From+":"+req.Nonce, req.Ts); err != nil {
-			s.log.Warn("replay blocked for challenge nonce", logging.From(req.From), logging.Error(err))
+		if !s.replay.CheckAndRemember("auth:request:nonce:"+req.From+":"+req.Nonce, 0) {
+			s.log.Warn("replay blocked for challenge nonce", logging.From(req.From))
 			_ = s.peers.SetAuthStatus(req.From, types.AuthRejected)
 			return
 		}
@@ -275,12 +276,12 @@ func (s *Service) handleChallengeResponse(subject string, data []byte) {
 	}
 
 	if s.replay != nil {
-		if err := s.replay.CheckAndRemember("auth:response:message:"+resp.MessageID, resp.Ts); err != nil {
-			s.log.Warn("replay blocked for challenge response", logging.From(resp.From), logging.Error(err))
+		if !s.replay.CheckAndRemember("auth:response:message:"+resp.MessageID, 0) {
+			s.log.Warn("replay blocked for challenge response", logging.From(resp.From))
 			return
 		}
-		if err := s.replay.CheckAndRemember("auth:response:nonce:"+resp.From+":"+resp.Nonce, resp.Ts); err != nil {
-			s.log.Warn("replay blocked for challenge response nonce", logging.From(resp.From), logging.Error(err))
+		if !s.replay.CheckAndRemember("auth:response:nonce:"+resp.From+":"+resp.Nonce, 0) {
+			s.log.Warn("replay blocked for challenge response nonce", logging.From(resp.From))
 			return
 		}
 	}
@@ -348,8 +349,8 @@ func (s *Service) handleChallengeAck(_ string, data []byte) {
 	}
 
 	if s.replay != nil {
-		if err := s.replay.CheckAndRemember("auth:ack:message:"+ack.MessageID, ack.Ts); err != nil {
-			s.log.Warn("replay blocked for challenge ack", logging.From(ack.From), logging.Error(err))
+		if !s.replay.CheckAndRemember("auth:ack:message:"+ack.MessageID, 0) {
+			s.log.Warn("replay blocked for challenge ack", logging.From(ack.From))
 			return
 		}
 	}

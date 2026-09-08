@@ -20,6 +20,7 @@ import (
 	"clawsynapse/internal/logging"
 	"clawsynapse/internal/messaging"
 	"clawsynapse/internal/natsbus"
+	"clawsynapse/internal/replay"
 	"clawsynapse/internal/store"
 	"clawsynapse/internal/transfer"
 	"clawsynapse/internal/trust"
@@ -103,13 +104,13 @@ func New(cfg config.Config, version string) (*App, error) {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}
 
-	replay, err := auth.NewReplayGuard(fs, 10000, 10*time.Minute)
+	replayGuard, err := replay.NewReplayGuard(fs, 10000, 10*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("init replay guard: %w", err)
 	}
 
 	discoverySvc := discovery.NewService(log.With(slog.String("component", "discovery")), bus, peers, fs, nodeID, nodeDID, base64.RawURLEncoding.EncodeToString(id.PublicKey), hb, ttl, cfg.TrustMode, cfg.AgentAdapter)
-	authSvc := auth.NewService(log.With(slog.String("component", "auth")), peers, bus, nodeID, id, replay, cfg.TrustMode)
+	authSvc := auth.NewService(log.With(slog.String("component", "auth")), peers, bus, nodeID, id, replayGuard, cfg.TrustMode)
 	discoverySvc.SetAutoAuthenticator(authSvc.StartChallenge)
 	trustSvc, err := trust.NewService(log.With(slog.String("component", "trust")), peers, bus, fs, nodeID, id, cfg.TrustAutoApprove)
 	if err != nil {
@@ -118,6 +119,8 @@ func New(cfg config.Config, version string) (*App, error) {
 	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, nodeID, id, cfg.TrustMode, cfg.DeliverablePrefixes)
 	// T2.7: agent replies go through the durable outbox under the data dir.
 	messagingSvc.EnableOutbox(filepath.Join(cfg.DataDir, "outbox"))
+	// T2.2: duplicate inbox envelopes are dropped via the shared replay guard.
+	messagingSvc.EnableReplayGuard(replayGuard)
 	agentAdapter, err := newAgentAdapter(cfg, nodeID, log, fs)
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)

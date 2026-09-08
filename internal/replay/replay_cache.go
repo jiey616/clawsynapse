@@ -1,20 +1,27 @@
-package auth
+// Package replay provides a persisted seen-key cache shared by the auth
+// handshake (nonce/message replay protection) and the messaging inbox
+// (duplicate envelope suppression).
+package replay
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
-	"clawsynapse/internal/protocol"
 	"clawsynapse/internal/store"
 )
 
+// ReplayGuard remembers keys until their expiry. The persisted entry value
+// is the expiry unix-millisecond timestamp, so entries with different TTLs
+// (auth nonces vs inbox message ids) can coexist in one shared state file.
+//
+// Pre-1.0 state files stored the insertion timestamp instead; those values
+// are interpreted as already-expired on load and gc'd away harmlessly.
 type ReplayGuard struct {
 	mu         sync.Mutex
 	store      *store.FSStore
-	entries    map[string]int64
+	entries    map[string]int64 // key -> expireAtUnixMs
 	maxEntries int
-	ttl        time.Duration
+	defaultTTL time.Duration
 }
 
 func NewReplayGuard(fs *store.FSStore, maxEntries int, ttl time.Duration) (*ReplayGuard, error) {
@@ -34,7 +41,7 @@ func NewReplayGuard(fs *store.FSStore, maxEntries int, ttl time.Duration) (*Repl
 		store:      fs,
 		entries:    st.Entries,
 		maxEntries: maxEntries,
-		ttl:        ttl,
+		defaultTTL: ttl,
 	}
 	r.gc(time.Now().UnixMilli())
 	if err := r.persist(); err != nil {
@@ -43,7 +50,13 @@ func NewReplayGuard(fs *store.FSStore, maxEntries int, ttl time.Duration) (*Repl
 	return r, nil
 }
 
-func (r *ReplayGuard) CheckAndRemember(key string, ts int64) error {
+// CheckAndRemember reports whether key is being seen for the first time
+// within its ttl (true = fresh, remembered now; false = duplicate).
+// ttl <= 0 falls back to the constructor default.
+func (r *ReplayGuard) CheckAndRemember(key string, ttl time.Duration) bool {
+	if ttl <= 0 {
+		ttl = r.defaultTTL
+	}
 	nowMs := time.Now().UnixMilli()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -51,24 +64,24 @@ func (r *ReplayGuard) CheckAndRemember(key string, ts int64) error {
 	r.gc(nowMs)
 
 	if _, exists := r.entries[key]; exists {
-		return protocol.NewError(protocol.ErrReplayDetected, fmt.Sprintf("replay detected for key: %s", key))
+		return false
 	}
 
-	r.entries[key] = ts
+	r.entries[key] = nowMs + ttl.Milliseconds()
 	if len(r.entries) > r.maxEntries {
 		r.evictOldest()
 	}
 
-	if err := r.persistLocked(); err != nil {
-		return err
-	}
-	return nil
+	// Persist synchronously: a restart must not forget seen keys, or a
+	// redelivered envelope/nonce would be processed twice. Message and
+	// handshake frequency is low enough that a full-file write per check
+	// is acceptable (spec T2.2 allows the simplification).
+	return r.persistLocked() == nil
 }
 
 func (r *ReplayGuard) gc(nowMs int64) {
-	deadline := nowMs - r.ttl.Milliseconds()
-	for k, ts := range r.entries {
-		if ts < deadline {
+	for k, expireAt := range r.entries {
+		if expireAt < nowMs {
 			delete(r.entries, k)
 		}
 	}
@@ -105,7 +118,7 @@ func (r *ReplayGuard) persistLocked() error {
 		cp[k] = v
 	}
 	return r.store.SaveReplayState(store.ReplayState{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Entries:       cp,
 	})
 }
