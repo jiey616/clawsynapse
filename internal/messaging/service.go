@@ -54,13 +54,16 @@ type Service struct {
 	// outbox (T2.7) makes agent replies reliable; nil keeps the legacy
 	// best-effort reply behavior.
 	outbox *Outbox
+	// dispatcher (T2.1) serializes deliveries per session key; nil keeps
+	// the legacy fire-and-forget goroutine per delivery.
+	dispatcher *sessionDispatcher
 }
 
 func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string, deliverablePrefixes []string) *Service {
 	if len(deliverablePrefixes) == 0 {
 		deliverablePrefixes = []string{"chat", "task"}
 	}
-	return &Service{log: log, peers: peers, bus: bus, nodeID: nodeID, identity: id, trustMode: trustMode, deliverablePrefixes: deliverablePrefixes, inbox: []protocol.MessageEnvelope{}}
+	return &Service{log: log, peers: peers, bus: bus, nodeID: nodeID, identity: id, trustMode: trustMode, deliverablePrefixes: deliverablePrefixes, inbox: []protocol.MessageEnvelope{}, dispatcher: newSessionDispatcher(log)}
 }
 
 func (s *Service) SetMessageHandler(handler MessageHandler) {
@@ -252,7 +255,7 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 		return
 	}
 
-	go func() {
+	s.dispatchSession(env, func() {
 		result, err := handler.HandleMessage(IncomingMessage{
 			MessageID:  env.ID,
 			Type:       env.Type,
@@ -283,7 +286,22 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 		if result.Reply != "" {
 			s.replyToSender(env, result.Reply, false)
 		}
-	}()
+	})
+}
+
+// dispatchSession routes a delivery through the per-sessionKey serial
+// queue (T2.1): same-key deliveries run in arrival order on one worker,
+// different keys stay concurrent. Without a dispatcher (legacy) it is a
+// plain fire-and-forget goroutine.
+func (s *Service) dispatchSession(env protocol.MessageEnvelope, fn func()) {
+	s.mu.Lock()
+	d := s.dispatcher
+	s.mu.Unlock()
+	if d == nil {
+		go fn()
+		return
+	}
+	d.Dispatch(sessionDispatchKey(env), fn)
 }
 
 // EnableOutbox switches agent replies (replyToSender) to the reliable
