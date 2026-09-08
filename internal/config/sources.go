@@ -29,6 +29,7 @@ type fileConfig struct {
 	HermesModel         string   `yaml:"hermesModel"`
 	HermesConfigPath    string   `yaml:"hermesConfigPath"`
 	HermesTodoMode      string   `yaml:"hermesTodoMode"`
+	Task                *TaskConfig `yaml:"task"`
 	WebhookURL          string   `yaml:"webhookUrl"`
 	LogFilePath         string   `yaml:"logFilePath"`
 	LogRotateMaxSizeMB  *int     `yaml:"logRotateMaxSizeMb"`
@@ -48,6 +49,11 @@ func toFileConfig(cfg Config) fileConfig {
 	las := cfg.LogAddSource
 	taa := cfg.TrustAutoApprove
 	mfs := cfg.TransferMaxFileSize
+	var task *TaskConfig
+	if cfg.Task != nil {
+		t := *cfg.Task
+		task = &t
+	}
 	return fileConfig{
 		NATSServers:         cfg.NATSServers,
 		LocalAPIAddr:        cfg.LocalAPIAddr,
@@ -66,6 +72,7 @@ func toFileConfig(cfg Config) fileConfig {
 		HermesModel:         cfg.HermesModel,
 		HermesConfigPath:    cfg.HermesConfigPath,
 		HermesTodoMode:      cfg.HermesTodoMode,
+		Task:                task,
 		WebhookURL:          cfg.WebhookURL,
 		LogFilePath:         cfg.LogFilePath,
 		LogRotateMaxSizeMB:  &cfg.LogRotateMaxSizeMB,
@@ -141,6 +148,20 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 	if cfg.TrustAutoApprove != nil {
 		values.TrustAutoApprove = *cfg.TrustAutoApprove
 		values.TrustAutoApproveSet = true
+	}
+	if cfg.Task != nil {
+		if cfg.Task.MaxConcurrentRuns > 0 {
+			values.TaskMaxConcurrentRuns = cfg.Task.MaxConcurrentRuns
+		}
+		if cfg.Task.QueueCapacity > 0 {
+			values.TaskQueueCapacity = cfg.Task.QueueCapacity
+		}
+		if strings.TrimSpace(cfg.Task.RunTimeout) != "" {
+			values.TaskRunTimeout = parseDurationValue(cfg.Task.RunTimeout, 0)
+		}
+		if strings.TrimSpace(cfg.Task.QueueWaitTimeout) != "" {
+			values.TaskQueueWaitTimeout = parseDurationValue(cfg.Task.QueueWaitTimeout, 0)
+		}
 	}
 
 	if cfg.HeartbeatInterval != "" {
@@ -220,6 +241,10 @@ func loadValuesFromMap(values map[string]string) configValues {
 		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
 		AgentAdapterTimeout: parseDurationValue(values["AGENT_ADAPTER_TIMEOUT"], 0),
 		AgentRole:           strings.TrimSpace(values["AGENT_ROLE"]),
+		TaskMaxConcurrentRuns: int(parseIntValue(values["TASK_MAX_CONCURRENT_RUNS"])),
+		TaskQueueCapacity:     int(parseIntValue(values["TASK_QUEUE_CAPACITY"])),
+		TaskRunTimeout:        parseDurationValue(values["TASK_RUN_TIMEOUT"], 0),
+		TaskQueueWaitTimeout:  parseDurationValue(values["TASK_QUEUE_WAIT_TIMEOUT"], 0),
 		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
 		LogFilePath:         strings.TrimSpace(values["LOG_FILE_PATH"]),
 		LogRotateMaxSizeMB:  int(parseIntValue(values["LOG_ROTATE_MAX_SIZE_MB"])),

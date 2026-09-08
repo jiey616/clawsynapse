@@ -37,6 +37,14 @@ type HermesConfig struct {
 	// (default 8, leaving 2 spare slots under the gateway's global limit
 	// of 10). Zero or negative falls back to the default.
 	MaxConcurrentRuns int
+	// Task bounds task run admission/queueing for the TaskCoordinator.
+	// Zero-value fields fall back to the coordinator defaults
+	// (8 concurrent / 100 queue / 60m run / 5m queue wait).
+	Task TaskConfig
+	// TaskStore persists the task run lifecycle (task_runs/). When nil the
+	// TaskCoordinator stays disabled and todo.* deliveries keep the
+	// legacy T0.6 gate path.
+	TaskStore *store.TaskStore
 }
 
 // HermesAdapter delivers messages to a local Hermes agent via the Gateway
@@ -62,6 +70,10 @@ type HermesAdapter struct {
 
 	capMu    sync.Mutex
 	capCache *capabilitiesSnapshot
+
+	// taskCoord serializes and bounds todo.* runs executions. Nil until a
+	// TaskStore is provided via HermesConfig (T1.5 wires the runs path).
+	taskCoord *TaskCoordinator
 
 	// restartGatewayFn is the gateway restart implementation. Overridable in
 	// tests to avoid spawning real processes; defaults to restartGateway.
@@ -107,6 +119,30 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		maxRuns = 8
 	}
 
+	// Task lifecycle coordination (T1.2). Boot recovery converts running
+	// records left by a previous process into failed (the node lost its
+	// polling rights; better a redispatchable failure than a ghost).
+	var taskCoord *TaskCoordinator
+	if cfg.TaskStore != nil {
+		if err := cfg.TaskStore.EnsureLayout(); err != nil {
+			return nil, fmt.Errorf("task store layout: %w", err)
+		}
+		if recovered, err := cfg.TaskStore.RecoverStaleRunningTasks(); err != nil {
+			log := cfg.Logger
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Warn("task run recovery failed", "err", err)
+		} else if recovered > 0 {
+			log := cfg.Logger
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Info("recovered stale running task records", "count", recovered)
+		}
+		taskCoord = NewTaskCoordinator(cfg.Task, cfg.TaskStore, cfg.Logger)
+	}
+
 	return &HermesAdapter{
 		nodeID:       strings.TrimSpace(cfg.NodeID),
 		log:          cfg.Logger,
@@ -124,6 +160,7 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		pollDeadline:    12 * time.Minute,
 		runSem:          make(chan struct{}, maxRuns),
 		backoff429:      []time.Duration{time.Second, 2 * time.Second, 4 * time.Second},
+		taskCoord:       taskCoord,
 	}, nil
 }
 

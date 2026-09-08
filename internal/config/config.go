@@ -31,6 +31,17 @@ const (
 	defaultTransferTTL         = "24h"
 )
 
+// TaskConfig bounds node-side task run admission and queueing (todo.* runs).
+// Durations follow the package convention of strings (e.g. "60m", "5m").
+// Zero values mean "use the adapter defaults" (8 concurrent / 100 queue /
+// 60m run timeout / 5m queue wait timeout).
+type TaskConfig struct {
+	MaxConcurrentRuns int    `json:"maxConcurrentRuns"`
+	QueueCapacity     int    `json:"queueCapacity"`
+	RunTimeout        string `json:"runTimeout"`
+	QueueWaitTimeout  string `json:"queueWaitTimeout"`
+}
+
 type Config struct {
 	NATSServers         []string `json:"natsServers"`
 	LocalAPIAddr        string   `json:"localApiAddr"`
@@ -49,6 +60,7 @@ type Config struct {
 	HermesModel         string   `json:"hermesModel"`
 	HermesConfigPath    string   `json:"hermesConfigPath"`
 	HermesTodoMode      string   `json:"hermesTodoMode"`
+	Task                *TaskConfig `json:"task"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
 	LogFormat           string   `json:"logFormat"`
@@ -182,6 +194,10 @@ type configValues struct {
 	HermesModel         string
 	HermesConfigPath    string
 	HermesTodoMode      string
+	TaskMaxConcurrentRuns int
+	TaskQueueCapacity     int
+	TaskRunTimeout        time.Duration
+	TaskQueueWaitTimeout  time.Duration
 	WebhookURL          string
 	LogFilePath         string
 	LogRotateMaxSizeMB  int
@@ -374,6 +390,21 @@ func LoadFromOS(args []string) (Config, error) {
 		return Config{}, err
 	}
 
+	var taskCfg *TaskConfig
+	if merged.TaskMaxConcurrentRuns > 0 || merged.TaskQueueCapacity > 0 ||
+		merged.TaskRunTimeout > 0 || merged.TaskQueueWaitTimeout > 0 {
+		taskCfg = &TaskConfig{
+			MaxConcurrentRuns: merged.TaskMaxConcurrentRuns,
+			QueueCapacity:     merged.TaskQueueCapacity,
+		}
+		if merged.TaskRunTimeout > 0 {
+			taskCfg.RunTimeout = merged.TaskRunTimeout.String()
+		}
+		if merged.TaskQueueWaitTimeout > 0 {
+			taskCfg.QueueWaitTimeout = merged.TaskQueueWaitTimeout.String()
+		}
+	}
+
 	return Config{
 		NATSServers:         rawServers,
 		LocalAPIAddr:        strings.TrimSpace(*apiAddr),
@@ -392,6 +423,7 @@ func LoadFromOS(args []string) (Config, error) {
 		HermesModel:         strings.TrimSpace(*hermesModel),
 		HermesConfigPath:    strings.TrimSpace(*hermesConfigPath),
 		HermesTodoMode:      strings.TrimSpace(*hermesTodoMode),
+		Task:                taskCfg,
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
 		LogRotateMaxSizeMB:  *logRotateMaxSizeMB,
@@ -486,6 +518,18 @@ func mergeConfigValues(base, override configValues) configValues {
 	}
 	if strings.TrimSpace(override.HermesTodoMode) != "" {
 		base.HermesTodoMode = strings.TrimSpace(override.HermesTodoMode)
+	}
+	if override.TaskMaxConcurrentRuns > 0 {
+		base.TaskMaxConcurrentRuns = override.TaskMaxConcurrentRuns
+	}
+	if override.TaskQueueCapacity > 0 {
+		base.TaskQueueCapacity = override.TaskQueueCapacity
+	}
+	if override.TaskRunTimeout > 0 {
+		base.TaskRunTimeout = override.TaskRunTimeout
+	}
+	if override.TaskQueueWaitTimeout > 0 {
+		base.TaskQueueWaitTimeout = override.TaskQueueWaitTimeout
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)

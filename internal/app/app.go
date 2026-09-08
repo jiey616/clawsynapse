@@ -230,6 +230,8 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 			Model:        cfg.HermesModel,
 			ConfigPath:   cfg.HermesConfigPath,
 			TodoMode:     cfg.HermesTodoMode,
+			Task:         taskConfigFrom(cfg.Task),
+			TaskStore:    store.NewTaskStore(cfg.DataDir),
 		})
 	default:
 		return nil, fmt.Errorf("unsupported agent adapter: %s", cfg.AgentAdapter)
@@ -246,6 +248,25 @@ func resolveAgentAdapterTimeout(cfg config.Config) (time.Duration, error) {
 		return 0, fmt.Errorf("parse agent adapter timeout: %s", timeout)
 	}
 	return d, nil
+}
+
+// taskConfigFrom converts the config-file task settings into the adapter
+// TaskConfig. Invalid duration strings fall back to the coordinator
+// defaults (zero value).
+func taskConfigFrom(t *config.TaskConfig) adapter.TaskConfig {
+	var out adapter.TaskConfig
+	if t == nil {
+		return out
+	}
+	out.MaxConcurrentRuns = t.MaxConcurrentRuns
+	out.QueueCapacity = t.QueueCapacity
+	if d, err := time.ParseDuration(strings.TrimSpace(t.RunTimeout)); err == nil {
+		out.RunTimeout = d
+	}
+	if d, err := time.ParseDuration(strings.TrimSpace(t.QueueWaitTimeout)); err == nil {
+		out.QueueWaitTimeout = d
+	}
+	return out
 }
 
 func (a *App) Run(ctx context.Context) error {
