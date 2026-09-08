@@ -62,6 +62,12 @@ type HermesAdapter struct {
 	// restartGatewayFn is the gateway restart implementation. Overridable in
 	// tests to avoid spawning real processes; defaults to restartGateway.
 	restartGatewayFn func(ctx context.Context) error
+
+	// Poll tuning. Defaults: 1s initial backoff, 5s cap, 12m hard deadline.
+	// Overridable in tests to keep them fast.
+	pollInterval    time.Duration
+	pollIntervalMax time.Duration
+	pollDeadline    time.Duration
 }
 
 // NewHermesAdapter creates a Hermes adapter instance backed by the Gateway API.
@@ -91,12 +97,15 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		sessionStore: cfg.SessionStore,
 		agentRole:    strings.ToLower(strings.TrimSpace(cfg.AgentRole)),
 		// Timeout is driven by the caller-supplied context, not a fixed client timeout.
-		httpClient: &http.Client{Timeout: 0},
-		baseURL:    baseURL,
-		apiKey:     strings.TrimSpace(cfg.APIKey),
-		model:      model,
-		configPath: strings.TrimSpace(cfg.ConfigPath),
-		todoMode:   todoMode,
+		httpClient:      &http.Client{Timeout: 0},
+		baseURL:         baseURL,
+		apiKey:          strings.TrimSpace(cfg.APIKey),
+		model:           model,
+		configPath:      strings.TrimSpace(cfg.ConfigPath),
+		todoMode:        todoMode,
+		pollInterval:    time.Second,
+		pollIntervalMax: 5 * time.Second,
+		pollDeadline:    12 * time.Minute,
 	}, nil
 }
 
@@ -488,36 +497,80 @@ func runFailed(status string) bool {
 	return isTerminalRunStatus(s) && s != "completed"
 }
 
-// pollRun polls GET /v1/runs/{id} until it reaches a terminal state or the
-// context is cancelled. Polling interval backs off from 1s to a 5s cap.
+// pollRun polls GET /v1/runs/{id} until it reaches a terminal state.
+//
+// Polling interval backs off from 1s to a 5s cap. Resilience rules:
+//   - up to 3 consecutive poll-request errors are tolerated (gateway restart
+//     window) before giving up; the backoff does not grow on errors;
+//   - a hard 12-minute deadline caps polling regardless of the caller's ctx
+//     (a caller-level cancellation still surfaces immediately as ctx.Err());
+//   - 5 consecutive polls returning the same non-terminal status are treated
+//     as a stuck run and fail fast instead of burning the whole timeout.
 func (a *HermesAdapter) pollRun(ctx context.Context, runID string) (*runStatusResponse, error) {
-	interval := time.Second
+	pollCtx, cancel := context.WithTimeout(ctx, a.pollDeadline)
+	defer cancel()
+
+	interval := a.pollInterval
+	consecErrs := 0
+	lastStatus := ""
+	unchanged := 0
 	for {
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-pollCtx.Done():
+			if ctx.Err() != nil {
+				// Caller-level cancellation/timeout: surface immediately so
+				// the caller can decide (e.g. stop the run on the gateway).
+				return nil, ctx.Err()
+			}
+			if lastStatus != "" {
+				return nil, fmt.Errorf("run %s polling deadline exceeded (%s), last status=%s", runID, a.pollDeadline, lastStatus)
+			}
+			return nil, pollCtx.Err()
 		default:
 		}
 
 		var st runStatusResponse
-		_, err := a.callJSON(ctx, http.MethodGet, a.baseURL+"/runs/"+runID, nil, &st)
+		_, err := a.callJSON(pollCtx, http.MethodGet, a.baseURL+"/runs/"+runID, nil, &st)
 		if err != nil {
-			return nil, err
+			if pollCtx.Err() != nil {
+				continue // loop head handles ctx.Done uniformly
+			}
+			consecErrs++
+			if consecErrs >= 3 {
+				return nil, fmt.Errorf("run %s poll failed %d times consecutively: %w", runID, consecErrs, err)
+			}
+			select {
+			case <-pollCtx.Done():
+				continue
+			case <-time.After(interval): // do not grow the backoff on errors
+			}
+			continue
 		}
+		consecErrs = 0
 
 		if isTerminalRunStatus(st.Status) {
 			return &st, nil
 		}
 
+		if status := strings.TrimSpace(st.Status); status == lastStatus {
+			unchanged++
+			if unchanged >= 5 {
+				return nil, fmt.Errorf("run %s stuck in status %q after %d polls", runID, status, unchanged)
+			}
+		} else {
+			lastStatus = status
+			unchanged = 0
+		}
+
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-pollCtx.Done():
+			continue
 		case <-time.After(interval):
 		}
-		if interval < 5*time.Second {
+		if interval < a.pollIntervalMax {
 			interval *= 2
 		} else {
-			interval = 5 * time.Second
+			interval = a.pollIntervalMax
 		}
 	}
 }
