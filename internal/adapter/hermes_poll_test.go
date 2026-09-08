@@ -137,3 +137,22 @@ func TestPollRun_HardDeadline(t *testing.T) {
 		t.Fatalf("error should mention polling deadline, got: %v", err)
 	}
 }
+
+// ── T0.3: run create carries the adapter model ───────────────────
+
+func TestDeliverViaRuns_SendsModel(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	if _, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.assigned", SessionKey: "task-m1", Message: "do it"}); err != nil {
+		t.Fatalf("DeliverMessage: %v", err)
+	}
+	if len(fg.runsModel) == 0 {
+		t.Fatal("no /v1/runs create recorded")
+	}
+	if got := fg.runsModel[0]; got != "hermes-agent" {
+		t.Fatalf("model = %q, want hermes-agent", got)
+	}
+}

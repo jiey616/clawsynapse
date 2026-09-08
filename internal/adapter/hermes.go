@@ -341,7 +341,7 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 
 	// NOTE(§7.1): continuation field name for /v1/runs is to be verified
 	// against the live gateway (session_id vs previous_response_id).
-	body := runCreateRequest{Input: formatted}
+	body := runCreateRequest{Input: formatted, Model: a.model}
 	if prevID != "" {
 		body.SessionID = prevID
 	}
@@ -392,7 +392,7 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 			}
 			a.deleteMappedSession(taskKey)
 			a.logGateway("runs-retry-fresh", taskKey, false)
-			fresh := runCreateRequest{Input: formatted}
+			fresh := runCreateRequest{Input: formatted, Model: a.model}
 			var created2 runCreateResponse
 			if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created2); err2 == nil {
 				runID2 := strings.TrimSpace(created2.RunID)
@@ -584,7 +584,7 @@ func (a *HermesAdapter) retryFreshRun(ctx context.Context, taskKey, formatted, p
 	a.deleteMappedSession(taskKey)
 	a.logGateway("runs-retry-fresh", taskKey, false)
 
-	fresh := runCreateRequest{Input: formatted}
+	fresh := runCreateRequest{Input: formatted, Model: a.model}
 	var created runCreateResponse
 	if _, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created); err != nil {
 		return nil, false
@@ -864,6 +864,7 @@ type responsesResponse struct {
 }
 
 type runCreateRequest struct {
+	Model string `json:"model,omitempty"`
 	Input string `json:"input"`
 	// Continuation id for task context. Field name TBD (§7.1).
 	SessionID string `json:"session_id,omitempty"`

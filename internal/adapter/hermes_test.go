@@ -21,6 +21,7 @@ type fakeGateway struct {
 	responsesPrev         []string // previous_response_id received on each /v1/responses call
 	responsesConversation []string // conversation received on each /v1/responses call
 	runsSessionID         []string // session_id received on each /v1/runs call
+	runsModel             []string // model received on each /v1/runs call
 
 	runStatusIdx map[string]int
 
@@ -73,6 +74,7 @@ func (fg *fakeGateway) handler() http.Handler {
 
 		fg.mu.Lock()
 		fg.runsSessionID = append(fg.runsSessionID, req.SessionID)
+		fg.runsModel = append(fg.runsModel, req.Model)
 		fg.mu.Unlock()
 
 		if fg.unknownRuns && !fg.urRunsDone && req.SessionID != "" {
