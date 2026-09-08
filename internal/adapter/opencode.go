@@ -158,6 +158,8 @@ func (a *OpenCodeAdapter) runCommand(ctx context.Context, msg string, sessionID 
 	return a.execCmd(ctx, args...)
 }
 
+// TODO(sessionMapper): migrate to internal/adapter/session_mapper.go for
+// in-memory reads/writes with batched persistence (see T2.3).
 func (a *OpenCodeAdapter) loadMappedSessionID(sessionKey string) string {
 	if a.sessionStore == nil {
 		return ""

@@ -63,6 +63,11 @@ type HermesAdapter struct {
 	sessionStore *store.FSStore
 	agentRole    string
 
+	// sessionMap (T2.3) batches session-continuation persistence; nil
+	// when no SessionStore is configured (then the three mapping helpers
+	// are no-ops, same as before).
+	sessionMap *sessionMapper
+
 	httpClient *http.Client
 	baseURL    string
 	apiKey     string
@@ -150,6 +155,7 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		nodeID:       strings.TrimSpace(cfg.NodeID),
 		log:          cfg.Logger,
 		sessionStore: cfg.SessionStore,
+		sessionMap:   newSessionMapper("hermes", cfg.SessionStore, cfg.Logger),
 		agentRole:    strings.ToLower(strings.TrimSpace(cfg.AgentRole)),
 		// Timeout is driven by the caller-supplied context, not a fixed client timeout.
 		httpClient:      &http.Client{Timeout: 0},
@@ -990,75 +996,24 @@ func extractTaskID(metadata map[string]any) string {
 	return ""
 }
 
-// ── Session mapping (reuses store.SessionState like Codex adapter) ──
+// ── Session mapping (T2.3: in-memory reads/writes, batched persistence) ──
 
 func (a *HermesAdapter) loadMappedSessionID(sessionKey string) string {
-	if a.sessionStore == nil {
-		return ""
-	}
-	sessionKey = strings.TrimSpace(sessionKey)
-	if sessionKey == "" {
-		return ""
-	}
-
-	st, ok, err := a.sessionStore.LoadSessionState("hermes", sessionKey)
-	if err != nil {
-		a.logStoreWarning("load hermes session mapping failed", sessionKey, err)
-		return ""
-	}
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(st.SessionID)
+	return a.sessionMap.load(sessionKey)
 }
 
 func (a *HermesAdapter) saveMappedSession(sessionKey string, sessionID string) {
-	if a.sessionStore == nil {
-		return
-	}
-	sessionKey = strings.TrimSpace(sessionKey)
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionKey == "" || sessionID == "" {
-		return
-	}
-
-	existing, ok, err := a.sessionStore.LoadSessionState("hermes", sessionKey)
-	if err != nil {
-		a.logStoreWarning("load hermes session mapping failed", sessionKey, err)
-		return
-	}
-	if ok && strings.TrimSpace(existing.SessionID) == sessionID {
-		return
-	}
-
-	now := time.Now().UnixMilli()
-	createdAt := now
-	if ok && existing.CreatedAtMs > 0 {
-		createdAt = existing.CreatedAtMs
-	}
-
-	if err := a.sessionStore.SaveSessionState(store.SessionState{
-		Adapter:     "hermes",
-		SessionKey:  sessionKey,
-		SessionID:   sessionID,
-		CreatedAtMs: createdAt,
-		UpdatedAtMs: now,
-	}); err != nil {
-		a.logStoreWarning("save hermes session mapping failed", sessionKey, err)
-	}
+	a.sessionMap.save(sessionKey, sessionID)
 }
 
 func (a *HermesAdapter) deleteMappedSession(sessionKey string) {
-	if a.sessionStore == nil {
-		return
-	}
-	sessionKey = strings.TrimSpace(sessionKey)
-	if sessionKey == "" {
-		return
-	}
-	if err := a.sessionStore.DeleteSessionState("hermes", sessionKey); err != nil {
-		a.logStoreWarning("delete hermes session mapping failed", sessionKey, err)
-	}
+	a.sessionMap.delete(sessionKey)
+}
+
+// Close flushes pending session-mapping writes; call on process exit so
+// mutations inside the 30s flush window are not lost.
+func (a *HermesAdapter) Close() {
+	a.sessionMap.Close()
 }
 
 // ── Logging helpers ─────────────────────────────────────────────────

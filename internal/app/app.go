@@ -40,6 +40,9 @@ type App struct {
 	bus       *natsbus.Client
 	peers     *discovery.Registry
 	identity  *identity.Identity
+	// agentAdapter is kept for the exit hook: adapters with batched
+	// session persistence (T2.3) flush on shutdown via Close().
+	agentAdapter adapter.AgentAdapter
 }
 
 func New(cfg config.Config, version string) (*App, error) {
@@ -200,6 +203,7 @@ func New(cfg config.Config, version string) (*App, error) {
 		bus:       bus,
 		peers:     peers,
 		identity:  id,
+		agentAdapter: agentAdapter,
 	}, nil
 }
 
@@ -330,6 +334,11 @@ func (a *App) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		// T2.3: adapters with batched session persistence flush pending
+		// writes before the process goes down.
+		if closer, ok := a.agentAdapter.(interface{ Close() }); ok {
+			closer.Close()
+		}
 		a.bus.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
