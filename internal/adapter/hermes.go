@@ -550,8 +550,8 @@ func (a *HermesAdapter) runsDeliveryBody(ctx context.Context, taskID, formatted 
 		prevID = strings.TrimSpace(prevSessionID)
 	}
 
-	// NOTE(§7.1): continuation field name for /v1/runs is to be verified
-	// against the live gateway (session_id vs previous_response_id).
+	// Continuation verified live (T2.4): session_id resumes; see
+	// runCreateRequest.SessionID.
 	body := runCreateRequest{Input: formatted, Model: a.model}
 	if prevID != "" {
 		body.SessionID = prevID
@@ -1117,7 +1117,10 @@ type responsesResponse struct {
 type runCreateRequest struct {
 	Model string `json:"model,omitempty"`
 	Input string `json:"input"`
-	// Continuation id for task context. Field name TBD (§7.1).
+	// Continuation id (T2.4, live-verified 2026-09-09 against gateway
+	// v1.0.35): session_id RESUMES the prior run's conversation;
+	// previous_response_id is silently ignored on /v1/runs (fresh session
+	// every time). session_id == run_id on a first run.
 	SessionID string `json:"session_id,omitempty"`
 }
 
