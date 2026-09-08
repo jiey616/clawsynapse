@@ -33,6 +33,10 @@ type HermesConfig struct {
 	//   - "runs" (default): POST /v1/runs, polled to terminal state
 	//   - "responses": POST /v1/responses with session_id continuation
 	TodoMode string
+	// MaxConcurrentRuns caps the number of in-flight runs deliveries
+	// (default 8, leaving 2 spare slots under the gateway's global limit
+	// of 10). Zero or negative falls back to the default.
+	MaxConcurrentRuns int
 }
 
 // HermesAdapter delivers messages to a local Hermes agent via the Gateway
@@ -68,6 +72,13 @@ type HermesAdapter struct {
 	pollInterval    time.Duration
 	pollIntervalMax time.Duration
 	pollDeadline    time.Duration
+
+	// runSem gates concurrent runs deliveries (Phase 0 stopgap). It is held
+	// from before run creation until the run reaches a terminal state.
+	// Replaced by the TaskCoordinator in the lifecycle phase.
+	runSem chan struct{}
+	// backoff429 are the retry delays for gateway-level 429 rejections.
+	backoff429 []time.Duration
 }
 
 // NewHermesAdapter creates a Hermes adapter instance backed by the Gateway API.
@@ -91,6 +102,11 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		todoMode = "runs"
 	}
 
+	maxRuns := cfg.MaxConcurrentRuns
+	if maxRuns <= 0 {
+		maxRuns = 8
+	}
+
 	return &HermesAdapter{
 		nodeID:       strings.TrimSpace(cfg.NodeID),
 		log:          cfg.Logger,
@@ -106,6 +122,8 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		pollInterval:    time.Second,
 		pollIntervalMax: 5 * time.Second,
 		pollDeadline:    12 * time.Minute,
+		runSem:          make(chan struct{}, maxRuns),
+		backoff429:      []time.Duration{time.Second, 2 * time.Second, 4 * time.Second},
 	}, nil
 }
 
@@ -387,15 +405,25 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 		body.SessionID = prevID
 	}
 
+	// Gate concurrent runs deliveries before creating anything on the
+	// gateway. The slot is held until this delivery reaches a terminal state
+	// (including fresh-run retries), so gateway-side concurrency stays ≤
+	// MaxConcurrentRuns at all times.
+	select {
+	case a.runSem <- struct{}{}:
+		defer func() { <-a.runSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	a.logGateway("runs-create", taskKey, prevID != "")
 
-	var created runCreateResponse
-	status, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", body, &created)
+	created, status, err := a.createRunWithRetry(ctx, body)
 	if err != nil && prevID != "" && isGatewayUnknownSessionError(status, err.Error()) {
 		a.deleteMappedSession(taskKey)
 		body.SessionID = ""
 		a.logGateway("runs-create-retry", taskKey, false)
-		status, err = a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", body, &created)
+		created, status, err = a.createRunWithRetry(ctx, body)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("hermes gateway runs create: %w", err)
@@ -612,6 +640,39 @@ func (a *HermesAdapter) pollRun(ctx context.Context, runID string) (*runStatusRe
 			interval *= 2
 		} else {
 			interval = a.pollIntervalMax
+		}
+	}
+}
+
+// isGatewayRateLimited reports whether a callJSON error is the gateway's
+// global concurrency rejection (HTTP 429 "Too many concurrent runs").
+func isGatewayRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "429") || strings.Contains(s, "too many concurrent")
+}
+
+// createRunWithRetry POSTs the run create request, retrying gateway-level
+// 429 rejections with the configured backoff sequence (default 1s/2s/4s).
+// It returns the HTTP status of the last attempt so callers can apply their
+// own error classification (e.g. unknown-session retry).
+func (a *HermesAdapter) createRunWithRetry(ctx context.Context, body runCreateRequest) (*runCreateResponse, int, error) {
+	var created runCreateResponse
+	for attempt := 0; ; attempt++ {
+		status, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", body, &created)
+		if err == nil || !isGatewayRateLimited(err) {
+			return &created, status, err
+		}
+		if attempt >= len(a.backoff429) {
+			return nil, status, fmt.Errorf("rate limited after %d retries: %w", attempt, err)
+		}
+		a.logGateway("runs-create-429-retry", fmt.Sprintf("attempt=%d", attempt+1), false)
+		select {
+		case <-ctx.Done():
+			return nil, status, ctx.Err()
+		case <-time.After(a.backoff429[attempt]):
 		}
 	}
 }

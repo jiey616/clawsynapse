@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -317,5 +318,137 @@ func TestExtractTaskID_AcceptsBothKeys(t *testing.T) {
 		if got := extractTaskID(c.md); got != c.want {
 			t.Fatalf("case %d: extractTaskID = %q, want %q", i, got, c.want)
 		}
+	}
+}
+
+// ── T0.6: runs concurrency gate + 429 backoff ────────────────────
+
+// concurrencyGateHandler counts concurrent POST /v1/runs and records the
+// peak; polling GET /v1/runs/{id} always returns completed.
+type concurrencyGateHandler struct {
+	cur  atomic.Int64
+	peak atomic.Int64
+}
+
+func (ch *concurrencyGateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v1/runs") {
+		c := ch.cur.Add(1)
+		for {
+			p := ch.peak.Load()
+			if c <= p || ch.peak.CompareAndSwap(p, c) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+		ch.cur.Add(-1)
+		_ = json.NewEncoder(w).Encode(runCreateResponse{RunID: "run-1", SessionID: "s1"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(runStatusResponse{RunID: "run-1", Status: "completed", Output: "done"})
+}
+
+func TestDeliverViaRuns_ConcurrencyLimit(t *testing.T) {
+	ch := &concurrencyGateHandler{}
+	srv := httptest.NewServer(ch)
+	t.Cleanup(srv.Close)
+	a, err := NewHermesAdapter(HermesConfig{NodeID: "n1", BaseURL: srv.URL + "/v1", Model: "m"})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter: %v", err)
+	}
+	a.pollInterval = 5 * time.Millisecond
+	a.pollIntervalMax = 10 * time.Millisecond
+
+	const n = 20
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_, err := a.DeliverMessage(ctx, DeliverMessageRequest{
+				Type: "todo.assigned", SessionKey: fmt.Sprintf("task-%d", i), Message: "go",
+			})
+			errs <- err
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent delivery %d failed: %v", i, err)
+		}
+	}
+	if p := ch.peak.Load(); p > 8 {
+		t.Fatalf("concurrent runs peak = %d, want <= 8", p)
+	}
+	if p := ch.peak.Load(); p < 2 {
+		t.Fatalf("concurrent runs peak = %d, gate seems serializing everything", p)
+	}
+}
+
+func TestDeliverViaRuns_429RetryThenSuccess(t *testing.T) {
+	var posts atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/runs", func(w http.ResponseWriter, r *http.Request) {
+		if posts.Add(1) == 1 {
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":"Too many concurrent runs (max 10)"}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(runCreateResponse{RunID: "run-9", SessionID: "s"})
+	})
+	mux.HandleFunc("/v1/runs/", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(runStatusResponse{RunID: "run-9", Status: "completed", Output: "done"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	a, err := NewHermesAdapter(HermesConfig{NodeID: "n1", BaseURL: srv.URL + "/v1", Model: "m"})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter: %v", err)
+	}
+	a.backoff429 = []time.Duration{5 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
+	a.pollInterval = 5 * time.Millisecond
+	a.pollIntervalMax = 10 * time.Millisecond
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.assigned", SessionKey: "task-429", Message: "go"})
+	if err != nil {
+		t.Fatalf("429 should be retried and succeed: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if posts.Load() != 2 {
+		t.Fatalf("expected exactly 2 create calls, got %d", posts.Load())
+	}
+}
+
+func TestDeliverViaRuns_429Exhausted(t *testing.T) {
+	var posts atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/runs", func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"error":"Too many concurrent runs (max 10)"}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	a, err := NewHermesAdapter(HermesConfig{NodeID: "n1", BaseURL: srv.URL + "/v1", Model: "m"})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter: %v", err)
+	}
+	a.backoff429 = []time.Duration{5 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond}
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	_, err = a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.assigned", SessionKey: "task-429x", Message: "go"})
+	if err == nil {
+		t.Fatal("expected rate-limit exhaustion error")
+	}
+	if !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("error should mention rate limiting, got: %v", err)
+	}
+	if posts.Load() != 4 {
+		t.Fatalf("expected 1 initial + 3 retries, got %d", posts.Load())
 	}
 }
