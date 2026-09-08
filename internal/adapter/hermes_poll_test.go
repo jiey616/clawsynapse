@@ -6,10 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"clawsynapse/internal/store"
 )
 
 // newPollTestAdapter builds a HermesAdapter against a raw handler with fast
@@ -239,5 +242,80 @@ func TestDeliverTask_ProviderErrorRetryFails(t *testing.T) {
 	}
 	if !strings.Contains(res.Error, "被模型服务拒绝") {
 		t.Fatalf("error should mention model rejection, got: %q", res.Error)
+	}
+}
+
+// ── T0.5: empty task id interception ─────────────────────────────
+
+func TestDeliverViaRuns_RejectsEmptyTaskID(t *testing.T) {
+	fg := &fakeGateway{}
+	base := t.TempDir()
+	srv := httptest.NewServer(fg.handler())
+	t.Cleanup(srv.Close)
+	st := store.NewFSStore(base)
+	if err := st.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout: %v", err)
+	}
+	a, err := NewHermesAdapter(HermesConfig{NodeID: "n1", BaseURL: srv.URL + "/v1", Model: "m", SessionStore: st})
+	if err != nil {
+		t.Fatalf("NewHermesAdapter: %v", err)
+	}
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "todo.assigned", Message: "no identity at all"})
+	if err == nil {
+		t.Fatalf("empty taskId must be rejected for runs, got %+v", res)
+	}
+	if !strings.Contains(err.Error(), "requires a valid taskId") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No session mapping file may be created under sessions/hermes/.
+	matches, _ := filepath.Glob(filepath.Join(base, "sessions", "hermes", "*", "*"))
+	if len(matches) != 0 {
+		t.Fatalf("no session mapping should exist, got %v", matches)
+	}
+}
+
+func TestDeliverViaRuns_AcceptsMetadataTaskIDUnderscore(t *testing.T) {
+	fg := &fakeGateway{}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{
+		Type:     "todo.assigned",
+		Message:  "hi",
+		Metadata: map[string]any{"task_id": "T-100"},
+	})
+	if err != nil {
+		t.Fatalf("task_id metadata key must be accepted: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if fg.runsSessionID[0] != "task:T-100" && fg.runsSessionID[0] != "" {
+		// session_id echo not asserted here; presence of a successful create is enough
+		_ = fg.runsSessionID[0]
+	}
+}
+
+func TestExtractTaskID_AcceptsBothKeys(t *testing.T) {
+	cases := []struct {
+		md   map[string]any
+		want string
+	}{
+		{map[string]any{"taskId": "abc"}, "abc"},
+		{map[string]any{"task_id": "xyz"}, "xyz"},
+		{map[string]any{"taskId": "   "}, ""},
+		{map[string]any{"other": 1}, ""},
+		{nil, ""},
+		{map[string]any{"taskId": 42}, ""},
+	}
+	for i, c := range cases {
+		if got := extractTaskID(c.md); got != c.want {
+			t.Fatalf("case %d: extractTaskID = %q, want %q", i, got, c.want)
+		}
 	}
 }

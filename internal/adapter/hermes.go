@@ -366,7 +366,18 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 // ── Task flow: Runs API (long-running, polled) ────────────────────
 
 func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, req DeliverMessageRequest) (*DeliverMessageResult, error) {
-	taskKey := "task:" + a.taskSessionKey(req)
+	// Runs execution needs a stable task identity for idempotency, the
+	// single-task mutex and session continuation. Without one every message
+	// would share the bare "task:" key and pollute a common session — refuse
+	// instead (the handler turns this into an .error reply to the platform).
+	// Note: the task.* responses path deliberately keeps its current behavior
+	// (empty id → fresh session, no error); tasks must stay isolated per task,
+	// so falling back to the sender id would be worse than no continuation.
+	taskID := a.taskSessionKey(req)
+	if strings.TrimSpace(taskID) == "" {
+		return nil, fmt.Errorf("hermes runs execution requires a valid taskId or sessionKey")
+	}
+	taskKey := "task:" + taskID
 	prevID := a.loadMappedSessionID(taskKey)
 
 	// NOTE(§7.1): continuation field name for /v1/runs is to be verified
@@ -714,14 +725,21 @@ func (a *HermesAdapter) rootURL() string {
 // ── Task ID extraction ─────────────────────────────────────────────
 
 // extractTaskID returns the taskId from message metadata, if present.
-// This is used as a stable fallback key when the message SessionKey
-// changes across rounds (e.g. todo.assigned → task.context.result).
+// Accepts both "taskId" and "task_id" payload spellings. This is used as a
+// stable fallback key when the message SessionKey changes across rounds
+// (e.g. todo.assigned → task.context.result).
 func extractTaskID(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
-	id, _ := metadata["taskId"].(string)
-	return strings.TrimSpace(id)
+	for _, key := range []string{"taskId", "task_id"} {
+		if id, ok := metadata[key].(string); ok {
+			if id = strings.TrimSpace(id); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // ── Session mapping (reuses store.SessionState like Codex adapter) ──
