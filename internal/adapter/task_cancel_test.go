@@ -36,7 +36,7 @@ func newCancelTestAdapter(t *testing.T, fg *fakeGateway) *HermesAdapter {
 // → poll. It gives the cancel/steer tests a realistic in-flight execution.
 func t1dot3RunFn(a *HermesAdapter, input string) RunFn {
 	return func(ctx context.Context, prevSessionID string) (string, string, string, error) {
-		created, _, err := a.createRunWithRetry(ctx, runCreateRequest{Input: input, Model: a.model})
+		created, _, err := a.createRunWithRetry(ctx, runCreateRequest{Input: input, Model: a.model}, "")
 		if err != nil {
 			return "", "", "", err
 		}

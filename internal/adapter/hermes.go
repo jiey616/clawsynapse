@@ -334,13 +334,13 @@ func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted s
 	a.logGateway("responses-task", "task:"+sid, sid != "")
 
 	var resp responsesResponse
-	status, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp)
+	status, err := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp, idemKeyOf(req.MessageID, ""))
 	// Unknown/lost task conversation: drop the conversation name and retry
 	// once on a fresh session (mirrors the chat path's unknown-session retry).
 	if err != nil && sid != "" && isGatewayUnknownSessionError(status, err.Error()) {
 		a.logGateway("responses-task-retry", "task:"+sid, false)
 		body.Conversation = ""
-		status, err = a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp)
+		status, err = a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp, idemKeyOf(req.MessageID, "-r1"))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("hermes gateway responses(task): %w", err)
@@ -366,7 +366,7 @@ func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted s
 			a.logGateway("responses-task-retry-fresh", "task:"+sid, false)
 			body.Conversation = ""
 			var resp2 responsesResponse
-			if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp2); err2 == nil {
+			if _, err2 := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp2, idemKeyOf(req.MessageID, "-r2")); err2 == nil {
 				reply2 := extractResponseText(resp2)
 				if strings.TrimSpace(reply2) != "" && !isModelProviderError(reply2) {
 					return &DeliverMessageResult{
@@ -408,12 +408,12 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 	a.logGateway("responses", chatKey, prevID != "")
 
 	var resp responsesResponse
-	status, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp)
+	status, err := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp, idemKeyOf(req.MessageID, ""))
 	if err != nil && prevID != "" && isGatewayUnknownSessionError(status, err.Error()) {
 		a.deleteMappedSession(chatKey)
 		body.PreviousResponseID = ""
 		a.logGateway("responses-retry", chatKey, false)
-		status, err = a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp)
+		status, err = a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp, idemKeyOf(req.MessageID, "-r1"))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("hermes gateway responses: %w", err)
@@ -445,7 +445,7 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 		body.PreviousResponseID = ""
 		a.logGateway("responses-retry-fresh", chatKey, false)
 		var resp2 responsesResponse
-		if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp2); err2 == nil {
+		if _, err2 := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp2, idemKeyOf(req.MessageID, "-r2")); err2 == nil {
 			reply2 := extractResponseText(resp2)
 			if strings.TrimSpace(reply2) != "" && !isModelProviderError(reply2) {
 				if resp2.ID != "" {
@@ -518,12 +518,13 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 
 	a.logGateway("runs-create", taskKey, prevID != "")
 
-	created, status, err := a.createRunWithRetry(ctx, body)
+	idemKey := idemKeyOf(req.MessageID, "")
+	created, status, err := a.createRunWithRetry(ctx, body, idemKey)
 	if err != nil && prevID != "" && isGatewayUnknownSessionError(status, err.Error()) {
 		a.deleteMappedSession(taskKey)
 		body.SessionID = ""
 		a.logGateway("runs-create-retry", taskKey, false)
-		created, status, err = a.createRunWithRetry(ctx, body)
+		created, status, err = a.createRunWithRetry(ctx, body, idemKeyOf(req.MessageID, "-r1"))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("hermes gateway runs create: %w", err)
@@ -571,7 +572,7 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 			a.logGateway("runs-retry-fresh", taskKey, false)
 			fresh := runCreateRequest{Input: formatted, Model: a.model}
 			var created2 runCreateResponse
-			if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created2); err2 == nil {
+			if _, err2 := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created2, idemKeyOf(req.MessageID, "-r2")); err2 == nil {
 				runID2 := strings.TrimSpace(created2.RunID)
 				if runID2 == "" {
 					runID2 = strings.TrimSpace(created2.ID)
@@ -620,7 +621,7 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 	if strings.TrimSpace(reply) == "" || strings.TrimSpace(reply) == "(empty)" {
 		// Agent produced no usable text (hermes "(empty)" sentinel or blank).
 		// Retry once on a fresh run — the model often recovers on a retry.
-		if retried, ok := a.retryFreshRun(ctx, taskKey, formatted, runID); ok {
+		if retried, ok := a.retryFreshRun(ctx, taskKey, formatted, runID, idemKeyOf(req.MessageID, "-r3")); ok {
 			return retried, nil
 		}
 		return &DeliverMessageResult{
@@ -766,10 +767,12 @@ func isGatewayRateLimited(err error) bool {
 // 429 rejections with the configured backoff sequence (default 1s/2s/4s).
 // It returns the HTTP status of the last attempt so callers can apply their
 // own error classification (e.g. unknown-session retry).
-func (a *HermesAdapter) createRunWithRetry(ctx context.Context, body runCreateRequest) (*runCreateResponse, int, error) {
+func (a *HermesAdapter) createRunWithRetry(ctx context.Context, body runCreateRequest, idemKey string) (*runCreateResponse, int, error) {
 	var created runCreateResponse
 	for attempt := 0; ; attempt++ {
-		status, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", body, &created)
+		// 429 backoff retries reuse the same Idempotency-Key: a 429 means
+		// the gateway rejected the request without creating anything.
+		status, err := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/runs", body, &created, idemKey)
 		if err == nil || !isGatewayRateLimited(err) {
 			return &created, status, err
 		}
@@ -790,13 +793,13 @@ func (a *HermesAdapter) createRunWithRetry(ctx context.Context, body runCreateRe
 // hermes "(empty)" sentinel or a blank output. It returns (nil, false) when
 // the retry cannot produce a usable result, so the caller falls back to its
 // own error path.
-func (a *HermesAdapter) retryFreshRun(ctx context.Context, taskKey, formatted, prevRunID string) (*DeliverMessageResult, bool) {
+func (a *HermesAdapter) retryFreshRun(ctx context.Context, taskKey, formatted, prevRunID, idemKey string) (*DeliverMessageResult, bool) {
 	a.deleteMappedSession(taskKey)
 	a.logGateway("runs-retry-fresh", taskKey, false)
 
 	fresh := runCreateRequest{Input: formatted, Model: a.model}
 	var created runCreateResponse
-	if _, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created); err != nil {
+	if _, err := a.callJSONIdempotent(ctx, http.MethodPost, a.baseURL+"/runs", fresh, &created, idemKey); err != nil {
 		return nil, false
 	}
 	runID := strings.TrimSpace(created.RunID)
@@ -844,6 +847,12 @@ func (a *HermesAdapter) retryFreshRun(ctx context.Context, taskKey, formatted, p
 // callJSON performs a JSON request against the gateway. It returns the HTTP
 // status code and an error (which embeds the response body on non-2xx).
 func (a *HermesAdapter) callJSON(ctx context.Context, method, url string, reqBody any, out any) (int, error) {
+	return a.callJSONWithHeaders(ctx, method, url, reqBody, out, nil)
+}
+
+// callJSONWithHeaders is callJSON with extra request headers (used for the
+// gateway Idempotency-Key, T1.4).
+func (a *HermesAdapter) callJSONWithHeaders(ctx context.Context, method, url string, reqBody any, out any, headers map[string]string) (int, error) {
 	var bodyReader io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -858,6 +867,9 @@ func (a *HermesAdapter) callJSON(ctx context.Context, method, url string, reqBod
 		return 0, fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		httpReq.Header.Set(k, v)
+	}
 	if a.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
 	}
@@ -881,6 +893,34 @@ func (a *HermesAdapter) callJSON(ctx context.Context, method, url string, reqBod
 		}
 	}
 	return resp.StatusCode, nil
+}
+
+// idemKeyOf builds an Idempotency-Key from the upstream message id. Empty
+// messageID → "" (no header; the gateway then behaves as before).
+// suffix distinguishes retry attempts within one HandleMessage ("-r1", ...).
+func idemKeyOf(messageID, suffix string) string {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return ""
+	}
+	return messageID + suffix
+}
+
+// callJSONIdempotent performs a JSON request carrying
+// `Idempotency-Key: <idemKey>`. A 409 (same key, different payload — e.g.
+// the retry body changed) degrades to one retry WITHOUT the header, matching
+// the pre-T1.4 behavior. Empty idemKey sends no header at all.
+func (a *HermesAdapter) callJSONIdempotent(ctx context.Context, method, url string, reqBody any, out any, idemKey string) (int, error) {
+	if idemKey == "" {
+		return a.callJSON(ctx, method, url, reqBody, out)
+	}
+	status, err := a.callJSONWithHeaders(ctx, method, url, reqBody, out, map[string]string{"Idempotency-Key": idemKey})
+	if err != nil && status == http.StatusConflict {
+		// Same key already registered with a different payload: drop the
+		// header and retry once so the delivery still lands.
+		return a.callJSON(ctx, method, url, reqBody, out)
+	}
+	return status, err
 }
 
 func (a *HermesAdapter) rootURL() string {

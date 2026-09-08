@@ -43,6 +43,12 @@ type fakeGateway struct {
 	runStatusSeq map[string][]string // per-run GET status sequences (default legacy ["running","completed"])
 	stopCalls   []string            // run ids passed to POST /v1/runs/{id}/stop
 	steerCalls  []string            // run ids passed to POST /v1/runs/{id}/steer
+
+	// T1.4 idempotency support
+	runsIdem      []string // Idempotency-Key received on each /v1/runs POST ("" = absent)
+	responsesIdem []string // Idempotency-Key received on each /v1/responses POST ("" = absent)
+	conflictRuns  bool     // first /v1/runs POST carrying a key answers 409
+	conflictDone  bool
 }
 
 func (fg *fakeGateway) handler() http.Handler {
@@ -63,6 +69,7 @@ func (fg *fakeGateway) handler() http.Handler {
 		fg.mu.Lock()
 		fg.responsesPrev = append(fg.responsesPrev, req.PreviousResponseID)
 		fg.responsesConversation = append(fg.responsesConversation, req.Conversation)
+		fg.responsesIdem = append(fg.responsesIdem, r.Header.Get("Idempotency-Key"))
 		id := fmt.Sprintf("resp-%d", len(fg.responsesPrev))
 		fg.mu.Unlock()
 
@@ -102,7 +109,25 @@ func (fg *fakeGateway) handler() http.Handler {
 		fg.mu.Lock()
 		fg.runsSessionID = append(fg.runsSessionID, req.SessionID)
 		fg.runsModel = append(fg.runsModel, req.Model)
+		fg.runsIdem = append(fg.runsIdem, r.Header.Get("Idempotency-Key"))
 		fg.mu.Unlock()
+
+		// T1.4: same key, different payload → 409 once, so the adapter can
+		// prove its degrade-to-headerless retry.
+		if fg.conflictRuns {
+			fg.mu.Lock()
+			hadKey := r.Header.Get("Idempotency-Key") != ""
+			fire := hadKey && !fg.conflictDone
+			if fire {
+				fg.conflictDone = true
+			}
+			fg.mu.Unlock()
+			if fire {
+				w.WriteHeader(409)
+				_, _ = w.Write([]byte(`{"error":"idempotency key conflict"}`))
+				return
+			}
+		}
 
 		if fg.unknownRuns && !fg.urRunsDone && req.SessionID != "" {
 			fg.urRunsDone = true
@@ -186,6 +211,18 @@ func (fg *fakeGateway) recordedSteerCalls() []string {
 	fg.mu.Lock()
 	defer fg.mu.Unlock()
 	return append([]string(nil), fg.steerCalls...)
+}
+
+func (fg *fakeGateway) recordedRunsIdem() []string {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	return append([]string(nil), fg.runsIdem...)
+}
+
+func (fg *fakeGateway) recordedResponsesIdem() []string {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	return append([]string(nil), fg.responsesIdem...)
 }
 
 func newTestAdapter(t *testing.T, fg *fakeGateway) *HermesAdapter {

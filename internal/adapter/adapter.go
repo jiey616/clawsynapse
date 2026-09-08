@@ -36,6 +36,10 @@ type DeliverMessageRequest struct {
 	Message    string
 	From       string
 	Metadata   map[string]any
+	// MessageID is the upstream protocol message id (MessageEnvelope.ID).
+	// It seeds the gateway Idempotency-Key so a gateway-restart-window
+	// redelivery cannot create a duplicate run/response.
+	MessageID string
 }
 
 type DeliverMessageResult struct {

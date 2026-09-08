@@ -136,6 +136,7 @@ func (h *AdapterMessageHandler) HandleMessage(msg IncomingMessage) (HandlerResul
 		Message:    msg.Message,
 		From:       msg.From,
 		Metadata:   msg.Metadata,
+		MessageID:  msg.MessageID,
 	})
 	if err != nil {
 		return HandlerResult{}, err
