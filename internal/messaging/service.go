@@ -120,10 +120,19 @@ func (s *Service) Start() error {
 	if s.bus == nil {
 		return errors.New("nats client is required")
 	}
-	if _, err := s.bus.Subscribe(inboxSubject, s.handleInbox); err != nil {
+	// T2.5: durable consumer — messages published while this node is
+	// disconnected (or whose delivery errored) are redelivered on
+	// reconnect. JetStream unavailable → falls back to core subscription
+	// inside the bus (legacy fire-and-forget) with a warning.
+	sub, err := s.bus.SubscribeDurable(inboxSubject, "inbox-"+s.nodeID, s.handleInbox)
+	if err != nil {
 		return err
 	}
-	s.log.Debug("subscribed to inbox", logging.Event("message.subscribe"), logging.Subject(inboxSubject))
+	s.log.Info("subscribed to inbox",
+		logging.Event("message.subscribe"),
+		logging.Subject(inboxSubject),
+		slog.Bool("durable", sub.Durable()),
+	)
 	return nil
 }
 
@@ -199,15 +208,20 @@ func (s *Service) RecentMessages(limit int) []protocol.MessageEnvelope {
 	return out
 }
 
-func (s *Service) handleInbox(subject string, data []byte) {
+// handleInbox processes one raw inbox payload. Its error drives the
+// durable inbox (T2.5): nil → Ack, non-nil → Nak (redelivered up to
+// MaxDeliver). Only transient losses (session queue full) return an
+// error; permanent failures (decode, untrusted sender, duplicate) ack —
+// redelivery could not fix them.
+func (s *Service) handleInbox(subject string, data []byte) error {
 	var env protocol.MessageEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		s.log.Warn("decode inbox message failed", logging.Subject(subject), logging.Error(err))
-		return
+		return nil
 	}
 
 	if env.To != "" && env.To != s.nodeID {
-		return
+		return nil
 	}
 
 	if s.trustMode == "open" {
@@ -220,32 +234,27 @@ func (s *Service) handleInbox(subject string, data []byte) {
 			logging.ContentLength(env.Content),
 			logging.ContentPreview(env.Content, contentPreviewLimit),
 		)
-		if s.dedupInbox(env) {
-			return
-		}
-		s.acceptInbox(env)
-		s.maybeDeliver(env)
-		return
+		return s.acceptAndDispatch(env)
 	}
 
 	peer, ok := s.peers.Get(env.From)
 	if !ok {
 		s.log.Warn("message sender not found", logging.From(env.From))
-		return
+		return nil
 	}
 	if peer.TrustStatus != types.TrustTrusted {
 		s.log.Warn("reject message from untrusted peer", logging.From(env.From), logging.TrustStatus(peer.TrustStatus))
-		return
+		return nil
 	}
 
 	pub, err := s.peerPublicKey(env.From)
 	if err != nil {
 		s.log.Warn("sender public key unavailable", logging.From(env.From), logging.Error(err))
-		return
+		return nil
 	}
 	if !identity.Verify(pub, []byte(s.signatureInput(env)), env.Sig) {
 		s.log.Warn("invalid message signature", logging.From(env.From), logging.MessageID(env.ID))
-		return
+		return nil
 	}
 
 	s.log.Info("message received",
@@ -257,11 +266,27 @@ func (s *Service) handleInbox(subject string, data []byte) {
 		logging.ContentLength(env.Content),
 		logging.ContentPreview(env.Content, contentPreviewLimit),
 	)
+	return s.acceptAndDispatch(env)
+}
+
+// acceptAndDispatch dedups, records and enqueues the envelope. A failed
+// enqueue (queue full) forgets the dedup key before erroring so the
+// Nak-driven redelivery is not mistaken for a duplicate (T2.5).
+func (s *Service) acceptAndDispatch(env protocol.MessageEnvelope) error {
 	if s.dedupInbox(env) {
-		return
+		return nil
 	}
 	s.acceptInbox(env)
-	s.maybeDeliver(env)
+	if s.maybeDeliver(env) {
+		return nil
+	}
+	s.mu.Lock()
+	g := s.replay
+	s.mu.Unlock()
+	if g != nil {
+		g.Forget("msg:" + env.ID)
+	}
+	return fmt.Errorf("inbox delivery for %s dropped: session queue full", env.ID)
 }
 
 func (s *Service) acceptInbox(env protocol.MessageEnvelope) {
@@ -279,7 +304,11 @@ func (s *Service) acceptInbox(env protocol.MessageEnvelope) {
 	}
 }
 
-func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
+// maybeDeliver routes env to the agent handler (or the transfer handler).
+// It reports whether the envelope was consumed or intentionally dropped
+// (true = safe to ack) versus lost to backpressure (false = the durable
+// inbox should Nak and redeliver, T2.5).
+func (s *Service) maybeDeliver(env protocol.MessageEnvelope) bool {
 	if env.Type == "transfer.available" {
 		s.mu.Lock()
 		th := s.transferHandler
@@ -287,18 +316,18 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 		if th != nil {
 			go th(env)
 		}
-		return
+		return true
 	}
 
 	if !isDeliverableType(env.Type, s.deliverablePrefixes) {
-		return
+		return true // not for the agent: intentional drop
 	}
 	handler := s.messageHandler()
 	if handler == nil {
-		return
+		return true // no consumer configured: redelivery cannot help
 	}
 
-	s.dispatchSession(env, func() {
+	return s.dispatchSession(env, func() {
 		result, err := handler.HandleMessage(IncomingMessage{
 			MessageID:  env.ID,
 			Type:       env.Type,
@@ -335,16 +364,17 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 // dispatchSession routes a delivery through the per-sessionKey serial
 // queue (T2.1): same-key deliveries run in arrival order on one worker,
 // different keys stay concurrent. Without a dispatcher (legacy) it is a
-// plain fire-and-forget goroutine.
-func (s *Service) dispatchSession(env protocol.MessageEnvelope, fn func()) {
+// plain fire-and-forget goroutine. Returns whether the delivery was
+// enqueued (false = queue full and the drop deadline passed).
+func (s *Service) dispatchSession(env protocol.MessageEnvelope, fn func()) bool {
 	s.mu.Lock()
 	d := s.dispatcher
 	s.mu.Unlock()
 	if d == nil {
 		go fn()
-		return
+		return true
 	}
-	d.Dispatch(sessionDispatchKey(env), fn)
+	return d.Dispatch(sessionDispatchKey(env), fn)
 }
 
 // EnableOutbox switches agent replies (replyToSender) to the reliable

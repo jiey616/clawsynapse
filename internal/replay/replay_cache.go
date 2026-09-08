@@ -79,6 +79,19 @@ func (r *ReplayGuard) CheckAndRemember(key string, ttl time.Duration) bool {
 	return r.persistLocked() == nil
 }
 
+// Forget drops a remembered key (e.g. an inbox id whose delivery could
+// not be enqueued and will be redelivered — the redelivery must not be
+// mistaken for a duplicate).
+func (r *ReplayGuard) Forget(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.entries[key]; !exists {
+		return
+	}
+	delete(r.entries, key)
+	_ = r.persistLocked()
+}
+
 func (r *ReplayGuard) gc(nowMs int64) {
 	for k, expireAt := range r.entries {
 		if expireAt < nowMs {

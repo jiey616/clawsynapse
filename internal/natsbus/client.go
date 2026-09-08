@@ -168,6 +168,100 @@ func (c *Client) Subscribe(subject string, handler func(subject string, data []b
 	})
 }
 
+// DurableSubscription is the result of SubscribeDurable. When JetStream is
+// unavailable the fallback core subscription is wrapped here so callers
+// can treat both modes uniformly; Unsubscribes only applies to the core
+// sub (JS consumers are managed server-side by their durable name).
+type DurableSubscription struct {
+	core *nats.Subscription
+	js   bool
+}
+
+// Durable reports whether the subscription is JetStream-backed.
+func (d *DurableSubscription) Durable() bool { return d != nil && d.js }
+
+// Unsubscribe removes a fallback core subscription; a no-op for JS mode.
+func (d *DurableSubscription) Unsubscribe() error {
+	if d == nil || d.core == nil {
+		return nil
+	}
+	return d.core.Unsubscribe()
+}
+
+// SubscribeDurable attaches handler to subject with at-least-once
+// semantics: the handler's returned error decides Ack vs Nak, and a
+// durable consumer (AckExplicit, AckWait 60s, MaxDeliver 5) redelivers
+// everything the server still holds — including messages published while
+// this client was disconnected.
+//
+// A stream covering "clawsynapse.>" is created on first use so core
+// publishes land in JetStream. If JetStream is unavailable (server
+// without JS, missing permissions, stream creation failure) the call
+// degrades to a plain core subscription with a warning — fire-and-forget
+// semantics, exactly the pre-T2.5 behavior.
+func (c *Client) SubscribeDurable(subject, durable string, handler func(subject string, data []byte) error) (*DurableSubscription, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.nc == nil {
+		return nil, fmt.Errorf("nats client is closed")
+	}
+
+	if c.js != nil {
+		if err := c.subscribeJetStream(subject, durable, handler); err == nil {
+			return &DurableSubscription{js: true}, nil
+		} else {
+			slog.Warn("jetstream durable subscribe failed; falling back to core subscription",
+				slog.String("subject", subject),
+				slog.String("durable", durable),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
+	sub, err := c.nc.Subscribe(subject, func(msg *nats.Msg) {
+		_ = handler(msg.Subject, msg.Data) // core NATS has no acks
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &DurableSubscription{core: sub}, nil
+}
+
+// subscribeJetStream creates the CLAWSYNAPSE stream (if missing) and a
+// durable push consumer, then wires handler with Ack/Nak. Requires the
+// caller to hold c.mu (read).
+func (c *Client) subscribeJetStream(subject, durable string, handler func(subject string, data []byte) error) error {
+	const streamName = "CLAWSYNAPSE"
+	if _, err := c.js.StreamInfo(streamName); err != nil {
+		if _, err2 := c.js.AddStream(&nats.StreamConfig{
+			Name:      streamName,
+			Subjects:  []string{"clawsynapse.>"},
+			Retention: nats.LimitsPolicy,
+			Storage:   nats.FileStorage,
+			MaxAge:    24 * time.Hour,
+		}); err2 != nil {
+			return fmt.Errorf("create stream %s: %w", streamName, err2)
+		}
+	}
+
+	if _, err := c.js.Subscribe(subject, func(msg *nats.Msg) {
+		if err := handler(msg.Subject, msg.Data); err != nil {
+			_ = msg.Nak()
+			return
+		}
+		_ = msg.Ack()
+	},
+		nats.Durable(durable),
+		nats.ManualAck(),
+		nats.AckWait(60*time.Second),
+		nats.MaxDeliver(5),
+		nats.DeliverAll(),
+	); err != nil {
+		return fmt.Errorf("durable consumer %s: %w", durable, err)
+	}
+	return nil
+}
+
 func (c *Client) FlushTimeout(timeout time.Duration) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

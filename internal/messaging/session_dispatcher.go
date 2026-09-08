@@ -73,8 +73,9 @@ func sessionDispatchKey(env protocol.MessageEnvelope) string {
 // Dispatch schedules fn on the key's FIFO queue, creating the queue and
 // its worker on first use. When the queue is full it waits synchronously
 // for space up to enqueueTimeout, then drops the delivery with a warning
-// (backpressure surface, not silent growth).
-func (d *sessionDispatcher) Dispatch(key string, fn func()) {
+// (backpressure surface, not silent growth). Returns whether the delivery
+// was enqueued; false lets the durable inbox (T2.5) Nak and redeliver.
+func (d *sessionDispatcher) Dispatch(key string, fn func()) bool {
 	deadline := time.Now().Add(d.enqueueTimeout)
 	for {
 		d.mu.Lock()
@@ -91,12 +92,12 @@ func (d *sessionDispatcher) Dispatch(key string, fn func()) {
 			default: // worker already signalled
 			}
 			d.mu.Unlock()
-			return
+			return true
 		}
 		d.mu.Unlock()
 		if time.Now().After(deadline) {
 			d.log.Warn("session queue full; dropping delivery", "sessionKey", key)
-			return
+			return false
 		}
 		time.Sleep(enqueueRetryInterval)
 	}
