@@ -57,6 +57,10 @@ type AdapterMessageHandler struct {
 	// 60m — deliberately much longer than `timeout` so long runs are not
 	// killed by the generic 10m adapter timeout (T1.3 timeout split).
 	taskRunTimeout time.Duration
+	// rootCtx parents every per-message delivery ctx. Nil = Background.
+	// App wires a cancelable root (T2.6) so shutdown can interrupt
+	// in-flight gateway runs after the drain grace expires.
+	rootCtx context.Context
 }
 
 // HandlerOption customizes an AdapterMessageHandler at construction time.
@@ -75,6 +79,12 @@ func WithFeedbackDelivery() HandlerOption {
 // (default 60m).
 func WithTaskRunTimeout(d time.Duration) HandlerOption {
 	return func(h *AdapterMessageHandler) { h.taskRunTimeout = d }
+}
+
+// WithRootContext parents every delivery context (T2.6 graceful exit):
+// cancelling the root aborts all in-flight adapter calls.
+func WithRootContext(ctx context.Context) HandlerOption {
+	return func(h *AdapterMessageHandler) { h.rootCtx = ctx }
 }
 
 func NewAdapterMessageHandler(agentAdapter adapter.AgentAdapter, timeout time.Duration, opts ...HandlerOption) *AdapterMessageHandler {
@@ -126,7 +136,11 @@ func (h *AdapterMessageHandler) HandleMessage(msg IncomingMessage) (HandlerResul
 		deliveryTimeout = h.taskRunTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), deliveryTimeout)
+	root := h.rootCtx
+	if root == nil {
+		root = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(root, deliveryTimeout)
 	defer cancel()
 
 	result, err := h.adapter.DeliverMessage(ctx, adapter.DeliverMessageRequest{

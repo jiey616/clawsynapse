@@ -43,6 +43,9 @@ type App struct {
 	// agentAdapter is kept for the exit hook: adapters with batched
 	// session persistence (T2.3) flush on shutdown via Close().
 	agentAdapter adapter.AgentAdapter
+	// adapterCancel aborts in-flight adapter calls after the drain grace
+	// expires (T2.6 graceful exit).
+	adapterCancel context.CancelFunc
 }
 
 func New(cfg config.Config, version string) (*App, error) {
@@ -141,6 +144,10 @@ func New(cfg config.Config, version string) (*App, error) {
 	if taskCfg := taskConfigFrom(cfg.Task); taskCfg.RunTimeout > 0 {
 		handlerOpts = append(handlerOpts, messaging.WithTaskRunTimeout(taskCfg.RunTimeout))
 	}
+	// T2.6: a cancelable root context lets shutdown interrupt in-flight
+	// adapter calls once the drain grace expires.
+	adapterRootCtx, adapterCancel := context.WithCancel(context.Background())
+	handlerOpts = append(handlerOpts, messaging.WithRootContext(adapterRootCtx))
 	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, agentAdapterTimeout, handlerOpts...)
 	messagingSvc.SetMessageHandler(adapterHandler)
 
@@ -204,6 +211,7 @@ func New(cfg config.Config, version string) (*App, error) {
 		peers:     peers,
 		identity:  id,
 		agentAdapter: agentAdapter,
+		adapterCancel: adapterCancel,
 	}, nil
 }
 
@@ -334,8 +342,17 @@ func (a *App) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		// T2.3: adapters with batched session persistence flush pending
-		// writes before the process goes down.
+		// T2.6 graceful exit: ① drain the messaging service (wait for
+		// in-flight handler executions up to the grace period; timed-out
+		// ones get an interruption .error reply), ② cancel the adapter
+		// root context so gateway runs actually stop, ③ flush batched
+		// adapter persistence, ④ close the bus, ⑤ shut the API down.
+		graceCtx, graceCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		a.messaging.Drain(graceCtx)
+		graceCancel()
+		if a.adapterCancel != nil {
+			a.adapterCancel()
+		}
 		if closer, ok := a.agentAdapter.(interface{ Close() }); ok {
 			closer.Close()
 		}

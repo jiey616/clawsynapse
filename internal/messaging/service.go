@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"clawsynapse/internal/discovery"
@@ -61,13 +63,24 @@ type Service struct {
 	// replay (T2.2) drops duplicate inbox envelopes by id; nil keeps the
 	// legacy at-most-once-by-luck behavior.
 	replay *replay.ReplayGuard
+
+	// draining (T2.6): once set, new inbox deliveries are Nak'd (the
+	// durable inbox redelivers them after restart) and dispatch is
+	// rejected. drainWG counts queued+running handler executions and
+	// pending remembers their envelopes so a drain timeout can answer
+	// them with an interruption error.
+	draining   atomic.Bool
+	drainWG    sync.WaitGroup
+	pendingMu  sync.Mutex
+	pending    map[string]protocol.MessageEnvelope
+	pendingSeq atomic.Int64 // key for envelopes without an id
 }
 
 func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string, deliverablePrefixes []string) *Service {
 	if len(deliverablePrefixes) == 0 {
 		deliverablePrefixes = []string{"chat", "task"}
 	}
-	return &Service{log: log, peers: peers, bus: bus, nodeID: nodeID, identity: id, trustMode: trustMode, deliverablePrefixes: deliverablePrefixes, inbox: []protocol.MessageEnvelope{}, dispatcher: newSessionDispatcher(log)}
+	return &Service{log: log, peers: peers, bus: bus, nodeID: nodeID, identity: id, trustMode: trustMode, deliverablePrefixes: deliverablePrefixes, inbox: []protocol.MessageEnvelope{}, dispatcher: newSessionDispatcher(log), pending: map[string]protocol.MessageEnvelope{}}
 }
 
 func (s *Service) SetMessageHandler(handler MessageHandler) {
@@ -213,7 +226,50 @@ func (s *Service) RecentMessages(limit int) []protocol.MessageEnvelope {
 // MaxDeliver). Only transient losses (session queue full) return an
 // error; permanent failures (decode, untrusted sender, duplicate) ack —
 // redelivery could not fix them.
+// Drain stops accepting new inbox deliveries and waits for the in-flight
+// handler executions until ctx expires (T2.6). On timeout the still
+// pending envelopes get an interruption error reply — the platform learns
+// the task did not finish — and the caller is expected to cancel the
+// adapter's root context right after so gateway runs actually stop.
+func (s *Service) Drain(ctx context.Context) {
+	s.draining.Store(true)
+	s.log.Info("messaging drain started")
+
+	done := make(chan struct{})
+	go func() {
+		s.drainWG.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		s.log.Info("messaging drain complete")
+		return
+	case <-ctx.Done():
+	}
+
+	s.pendingMu.Lock()
+	leftovers := make([]protocol.MessageEnvelope, 0, len(s.pending))
+	for _, env := range s.pending {
+		leftovers = append(leftovers, env)
+	}
+	s.pending = map[string]protocol.MessageEnvelope{}
+	s.pendingMu.Unlock()
+
+	for _, env := range leftovers {
+		s.replyToSender(env, "node shutting down, task interrupted", true)
+	}
+	s.log.Warn("messaging drain timed out; in-flight deliveries interrupted",
+		slog.Int("count", len(leftovers)),
+	)
+}
+
 func (s *Service) handleInbox(subject string, data []byte) error {
+	if s.draining.Load() {
+		// T2.6: shut-down in progress. Nak so the durable inbox
+		// redelivers this envelope after the node restarts.
+		return fmt.Errorf("node draining: message %s deferred", subject)
+	}
 	var env protocol.MessageEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		s.log.Warn("decode inbox message failed", logging.Subject(subject), logging.Error(err))
@@ -272,8 +328,7 @@ func (s *Service) handleInbox(subject string, data []byte) error {
 // acceptAndDispatch dedups, records and enqueues the envelope. A failed
 // enqueue (queue full) forgets the dedup key before erroring so the
 // Nak-driven redelivery is not mistaken for a duplicate (T2.5).
-func (s *Service) acceptAndDispatch(env protocol.MessageEnvelope) error {
-	if s.dedupInbox(env) {
+func (s *Service) acceptAndDispatch(env protocol.MessageEnvelope) error {	if s.dedupInbox(env) {
 		return nil
 	}
 	s.acceptInbox(env)
@@ -365,16 +420,51 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) bool {
 // queue (T2.1): same-key deliveries run in arrival order on one worker,
 // different keys stay concurrent. Without a dispatcher (legacy) it is a
 // plain fire-and-forget goroutine. Returns whether the delivery was
-// enqueued (false = queue full and the drop deadline passed).
+// enqueued (false = queue full and the drop deadline passed, or the
+// service is draining — T2.6).
+//
+// Every accepted delivery is registered in pending + drainWG until its
+// handler finishes, so Drain knows exactly what is in flight.
 func (s *Service) dispatchSession(env protocol.MessageEnvelope, fn func()) bool {
-	s.mu.Lock()
-	d := s.dispatcher
-	s.mu.Unlock()
-	if d == nil {
-		go fn()
-		return true
+	if s.draining.Load() {
+		return false // T2.6: no new work while draining
 	}
-	return d.Dispatch(sessionDispatchKey(env), fn)
+	key := env.ID
+	if key == "" {
+		key = fmt.Sprintf("anon-%d", s.pendingSeq.Add(1))
+	}
+	s.pendingMu.Lock()
+	s.pending[key] = env
+	s.pendingMu.Unlock()
+	s.drainWG.Add(1)
+
+	var d *sessionDispatcher
+	s.mu.Lock()
+	d = s.dispatcher
+	s.mu.Unlock()
+
+	clearPending := func() {
+		s.pendingMu.Lock()
+		delete(s.pending, key)
+		s.pendingMu.Unlock()
+		s.drainWG.Done()
+	}
+
+	var enqueued bool
+	wrapped := func() {
+		defer clearPending()
+		fn()
+	}
+	if d == nil {
+		go wrapped()
+		enqueued = true
+	} else {
+		enqueued = d.Dispatch(sessionDispatchKey(env), wrapped)
+	}
+	if !enqueued {
+		clearPending() // dropped by backpressure: not in flight anymore
+	}
+	return enqueued
 }
 
 // EnableOutbox switches agent replies (replyToSender) to the reliable
