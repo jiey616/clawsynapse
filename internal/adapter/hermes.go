@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -86,9 +87,10 @@ type HermesAdapter struct {
 	pollIntervalMax time.Duration
 	pollDeadline    time.Duration
 
-	// runSem gates concurrent runs deliveries (Phase 0 stopgap). It is held
-	// from before run creation until the run reaches a terminal state.
-	// Replaced by the TaskCoordinator in the lifecycle phase.
+	// runSem gates concurrent runs deliveries on the legacy path only
+	// (no TaskStore — tests). It is held from before run creation until
+	// the run reaches a terminal state. Production concurrency is
+	// coordinator-managed since T1.5.
 	runSem chan struct{}
 	// backoff429 are the retry delays for gateway-level 429 rejections.
 	backoff429 []time.Duration
@@ -495,25 +497,58 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 	if strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("hermes runs execution requires a valid taskId or sessionKey")
 	}
+
+	// T1.5: with a TaskCoordinator (production always wires a TaskStore)
+	// the whole lifecycle — per-task serialization, duplicate join, queue
+	// bounds and persistence — is delegated to ExecuteRun; the adapter
+	// only supplies the execution body.
+	if a.taskCoord != nil {
+		runFn := func(ctx context.Context, prevSessionID string) (string, string, string, error) {
+			res, err := a.runsDeliveryBody(ctx, taskID, formatted, req, prevSessionID)
+			if err != nil {
+				return "", "", "", err
+			}
+			if !res.Success {
+				// Soft failure (provider rejection after fresh-run retry,
+				// failed terminal status, empty output): surface as a run
+				// error so the coordinator persists a failed record and
+				// the handler emits the standard .error reply.
+				return res.RunID, res.SessionID, "", errors.New(res.Error)
+			}
+			return res.RunID, res.SessionID, res.Reply, nil
+		}
+		return a.taskCoord.ExecuteRun(ctx, taskID, req.MessageID, runFn)
+	}
+
+	// Legacy path (no TaskStore — tests only): keep the Phase-0 stopgap
+	// semaphore so uncoordinated tests stay bounded. Production
+	// concurrency is coordinator-managed.
+	select {
+	case a.runSem <- struct{}{}:
+		defer func() { <-a.runSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return a.runsDeliveryBody(ctx, taskID, formatted, req, "")
+}
+
+// runsDeliveryBody is the runs execution body shared by the coordinator
+// path (T1.5) and the legacy semaphore path: create → poll → fault
+// tolerance → result. prevSessionID is the TaskStore continuation hint
+// (coordinator path); when empty the adapter falls back to its own
+// session mapping.
+func (a *HermesAdapter) runsDeliveryBody(ctx context.Context, taskID, formatted string, req DeliverMessageRequest, prevSessionID string) (*DeliverMessageResult, error) {
 	taskKey := "task:" + taskID
 	prevID := a.loadMappedSessionID(taskKey)
+	if prevID == "" {
+		prevID = strings.TrimSpace(prevSessionID)
+	}
 
 	// NOTE(§7.1): continuation field name for /v1/runs is to be verified
 	// against the live gateway (session_id vs previous_response_id).
 	body := runCreateRequest{Input: formatted, Model: a.model}
 	if prevID != "" {
 		body.SessionID = prevID
-	}
-
-	// Gate concurrent runs deliveries before creating anything on the
-	// gateway. The slot is held until this delivery reaches a terminal state
-	// (including fresh-run retries), so gateway-side concurrency stays ≤
-	// MaxConcurrentRuns at all times.
-	select {
-	case a.runSem <- struct{}{}:
-		defer func() { <-a.runSem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	}
 
 	a.logGateway("runs-create", taskKey, prevID != "")
@@ -537,6 +572,10 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 	if runID == "" {
 		return nil, fmt.Errorf("hermes gateway runs create: missing run_id in response")
 	}
+
+	// T1.3/T1.5: publish the run id into the coordinator handle (no-op on
+	// the legacy path) so CancelActive can stop the run mid-flight.
+	PublishRunID(ctx, runID)
 
 	// Persist the continuation id returned at creation time so follow-up
 	// task messages can resume this run's session.
