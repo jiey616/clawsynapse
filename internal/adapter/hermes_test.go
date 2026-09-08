@@ -154,6 +154,42 @@ func TestIsRunsMessage(t *testing.T) {
 	}
 }
 
+// ── Run status machine ───────────────────────────────────────────
+
+// TestRunTerminalStatuses pins the terminal/failure classification of every
+// /v1/runs status observed on hermes v0.21.0 plus defensive extras.
+func TestRunTerminalStatuses(t *testing.T) {
+	cases := []struct {
+		status   string
+		terminal bool
+		failed   bool
+	}{
+		{"completed", true, false},
+		{"failed", true, true},
+		{"cancelled", true, true},  // gateway-observed spelling
+		{"canceled", true, true},   // US spelling, defensive
+		{"interrupted", true, true}, // /stop terminal state (was the "hangs 10m" bug)
+		{"stopped", true, true},
+		{"error", true, true},
+		{"queued", false, false},
+		{"started", false, false},
+		{"running", false, false},
+		{"stopping", false, false}, // transitioning, NOT terminal
+		{"", false, false},
+		{"unknown-future-status", false, false},
+		{"Interrupted", true, true}, // case-insensitive lookup
+		{" Completed", true, false},
+	}
+	for _, c := range cases {
+		if got := isTerminalRunStatus(c.status); got != c.terminal {
+			t.Errorf("isTerminalRunStatus(%q) = %v, want %v", c.status, got, c.terminal)
+		}
+		if got := runFailed(c.status); got != c.failed {
+			t.Errorf("runFailed(%q) = %v, want %v", c.status, got, c.failed)
+		}
+	}
+}
+
 // ── Dialogue: Responses API ──────────────────────────────────────
 
 func TestDeliverViaResponses_FirstTurn(t *testing.T) {

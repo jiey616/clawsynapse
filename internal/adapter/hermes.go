@@ -458,16 +458,22 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 
 // runTerminalStatuses are the /v1/runs statuses that mean the run is finished.
 //
-// Verified against a live gateway, a healthy run goes started → running →
-// completed. The failure statuses come from the official API docs; "stopped"
-// and "error" are accepted defensively but have never been observed, so any
-// status not listed here is treated as in-progress rather than terminal.
+// Verified against a live gateway (hermes v0.21.0): the full status set is
+// queued/started/running/stopping/completed/failed/cancelled/interrupted and
+// the terminal set is {completed, failed, cancelled, interrupted}. "stopped"
+// and "error" are accepted defensively but have never been observed; "canceled"
+// (US spelling) is accepted defensively alongside the observed "cancelled".
+// "stopping" is deliberately NOT terminal — the gateway is still transitioning.
+// Any status not listed here is treated as in-progress (with stuck-run and
+// deadline guards in pollRun).
 var runTerminalStatuses = map[string]bool{
-	"completed": true,
-	"failed":    true,
-	"cancelled": true,
-	"stopped":   true,
-	"error":     true,
+	"completed":   true,
+	"failed":      true,
+	"cancelled":   true,
+	"canceled":    true,
+	"interrupted": true,
+	"stopped":     true,
+	"error":       true,
 }
 
 // isTerminalRunStatus reports whether a /v1/runs status means the run is over.
