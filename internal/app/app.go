@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -115,6 +116,8 @@ func New(cfg config.Config, version string) (*App, error) {
 		return nil, fmt.Errorf("init trust service: %w", err)
 	}
 	messagingSvc := messaging.NewService(log.With(slog.String("component", "messaging")), peers, bus, nodeID, id, cfg.TrustMode, cfg.DeliverablePrefixes)
+	// T2.7: agent replies go through the durable outbox under the data dir.
+	messagingSvc.EnableOutbox(filepath.Join(cfg.DataDir, "outbox"))
 	agentAdapter, err := newAgentAdapter(cfg, nodeID, log, fs)
 	if err != nil {
 		return nil, fmt.Errorf("init agent adapter: %w", err)

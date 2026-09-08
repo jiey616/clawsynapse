@@ -51,6 +51,9 @@ type Service struct {
 	inbox               []protocol.MessageEnvelope
 	handler             MessageHandler
 	transferHandler     TransferHandler
+	// outbox (T2.7) makes agent replies reliable; nil keeps the legacy
+	// best-effort reply behavior.
+	outbox *Outbox
 }
 
 func NewService(log *slog.Logger, peers *discovery.Registry, bus *natsbus.Client, nodeID string, id *identity.Identity, trustMode string, deliverablePrefixes []string) *Service {
@@ -283,6 +286,30 @@ func (s *Service) maybeDeliver(env protocol.MessageEnvelope) {
 	}()
 }
 
+// EnableOutbox switches agent replies (replyToSender) to the reliable
+// outbox path: entries persist under dir before each publish attempt and
+// a background flusher redelivers failures with backoff. Safe to call
+// once; a second call is a no-op.
+func (s *Service) EnableOutbox(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.outbox != nil {
+		return
+	}
+	ob := NewOutbox(dir, s.log, func(req PublishRequest) error {
+		_, err := s.Publish(req)
+		return err
+	})
+	s.outbox = ob
+	ob.Start()
+}
+
+func (s *Service) getOutbox() *Outbox {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outbox
+}
+
 func (s *Service) replyToSender(orig protocol.MessageEnvelope, content string, isError bool) {
 	if orig.From == "" {
 		return
@@ -291,13 +318,43 @@ func (s *Service) replyToSender(orig protocol.MessageEnvelope, content string, i
 		return
 	}
 	replyType := replyTypeFor(orig.Type, isError)
-	_, err := s.Publish(PublishRequest{
+	req := PublishRequest{
 		TargetNode: orig.From,
 		Type:       replyType,
 		SessionKey: orig.SessionKey,
 		Message:    content,
-	})
-	if err != nil {
+	}
+
+	if ob := s.getOutbox(); ob != nil {
+		// T2.7 reliable return path: persist first, then attempt an
+		// immediate delivery; the flusher redelivers on failure. The
+		// attempt also advances retry state, so the first failure
+		// already counts toward the dead-letter budget.
+		entry, enqErr := ob.Enqueue(req)
+		if enqErr != nil {
+			// Persistence failed — fall back to best-effort publish so
+			// the reply is not lost purely because the disk hiccupped.
+			s.log.Error("outbox enqueue failed; reply is best-effort",
+				logging.Event("message.reply.failed"),
+				logging.To(orig.From),
+				logging.MessageID(orig.ID),
+				logging.Error(enqErr),
+			)
+			if err := s.publishToBus(req); err != nil {
+				s.log.Warn("send reply to sender failed",
+					logging.Event("message.reply.failed"),
+					logging.To(orig.From),
+					logging.MessageID(orig.ID),
+					logging.Error(err),
+				)
+			}
+			return
+		}
+		ob.attempt(*entry)
+		return
+	}
+
+	if err := s.publishToBus(req); err != nil {
 		s.log.Warn("send reply to sender failed",
 			logging.Event("message.reply.failed"),
 			logging.To(orig.From),
@@ -305,6 +362,11 @@ func (s *Service) replyToSender(orig protocol.MessageEnvelope, content string, i
 			logging.Error(err),
 		)
 	}
+}
+
+func (s *Service) publishToBus(req PublishRequest) error {
+	_, err := s.Publish(req)
+	return err
 }
 
 func replyTypeFor(msgType string, isError bool) string {
