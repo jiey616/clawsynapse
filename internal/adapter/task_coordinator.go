@@ -90,6 +90,62 @@ type taskRunHandle struct {
 	done chan struct{}
 	// final is the terminal record, written before done is closed.
 	final store.TaskRunRecord
+	// cancel aborts the run execution context (T1.3 CancelActive path).
+	// Calling it before runFn starts is a harmless no-op.
+	cancel context.CancelFunc
+	// runID is published by runFn as soon as the gateway run is created,
+	// so CancelActive can stop it mid-flight.
+	runID atomic.Value // string
+	// startedAtMs records when the claim was taken (queued phase start).
+	startedAtMs int64
+}
+
+func (h *taskRunHandle) setRunID(id string) {
+	if id == "" {
+		return
+	}
+	h.runID.Store(id)
+}
+
+func (h *taskRunHandle) getRunID() string {
+	if v := h.runID.Load(); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// lookup returns the in-flight handle for taskID, or nil.
+func (tc *TaskCoordinator) lookup(taskID string) *taskRunHandle {
+	taskID = normalizeTaskKey(taskID)
+	if taskID == "" {
+		return nil
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	return tc.inflight[taskID]
+}
+
+// normalizeTaskKey accepts both raw task ids and the "task:<id>" session
+// mapping key spelling.
+func normalizeTaskKey(key string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(key), "task:"))
+}
+
+// runIDPublisherKey carries the runID publish callback in the run ctx.
+type runIDPublisherKey struct{}
+
+// PublishRunID lets a RunFn publish the gateway run id as soon as it is
+// created (before polling), so CancelActive can stop the run mid-flight.
+// No-op outside of a coordinator-executed run.
+func PublishRunID(ctx context.Context, runID string) {
+	if ctx == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	if p, ok := ctx.Value(runIDPublisherKey{}).(func(string)); ok {
+		p(strings.TrimSpace(runID))
+	}
 }
 
 // NewTaskCoordinator builds a coordinator over the given TaskStore.
@@ -196,7 +252,11 @@ func (tc *TaskCoordinator) ExecuteRun(
 		tc.mu.Unlock()
 		return nil, fmt.Errorf("task store claim: %w", err)
 	}
-	handle := &taskRunHandle{done: make(chan struct{})}
+	// runCtx is the execution context: derived from the caller ctx and
+	// cancelled by CancelActive (T1.3) or on terminal write-back.
+	runCtx, cancel := context.WithCancel(ctx)
+	handle := &taskRunHandle{done: make(chan struct{}), cancel: cancel, startedAtMs: now}
+	runCtx = context.WithValue(runCtx, runIDPublisherKey{}, handle.setRunID)
 	tc.inflight[taskID] = handle
 	tc.mu.Unlock()
 
@@ -243,8 +303,8 @@ func (tc *TaskCoordinator) ExecuteRun(
 		return nil, fmt.Errorf("task store running write: %w", err)
 	}
 
-	// ── Execute outside every lock, under the caller ctx ─────────────
-	runID, sessionID, reply, runErr := runFn(ctx, prevSessionID)
+	// ── Execute outside every lock, under the run ctx ─────────────────
+	runID, sessionID, reply, runErr := runFn(runCtx, prevSessionID)
 
 	// ── Critical section B: terminal write-back ──────────────────────
 	terminal := running
@@ -281,6 +341,10 @@ func (tc *TaskCoordinator) finishRun(taskID string, handle *taskRunHandle, termi
 		tc.log.Warn("task terminal write failed", "taskId", taskID, "err", err)
 	}
 
+	if handle.cancel != nil {
+		handle.cancel() // release the runCtx resources; idempotent
+	}
+
 	tc.mu.Lock()
 	handle.final = terminal
 	if cur, ok := tc.inflight[taskID]; ok && cur == handle {
@@ -294,6 +358,9 @@ func (tc *TaskCoordinator) finishRun(taskID string, handle *taskRunHandle, termi
 // wakes duplicates with a failed pseudo-record and deletes the claim file
 // (only if it is still ours — a concurrent re-claim may have overwritten it).
 func (tc *TaskCoordinator) abandonClaim(taskID string, handle *taskRunHandle, claim store.TaskRunRecord) {
+	if handle.cancel != nil {
+		handle.cancel() // no-op if runFn never started
+	}
 	tc.mu.Lock()
 	handle.final = store.TaskRunRecord{
 		TaskID:     taskID,

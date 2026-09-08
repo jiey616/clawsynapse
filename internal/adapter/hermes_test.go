@@ -37,6 +37,12 @@ type fakeGateway struct {
 	// responsesReplies optionally scripts the OutputText returned by each
 	// /v1/responses call (popped in order; falls back to "hello").
 	responsesReplies []string
+
+	// T1.3 cancel/steer support
+	runsRunID   string              // run id returned by POST /v1/runs (default "run-1")
+	runStatusSeq map[string][]string // per-run GET status sequences (default legacy ["running","completed"])
+	stopCalls   []string            // run ids passed to POST /v1/runs/{id}/stop
+	steerCalls  []string            // run ids passed to POST /v1/runs/{id}/steer
 }
 
 func (fg *fakeGateway) handler() http.Handler {
@@ -106,32 +112,80 @@ func (fg *fakeGateway) handler() http.Handler {
 		}
 
 		_ = json.NewEncoder(w).Encode(runCreateResponse{
-			RunID:     "run-1",
+			RunID:     fg.runsRunIDOrDefault(),
 			SessionID: "sess-1",
 		})
 	})
 
 	mux.HandleFunc("/v1/runs/", func(w http.ResponseWriter, r *http.Request) {
-		seq := []string{"running", "completed"}
+		rest := strings.TrimPrefix(r.URL.Path, "/v1/runs/")
+		switch {
+		case strings.HasSuffix(rest, "/stop"):
+			id := strings.TrimSuffix(rest, "/stop")
+			fg.mu.Lock()
+			fg.stopCalls = append(fg.stopCalls, id)
+			fg.mu.Unlock()
+			w.WriteHeader(200)
+			return
+		case strings.HasSuffix(rest, "/steer"):
+			id := strings.TrimSuffix(rest, "/steer")
+			fg.mu.Lock()
+			fg.steerCalls = append(fg.steerCalls, id)
+			fg.mu.Unlock()
+			w.WriteHeader(200)
+			return
+		}
+
+		runID := rest
 		fg.mu.Lock()
 		if fg.runStatusIdx == nil {
 			fg.runStatusIdx = map[string]int{}
 		}
-		i := fg.runStatusIdx["run-1"]
-		fg.runStatusIdx["run-1"]++
+		i := fg.runStatusIdx[runID]
+		fg.runStatusIdx[runID]++
+		seq := fg.runStatusSeq[runID]
 		fg.mu.Unlock()
+
 		st := "completed"
-		if i < len(seq) {
-			st = seq[i]
+		if len(seq) > 0 {
+			if i < len(seq) {
+				st = seq[i]
+			} else {
+				st = seq[len(seq)-1]
+			}
+		} else if runID == "run-1" {
+			// legacy default: first poll running, then completed
+			if i < 1 {
+				st = "running"
+			}
 		}
 		_ = json.NewEncoder(w).Encode(runStatusResponse{
-			RunID:  "run-1",
+			RunID:  runID,
 			Status: st,
 			Output: "task done",
 		})
 	})
 
 	return mux
+}
+
+func (fg *fakeGateway) runsRunIDOrDefault() string {
+	if fg.runsRunID != "" {
+		return fg.runsRunID
+	}
+	return "run-1"
+}
+
+func (fg *fakeGateway) recordedStopCalls() []string {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	return append([]string(nil), fg.stopCalls...)
+}
+
+func (fg *fakeGateway) recordedSteerCalls() []string {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	return append([]string(nil), fg.steerCalls...)
 }
 
 func newTestAdapter(t *testing.T, fg *fakeGateway) *HermesAdapter {

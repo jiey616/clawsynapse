@@ -127,6 +127,11 @@ func New(cfg config.Config, version string) (*App, error) {
 	if cfg.AgentAdapter == "webhook" {
 		handlerOpts = append(handlerOpts, messaging.WithFeedbackDelivery())
 	}
+	// todo.* runs get their own (longer) timeout from the task config so a
+	// 60m run is not killed by the 10m generic adapter timeout (T1.3).
+	if taskCfg := taskConfigFrom(cfg.Task); taskCfg.RunTimeout > 0 {
+		handlerOpts = append(handlerOpts, messaging.WithTaskRunTimeout(taskCfg.RunTimeout))
+	}
 	adapterHandler := messaging.NewAdapterMessageHandler(agentAdapter, agentAdapterTimeout, handlerOpts...)
 	messagingSvc.SetMessageHandler(adapterHandler)
 

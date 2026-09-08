@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -195,6 +196,68 @@ func (a *HermesAdapter) GetStatus(ctx context.Context) (*AgentStatus, error) {
 	}
 	defer resp.Body.Close()
 	return &AgentStatus{Healthy: resp.StatusCode >= 200 && resp.StatusCode < 300}, nil
+}
+
+// ── RunCanceller (T1.3): cancel / steer in-flight task runs ──────────
+
+// stopRun asks the gateway to stop a run. 404/409 are tolerated (the run
+// may have already terminated); other errors are logged, not propagated —
+// the local ctx cancel is the authoritative abort.
+func (a *HermesAdapter) stopRun(ctx context.Context, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return nil
+	}
+	_, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs/"+url.PathEscape(strings.TrimSpace(runID))+"/stop", nil, nil)
+	if err != nil {
+		a.logGateway("runs-stop-failed", runID, false)
+	}
+	return err
+}
+
+// CancelActive implements RunCanceller. Looks up the in-flight handle for
+// taskKey: with a published runID → POST /runs/{id}/stop (5s budget) then
+// cancel the local run ctx; queued without a runID → cancel only; nothing
+// in flight → nil (idempotent).
+func (a *HermesAdapter) CancelActive(ctx context.Context, taskKey string) error {
+	if a.taskCoord == nil {
+		return nil
+	}
+	h := a.taskCoord.lookup(taskKey)
+	if h == nil {
+		return nil
+	}
+	if runID := h.getRunID(); runID != "" {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = a.stopRun(stopCtx, runID)
+	}
+	h.cancel()
+	return nil
+}
+
+// SteerActive implements RunCanceller: inject text into the in-flight run.
+func (a *HermesAdapter) SteerActive(ctx context.Context, taskKey string, input string) error {
+	if a.taskCoord == nil {
+		return ErrNoActiveRun
+	}
+	h := a.taskCoord.lookup(taskKey)
+	if h == nil || h.getRunID() == "" {
+		return ErrNoActiveRun
+	}
+	body := map[string]string{"input": input}
+	_, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/runs/"+url.PathEscape(h.getRunID())+"/steer", body, nil)
+	return err
+}
+
+// ActiveRunID implements RunCanceller: current in-flight runID for taskKey.
+func (a *HermesAdapter) ActiveRunID(taskKey string) string {
+	if a.taskCoord == nil {
+		return ""
+	}
+	if h := a.taskCoord.lookup(taskKey); h != nil {
+		return h.getRunID()
+	}
+	return ""
 }
 
 // ── Routing helpers ───────────────────────────────────────────────
@@ -482,6 +545,14 @@ func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, re
 
 	final, err := a.pollRun(ctx, runID)
 	if err != nil {
+		// Caller ctx cancelled/expired (or the adapter itself cancelled the
+		// run): make sure the gateway-side run is stopped too, otherwise it
+		// keeps burning tokens with nobody polling it (T1.3).
+		if runCtxErr := ctx.Err(); runCtxErr != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stopCancel()
+			_ = a.stopRun(stopCtx, runID)
+		}
 		return nil, fmt.Errorf("hermes gateway runs poll: %w", err)
 	}
 

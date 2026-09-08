@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -52,6 +53,10 @@ type AdapterMessageHandler struct {
 	adapter        adapter.AgentAdapter
 	timeout        time.Duration
 	acceptFeedback bool
+	// taskRunTimeout bounds todo.* deliveries (queue + run). Defaults to
+	// 60m — deliberately much longer than `timeout` so long runs are not
+	// killed by the generic 10m adapter timeout (T1.3 timeout split).
+	taskRunTimeout time.Duration
 }
 
 // HandlerOption customizes an AdapterMessageHandler at construction time.
@@ -66,11 +71,21 @@ func WithFeedbackDelivery() HandlerOption {
 	return func(h *AdapterMessageHandler) { h.acceptFeedback = true }
 }
 
+// WithTaskRunTimeout overrides the delivery timeout used for todo.* messages
+// (default 60m).
+func WithTaskRunTimeout(d time.Duration) HandlerOption {
+	return func(h *AdapterMessageHandler) { h.taskRunTimeout = d }
+}
+
 func NewAdapterMessageHandler(agentAdapter adapter.AgentAdapter, timeout time.Duration, opts ...HandlerOption) *AdapterMessageHandler {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	h := &AdapterMessageHandler{adapter: agentAdapter, timeout: timeout}
+	h := &AdapterMessageHandler{
+		adapter:        agentAdapter,
+		timeout:        timeout,
+		taskRunTimeout: 60 * time.Minute,
+	}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -80,6 +95,17 @@ func NewAdapterMessageHandler(agentAdapter adapter.AgentAdapter, timeout time.Du
 func (h *AdapterMessageHandler) HandleMessage(msg IncomingMessage) (HandlerResult, error) {
 	if !h.acceptFeedback && isFeedbackType(msg.Type) {
 		return HandlerResult{}, nil
+	}
+
+	// Task control messages (todo.status_changed{canceled}, todo.remind
+	// targeting an in-flight run) must be intercepted BEFORE the
+	// silentNotifyReply check — todo.status_changed is in
+	// silentNotifyTypes and would be silently ACKed without reaching the
+	// cancel path (T1.3).
+	if c, ok := h.adapter.(adapter.RunCanceller); ok {
+		if res, handled := h.handleTaskControl(msg, c); handled {
+			return res, nil
+		}
 	}
 
 	// Silent status-sync notifications carry no actionable content for the
@@ -93,7 +119,14 @@ func (h *AdapterMessageHandler) HandleMessage(msg IncomingMessage) (HandlerResul
 		return HandlerResult{Reply: reply}, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
+	// todo.* runs (queue + execute) get the dedicated task run timeout;
+	// everything else keeps the generic adapter timeout (T1.3 split).
+	deliveryTimeout := h.timeout
+	if h.taskRunTimeout > 0 && strings.HasPrefix(strings.TrimSpace(msg.Type), "todo.") {
+		deliveryTimeout = h.taskRunTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), deliveryTimeout)
 	defer cancel()
 
 	result, err := h.adapter.DeliverMessage(ctx, adapter.DeliverMessageRequest{
@@ -176,4 +209,73 @@ func silentNotifyReply(msg IncomingMessage) (string, bool) {
 		b.WriteString("（" + string(r) + "）")
 	}
 	return b.String(), true
+}
+
+// handleTaskControl intercepts task-control messages that target in-flight
+// runs instead of starting a new delivery:
+//   - todo.status_changed{status: canceled | cause: user_cancel} → cancel
+//     the in-flight run (POST /stop + ctx cancel) and ACK silently;
+//   - todo.remind while a run is in flight → steer (inject) the reminder
+//     text into that run instead of queueing a duplicate delivery;
+//     no in-flight run → not handled, falls through to normal delivery.
+//
+// Everything else is not handled here (todo.status_changed without a
+// cancel semantic falls back to the silentNotifyReply ACK).
+func (h *AdapterMessageHandler) handleTaskControl(msg IncomingMessage, c adapter.RunCanceller) (HandlerResult, bool) {
+	switch msg.Type {
+	case "todo.status_changed":
+		var p struct {
+			Status string `json:"status"`
+			Cause  string `json:"cause"`
+		}
+		_ = json.Unmarshal([]byte(msg.Message), &p)
+		status := strings.ToLower(strings.TrimSpace(p.Status))
+		cause := strings.ToLower(strings.TrimSpace(p.Cause))
+		if status != "canceled" && status != "cancelled" && cause != "user_cancel" {
+			return HandlerResult{}, false
+		}
+		taskKey := taskControlKey(msg)
+		if err := c.CancelActive(context.Background(), taskKey); err != nil {
+			// CancelActive is idempotent and best-effort; a failure must
+			// not wedge the platform-side cancel flow.
+			return HandlerResult{Reply: "ACK todo.status_changed - canceled"}, true
+		}
+		return HandlerResult{Reply: "ACK todo.status_changed - canceled"}, true
+	case "todo.remind":
+		taskKey := taskControlKey(msg)
+		if c.ActiveRunID(taskKey) == "" {
+			// Nothing in flight: let the reminder flow through the normal
+			// delivery path (spec: fall back instead of swallowing).
+			return HandlerResult{}, false
+		}
+		if err := c.SteerActive(context.Background(), taskKey, msg.Message); err != nil {
+			if errors.Is(err, adapter.ErrNoActiveRun) {
+				return HandlerResult{}, false
+			}
+			// Steer failed but a run IS in flight — still ack to avoid a
+			// duplicate delivery racing the in-flight run.
+			return HandlerResult{Reply: "ACK todo.remind - steered"}, true
+		}
+		return HandlerResult{Reply: "ACK todo.remind - steered"}, true
+	default:
+		return HandlerResult{}, false
+	}
+}
+
+// taskControlKey derives the task identity for cancel/steer: the platform
+// sets SessionKey to the task id; metadata taskId/task_id is the fallback.
+func taskControlKey(msg IncomingMessage) string {
+	if key := strings.TrimSpace(msg.SessionKey); key != "" {
+		return key
+	}
+	if msg.Metadata != nil {
+		for _, k := range []string{"taskId", "task_id", "todoId", "todo_id"} {
+			if v, ok := msg.Metadata[k].(string); ok {
+				if v = strings.TrimSpace(v); v != "" {
+					return v
+				}
+			}
+		}
+	}
+	return ""
 }
