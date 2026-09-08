@@ -216,7 +216,15 @@ func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted s
 	a.logGateway("responses-task", "task:"+sid, sid != "")
 
 	var resp responsesResponse
-	if _, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp); err != nil {
+	status, err := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp)
+	// Unknown/lost task conversation: drop the conversation name and retry
+	// once on a fresh session (mirrors the chat path's unknown-session retry).
+	if err != nil && sid != "" && isGatewayUnknownSessionError(status, err.Error()) {
+		a.logGateway("responses-task-retry", "task:"+sid, false)
+		body.Conversation = ""
+		status, err = a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("hermes gateway responses(task): %w", err)
 	}
 
@@ -232,6 +240,28 @@ func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted s
 		// Feedback confirmation carries no new work; swallow it.
 		if isFeedbackLike(req.Type) {
 			return &DeliverMessageResult{Success: true, Accepted: true, Reply: "ok"}, nil
+		}
+		// Session-history rejection (e.g. deepseek's strict "empty tool_calls
+		// array" check): the task conversation history is poisoned — retry
+		// once on a fresh conversation (mirrors the chat path's retry).
+		if sid != "" {
+			a.logGateway("responses-task-retry-fresh", "task:"+sid, false)
+			body.Conversation = ""
+			var resp2 responsesResponse
+			if _, err2 := a.callJSON(ctx, http.MethodPost, a.baseURL+"/responses", body, &resp2); err2 == nil {
+				reply2 := extractResponseText(resp2)
+				if strings.TrimSpace(reply2) != "" && !isModelProviderError(reply2) {
+					return &DeliverMessageResult{
+						Success:  true,
+						Accepted: true,
+						Reply:    reply2,
+					}, nil
+				}
+			}
+			return &DeliverMessageResult{
+				Success: false,
+				Error:   "对话上下文被模型服务拒绝，已自动重开会话，请重新发送该消息",
+			}, nil
 		}
 		return &DeliverMessageResult{
 			Success: false,

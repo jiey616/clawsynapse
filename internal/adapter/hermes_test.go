@@ -29,8 +29,14 @@ type fakeGateway struct {
 
 	unknownResponses bool // simulate unknown-session on first continuation (responses)
 	unknownRuns      bool // simulate unknown-session on first continuation (runs)
+	unknownTask      bool // simulate unknown-session on first task conversation continuation
 	urDone           bool
 	urRunsDone       bool
+	urTaskDone       bool
+
+	// responsesReplies optionally scripts the OutputText returned by each
+	// /v1/responses call (popped in order; falls back to "hello").
+	responsesReplies []string
 }
 
 func (fg *fakeGateway) handler() http.Handler {
@@ -61,10 +67,25 @@ func (fg *fakeGateway) handler() http.Handler {
 			return
 		}
 
+		if fg.unknownTask && !fg.urTaskDone && req.Conversation != "" {
+			fg.urTaskDone = true
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"session not found"}`))
+			return
+		}
+
+		reply := "hello"
+		fg.mu.Lock()
+		if len(fg.responsesReplies) > 0 {
+			reply = fg.responsesReplies[0]
+			fg.responsesReplies = fg.responsesReplies[1:]
+		}
+		fg.mu.Unlock()
+
 		_ = json.NewEncoder(w).Encode(responsesResponse{
 			ID:         id,
 			Status:     "completed",
-			OutputText: "hello",
+			OutputText: reply,
 		})
 	})
 

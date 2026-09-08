@@ -156,3 +156,88 @@ func TestDeliverViaRuns_SendsModel(t *testing.T) {
 		t.Fatalf("model = %q, want hermes-agent", got)
 	}
 }
+
+// ── T0.4: task path resilience ───────────────────────────────────
+
+func TestDeliverTask_UnknownSessionRetry(t *testing.T) {
+	fg := &fakeGateway{unknownTask: true}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "task-42", Message: "hi"})
+	if err != nil {
+		t.Fatalf("unknown-session retry should recover: %v", err)
+	}
+	if !res.Success || res.Reply != "hello" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if len(fg.responsesConversation) != 2 {
+		t.Fatalf("expected 2 /responses calls, got %d", len(fg.responsesConversation))
+	}
+	if fg.responsesConversation[0] != "task-42" || fg.responsesConversation[1] != "" {
+		t.Fatalf("retry must drop the conversation name, got %v", fg.responsesConversation)
+	}
+}
+
+func TestDeliverTask_ProviderErrorRetryFresh(t *testing.T) {
+	fg := &fakeGateway{responsesReplies: []string{
+		`{"error":{"type":"invalid_request_error","message":"tool_calls array is empty"}}`,
+		"recovered",
+	}}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "task-7", Message: "hi"})
+	if err != nil {
+		t.Fatalf("provider-error fresh retry should recover: %v", err)
+	}
+	if res.Reply != "recovered" {
+		t.Fatalf("reply = %q, want recovered", res.Reply)
+	}
+	if len(fg.responsesConversation) != 2 || fg.responsesConversation[1] != "" {
+		t.Fatalf("retry must drop the conversation name, got %v", fg.responsesConversation)
+	}
+}
+
+func TestDeliverTask_ProviderErrorFeedbackSwallowed(t *testing.T) {
+	fg := &fakeGateway{responsesReplies: []string{
+		`{"error":{"message":"tool_calls array is empty"}}`,
+	}}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message.response", SessionKey: "task-7", Message: "ack"})
+	if err != nil {
+		t.Fatalf("feedback provider error should be swallowed: %v", err)
+	}
+	if res.Reply != "ok" {
+		t.Fatalf("reply = %q, want ok", res.Reply)
+	}
+	if len(fg.responsesConversation) != 1 {
+		t.Fatalf("feedback must not trigger a retry, got %d calls", len(fg.responsesConversation))
+	}
+}
+
+func TestDeliverTask_ProviderErrorRetryFails(t *testing.T) {
+	fg := &fakeGateway{responsesReplies: []string{
+		`{"error":{"message":"tool_calls array is empty"}}`,
+		"still tool_calls broken",
+	}}
+	a := newTestAdapter(t, fg)
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	res, err := a.DeliverMessage(ctx, DeliverMessageRequest{Type: "task.message", SessionKey: "task-7", Message: "hi"})
+	if err != nil {
+		t.Fatalf("adapter returns error in result, not err: %v", err)
+	}
+	if res.Success {
+		t.Fatalf("expected failure result: %+v", res)
+	}
+	if !strings.Contains(res.Error, "被模型服务拒绝") {
+		t.Fatalf("error should mention model rejection, got: %q", res.Error)
+	}
+}
