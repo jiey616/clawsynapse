@@ -200,7 +200,7 @@ func loadDotEnvValues() configValues {
 	}
 
 	entries := parseDotEnv(string(data))
-	return loadValuesFromMap(entries)
+	return loadValuesFromMap(entries, "dotenv")
 }
 
 func findProjectRoot(start string) string {
@@ -231,50 +231,121 @@ func loadOSEnvValues() configValues {
 		}
 		entries[key] = value
 	}
-	return loadValuesFromMap(entries)
+	return loadValuesFromMap(entries, "env")
 }
 
-func loadValuesFromMap(values map[string]string) configValues {
-	trustAutoApproveRaw := strings.TrimSpace(values["TRUST_AUTO_APPROVE"])
+// loadValuesFromMap resolves a flat key/value map (OS environ or .env) into
+// config values. Canonical keys carry the CLAWSYNAPSE_ prefix; the bare
+// legacy name is accepted as fallback. src names the layer ("env" or
+// "dotenv") and is recorded per resolved key (suffix "-legacy" when the
+// unprefixed name supplied the value).
+func loadValuesFromMap(values map[string]string, src string) configValues {
+	lookup := func(legacyKey string) (string, bool) {
+		if v := strings.TrimSpace(values["CLAWSYNAPSE_"+legacyKey]); v != "" {
+			return v, false
+		}
+		if v := strings.TrimSpace(values[legacyKey]); v != "" {
+			return v, true
+		}
+		return "", false
+	}
+	tag := func(v *configValues, key, legacyKey string, vRaw string, legacy bool) {
+		name := src
+		if legacy {
+			name = src + "-legacy"
+		}
+		_ = vRaw
+		v.setSource(key, name)
+	}
 	cfg := configValues{
-		NATSServers:         splitCSV(values["NATS_SERVERS"]),
-		LocalAPIAddr:        strings.TrimSpace(values["LOCAL_API_ADDR"]),
-		DataDir:             strings.TrimSpace(values["DATA_DIR"]),
-		IdentityKeyPath:     strings.TrimSpace(values["IDENTITY_KEY_PATH"]),
-		IdentityPubPath:     strings.TrimSpace(values["IDENTITY_PUB_PATH"]),
-		Heartbeat:           parseDurationValue(values["HEARTBEAT_INTERVAL_MS"], 0),
-		AnnounceTTL:         parseDurationValue(values["ANNOUNCE_TTL_MS"], 0),
-		TrustMode:           strings.TrimSpace(values["TRUST_MODE"]),
-		AgentAdapter:        strings.TrimSpace(values["AGENT_ADAPTER"]),
-		AgentAdapterTimeout: parseDurationValue(values["AGENT_ADAPTER_TIMEOUT"], 0),
-		AgentRole:           strings.TrimSpace(values["AGENT_ROLE"]),
-		TaskMaxConcurrentRuns: int(parseIntValue(values["TASK_MAX_CONCURRENT_RUNS"])),
-		TaskQueueCapacity:     int(parseIntValue(values["TASK_QUEUE_CAPACITY"])),
-		TaskRunTimeout:        parseDurationValue(values["TASK_RUN_TIMEOUT"], 0),
-		TaskQueueWaitTimeout:  parseDurationValue(values["TASK_QUEUE_WAIT_TIMEOUT"], 0),
-		WebhookURL:          strings.TrimSpace(values["WEBHOOK_URL"]),
-		LogFilePath:         strings.TrimSpace(values["LOG_FILE_PATH"]),
-		LogRotateMaxSizeMB:  int(parseIntValue(values["LOG_ROTATE_MAX_SIZE_MB"])),
-		LogRotateMaxBackups: int(parseIntValue(values["LOG_ROTATE_MAX_BACKUPS"])),
-		LogRotateMaxAgeDays: int(parseIntValue(values["LOG_ROTATE_MAX_AGE_DAYS"])),
-		LogRotateCompress:   parseBoolValue(values["LOG_ROTATE_COMPRESS"]),
-		DeliverablePrefixes: splitCSV(values["DELIVERABLE_PREFIXES"]),
-		TransferDir:         strings.TrimSpace(values["TRANSFER_DIR"]),
-		TransferMaxFileSize: parseIntValue(values["TRANSFER_MAX_FILE_SIZE"]),
-		TransferTTL:         parseDurationValue(values["TRANSFER_TTL"], 0),
-		LogLevel:            strings.TrimSpace(values["LOG_LEVEL"]),
-		LogFormat:           strings.TrimSpace(values["LOG_FORMAT"]),
-		LogAddSource:        parseBoolValue(values["LOG_ADD_SOURCE"]),
+		NATSServers:         splitCSV(mustLookup(values, lookup, "NATS_SERVERS")),
+		LocalAPIAddr:        strings.TrimSpace(mustLookup(values, lookup, "LOCAL_API_ADDR")),
+		DataDir:             strings.TrimSpace(mustLookup(values, lookup, "DATA_DIR")),
+		IdentityKeyPath:     strings.TrimSpace(mustLookup(values, lookup, "IDENTITY_KEY_PATH")),
+		IdentityPubPath:     strings.TrimSpace(mustLookup(values, lookup, "IDENTITY_PUB_PATH")),
+		Heartbeat:           parseDurationValue(mustLookup(values, lookup, "HEARTBEAT_INTERVAL_MS"), 0),
+		AnnounceTTL:         parseDurationValue(mustLookup(values, lookup, "ANNOUNCE_TTL_MS"), 0),
+		TrustMode:           strings.TrimSpace(mustLookup(values, lookup, "TRUST_MODE")),
+		AgentAdapter:        strings.TrimSpace(mustLookup(values, lookup, "AGENT_ADAPTER")),
+		AgentAdapterTimeout: parseDurationValue(mustLookup(values, lookup, "AGENT_ADAPTER_TIMEOUT"), 0),
+		AgentRole:           strings.TrimSpace(mustLookup(values, lookup, "AGENT_ROLE")),
+		TaskMaxConcurrentRuns: int(parseIntValue(mustLookup(values, lookup, "TASK_MAX_CONCURRENT_RUNS"))),
+		TaskQueueCapacity:     int(parseIntValue(mustLookup(values, lookup, "TASK_QUEUE_CAPACITY"))),
+		TaskRunTimeout:        parseDurationValue(mustLookup(values, lookup, "TASK_RUN_TIMEOUT"), 0),
+		TaskQueueWaitTimeout:  parseDurationValue(mustLookup(values, lookup, "TASK_QUEUE_WAIT_TIMEOUT"), 0),
+		WebhookURL:          strings.TrimSpace(mustLookup(values, lookup, "WEBHOOK_URL")),
+		LogFilePath:         strings.TrimSpace(mustLookup(values, lookup, "LOG_FILE_PATH")),
+		LogRotateMaxSizeMB:  int(parseIntValue(mustLookup(values, lookup, "LOG_ROTATE_MAX_SIZE_MB"))),
+		LogRotateMaxBackups: int(parseIntValue(mustLookup(values, lookup, "LOG_ROTATE_MAX_BACKUPS"))),
+		LogRotateMaxAgeDays: int(parseIntValue(mustLookup(values, lookup, "LOG_ROTATE_MAX_AGE_DAYS"))),
+		LogRotateCompress:   parseBoolValue(mustLookup(values, lookup, "LOG_ROTATE_COMPRESS")),
+		DeliverablePrefixes: splitCSV(mustLookup(values, lookup, "DELIVERABLE_PREFIXES")),
+		TransferDir:         strings.TrimSpace(mustLookup(values, lookup, "TRANSFER_DIR")),
+		TransferMaxFileSize: parseIntValue(mustLookup(values, lookup, "TRANSFER_MAX_FILE_SIZE")),
+		TransferTTL:         parseDurationValue(mustLookup(values, lookup, "TRANSFER_TTL"), 0),
+		LogLevel:            strings.TrimSpace(mustLookup(values, lookup, "LOG_LEVEL")),
+		LogFormat:           strings.TrimSpace(mustLookup(values, lookup, "LOG_FORMAT")),
+		LogAddSource:        parseBoolValue(mustLookup(values, lookup, "LOG_ADD_SOURCE")),
 	}
-	if trustAutoApproveRaw != "" {
-		cfg.TrustAutoApprove = parseBoolValue(trustAutoApproveRaw)
+	// Record the per-key source for every value resolved above.
+	srcKeys := map[string]string{
+		"natsServers":            "NATS_SERVERS",
+		"localApiAddr":           "LOCAL_API_ADDR",
+		"dataDir":                "DATA_DIR",
+		"identityKeyPath":        "IDENTITY_KEY_PATH",
+		"identityPubPath":        "IDENTITY_PUB_PATH",
+		"heartbeat":              "HEARTBEAT_INTERVAL_MS",
+		"announceTtl":            "ANNOUNCE_TTL_MS",
+		"trustMode":              "TRUST_MODE",
+		"agentAdapter":           "AGENT_ADAPTER",
+		"agentAdapterTimeout":    "AGENT_ADAPTER_TIMEOUT",
+		"agentRole":              "AGENT_ROLE",
+		"task.maxConcurrentRuns": "TASK_MAX_CONCURRENT_RUNS",
+		"task.queueCapacity":     "TASK_QUEUE_CAPACITY",
+		"task.runTimeout":        "TASK_RUN_TIMEOUT",
+		"task.queueWaitTimeout":  "TASK_QUEUE_WAIT_TIMEOUT",
+		"webhookUrl":             "WEBHOOK_URL",
+		"logFilePath":            "LOG_FILE_PATH",
+		"logRotateMaxSizeMb":     "LOG_ROTATE_MAX_SIZE_MB",
+		"logRotateMaxBackups":    "LOG_ROTATE_MAX_BACKUPS",
+		"logRotateMaxAgeDays":    "LOG_ROTATE_MAX_AGE_DAYS",
+		"logRotateCompress":      "LOG_ROTATE_COMPRESS",
+		"deliverablePrefixes":    "DELIVERABLE_PREFIXES",
+		"transferDir":            "TRANSFER_DIR",
+		"transferMaxFileSize":    "TRANSFER_MAX_FILE_SIZE",
+		"transferTtl":            "TRANSFER_TTL",
+		"logLevel":               "LOG_LEVEL",
+		"logFormat":              "LOG_FORMAT",
+		"logAddSource":           "LOG_ADD_SOURCE",
+	}
+	for key, legacyKey := range srcKeys {
+		if v, legacy := lookup(legacyKey); v != "" {
+			name := src
+			if legacy {
+				name = src + "-legacy"
+			}
+			cfg.setSource(key, name)
+		}
+	}
+	if v, legacy := lookup("TRUST_AUTO_APPROVE"); v != "" {
+		cfg.TrustAutoApprove = parseBoolValue(v)
 		cfg.TrustAutoApproveSet = true
+		tag(&cfg, "trustAutoApprove", "TRUST_AUTO_APPROVE", v, legacy)
 	}
-	if roleAnchorRaw := strings.TrimSpace(values["CLAWSYNAPSE_ROLE_ANCHOR"]); roleAnchorRaw != "" {
-		cfg.RoleAnchor = parseBoolValue(roleAnchorRaw)
+	if v, legacy := lookup("ROLE_ANCHOR"); v != "" {
+		cfg.RoleAnchor = parseBoolValue(v)
 		cfg.RoleAnchorSet = true
+		tag(&cfg, "roleAnchor", "ROLE_ANCHOR", v, legacy)
 	}
 	return cfg
+}
+
+// mustLookup returns the resolved value for legacyKey (CLAWSYNAPSE_ prefix
+// first, bare legacy name as fallback) and records its per-key source tag.
+// values is kept in the signature for readability at call sites.
+func mustLookup(values map[string]string, lookup func(string) (string, bool), legacyKey string) string {
+	v, _ := lookup(legacyKey)
+	return v
 }
 
 func parseDurationValue(v string, fallback time.Duration) time.Duration {

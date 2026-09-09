@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+// envPrefixed resolves a config env var with the canonical CLAWSYNAPSE_ prefix.
+// The bare legacy name is kept as a fallback for existing deployments:
+// CLAWSYNAPSE_<KEY> wins, then <KEY>. Returns the value, whether the legacy
+// (unprefixed) name provided it, and whether anything was found.
+func envPrefixed(key, fallback string) (string, bool, bool) {
+	if v := strings.TrimSpace(os.Getenv("CLAWSYNAPSE_" + key)); v != "" {
+		return v, false, true
+	}
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v, true, true
+	}
+	return fallback, false, false
+}
+
 func envOr(key, fallback string) string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {

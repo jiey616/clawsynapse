@@ -77,6 +77,10 @@ type Config struct {
 	LogAddSource        bool     `json:"logAddSource"`
 	CheckConfig         bool     `json:"checkConfig"`
 	ConfigPath          string   `json:"-"`
+
+	// Sources records where each effective config value came from
+	// (default|yaml|dotenv|dotenv-legacy|env|env-legacy|flag). Not serialized.
+	Sources map[string]string `json:"-"`
 }
 
 func Validate(cfg Config) error {
@@ -214,6 +218,16 @@ type configValues struct {
 	LogLevel            string
 	LogFormat           string
 	LogAddSource        bool
+
+	Sources map[string]string
+}
+
+// setSource records which config layer supplied a value (lazy-init map).
+func (v *configValues) setSource(key, src string) {
+	if v.Sources == nil {
+		v.Sources = make(map[string]string)
+	}
+	v.Sources[key] = src
 }
 
 func (c Config) Runtime() runtimeConfig {
@@ -269,24 +283,24 @@ func LoadFromOS(args []string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	merged := mergeConfigValues(defaults, loaded)
-	merged = mergeConfigValues(merged, loadDotEnvValues())
-	merged = mergeConfigValues(merged, loadOSEnvValues())
+	merged := mergeConfigValues(defaults, loaded, "yaml")
+	merged = mergeConfigValues(merged, loadDotEnvValues(), "dotenv")
+	merged = mergeConfigValues(merged, loadOSEnvValues(), "env")
 
 	fs := flag.NewFlagSet("clawsynapsed", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	hermesGatewayURLDef := envOr("HERMES_GATEWAY_URL", merged.HermesGatewayURL)
+	hermesGatewayURLDef, _, _ := envPrefixed("HERMES_GATEWAY_URL", merged.HermesGatewayURL)
 	if hermesGatewayURLDef == "" {
 		hermesGatewayURLDef = "http://127.0.0.1:8642/v1"
 	}
-	hermesGatewayKeyDef := envOr("HERMES_GATEWAY_KEY", merged.HermesGatewayKey)
-	hermesModelDef := envOr("HERMES_MODEL", merged.HermesModel)
+	hermesGatewayKeyDef, _, _ := envPrefixed("HERMES_GATEWAY_KEY", merged.HermesGatewayKey)
+	hermesModelDef, _, _ := envPrefixed("HERMES_MODEL", merged.HermesModel)
 	if hermesModelDef == "" {
 		hermesModelDef = "hermes-agent"
 	}
-	hermesConfigPathDef := envOr("HERMES_CONFIG_PATH", merged.HermesConfigPath)
-	hermesTodoModeDef := envOr("HERMES_TODO_MODE", merged.HermesTodoMode)
+	hermesConfigPathDef, _, _ := envPrefixed("HERMES_CONFIG_PATH", merged.HermesConfigPath)
+	hermesTodoModeDef, _, _ := envPrefixed("HERMES_TODO_MODE", merged.HermesTodoMode)
 	roleAnchorDef := merged.RoleAnchor
 	if roleAnchorRaw := envOr("CLAWSYNAPSE_ROLE_ANCHOR", ""); roleAnchorRaw != "" {
 		roleAnchorDef = parseBoolValue(roleAnchorRaw)
@@ -413,7 +427,37 @@ func LoadFromOS(args []string) (Config, error) {
 		}
 	}
 
+	// Flags explicitly passed on the command line take precedence in the
+	// source report; only then copy the merged per-layer source map.
+	srcMap := merged.Sources
+	if srcMap == nil {
+		srcMap = make(map[string]string)
+	}
+	flagToKey := map[string]string{
+		"nats-servers": "natsServers", "local-api-addr": "localApiAddr",
+		"data-dir": "dataDir", "identity-key-path": "identityKeyPath",
+		"identity-pub-path": "identityPubPath", "heartbeat": "heartbeat",
+		"announce-ttl": "announceTtl", "trust-mode": "trustMode",
+		"trust-auto-approve": "trustAutoApprove", "agent-adapter": "agentAdapter",
+		"agent-adapter-timeout": "agentAdapterTimeout", "agent-role": "agentRole",
+		"hermes-gateway-url": "hermesGatewayUrl", "hermes-gateway-key": "hermesGatewayKey",
+		"hermes-model": "hermesModel", "hermes-config-path": "hermesConfigPath",
+		"hermes-todo-mode": "hermesTodoMode", "role-anchor": "roleAnchor",
+		"webhook-url": "webhookUrl", "log-level": "logLevel", "log-format": "logFormat",
+		"log-file-path": "logFilePath", "log-rotate-max-size-mb": "logRotateMaxSizeMb",
+		"log-rotate-max-backups": "logRotateMaxBackups", "log-rotate-max-age-days": "logRotateMaxAgeDays",
+		"log-rotate-compress": "logRotateCompress", "deliverable-prefixes": "deliverablePrefixes",
+		"transfer-dir": "transferDir", "transfer-max-file-size": "transferMaxFileSize",
+		"transfer-ttl": "transferTtl", "log-add-source": "logAddSource",
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if k, ok := flagToKey[f.Name]; ok {
+			srcMap[k] = "flag"
+		}
+	})
+
 	return Config{
+		Sources:             srcMap,
 		NATSServers:         rawServers,
 		LocalAPIAddr:        strings.TrimSpace(*apiAddr),
 		DataDir:             resolvedDataDir,
@@ -480,110 +524,146 @@ func defaultConfigValues(defaultDataDir string) configValues {
 	}
 }
 
-func mergeConfigValues(base, override configValues) configValues {
+func mergeConfigValues(base, override configValues, src string) configValues {
 	if len(override.NATSServers) > 0 {
 		base.NATSServers = append([]string(nil), override.NATSServers...)
+		base.setSource("natsServers", src)
 	}
 	if strings.TrimSpace(override.LocalAPIAddr) != "" {
 		base.LocalAPIAddr = strings.TrimSpace(override.LocalAPIAddr)
+		base.setSource("localApiAddr", src)
 	}
 	if strings.TrimSpace(override.DataDir) != "" {
 		base.DataDir = strings.TrimSpace(override.DataDir)
+		base.setSource("dataDir", src)
 	}
 	if strings.TrimSpace(override.IdentityKeyPath) != "" {
 		base.IdentityKeyPath = strings.TrimSpace(override.IdentityKeyPath)
+		base.setSource("identityKeyPath", src)
 	}
 	if strings.TrimSpace(override.IdentityPubPath) != "" {
 		base.IdentityPubPath = strings.TrimSpace(override.IdentityPubPath)
+		base.setSource("identityPubPath", src)
 	}
 	if override.Heartbeat > 0 {
 		base.Heartbeat = override.Heartbeat
+		base.setSource("heartbeat", src)
 	}
 	if override.AnnounceTTL > 0 {
 		base.AnnounceTTL = override.AnnounceTTL
+		base.setSource("announceTtl", src)
 	}
 	if strings.TrimSpace(override.TrustMode) != "" {
 		base.TrustMode = strings.TrimSpace(override.TrustMode)
+		base.setSource("trustMode", src)
 	}
 	if override.TrustAutoApproveSet {
 		base.TrustAutoApprove = override.TrustAutoApprove
+		base.setSource("trustAutoApprove", src)
 		base.TrustAutoApproveSet = true
+		base.setSource("trustAutoApprove", src)
 	}
 	if override.RoleAnchorSet {
 		base.RoleAnchor = override.RoleAnchor
+		base.setSource("roleAnchor", src)
 		base.RoleAnchorSet = true
+		base.setSource("roleAnchor", src)
 	}
 	if strings.TrimSpace(override.AgentAdapter) != "" {
 		base.AgentAdapter = strings.TrimSpace(override.AgentAdapter)
+		base.setSource("agentAdapter", src)
 	}
 	if override.AgentAdapterTimeout > 0 {
 		base.AgentAdapterTimeout = override.AgentAdapterTimeout
+		base.setSource("agentAdapterTimeout", src)
 	}
 	if strings.TrimSpace(override.AgentRole) != "" {
 		base.AgentRole = strings.TrimSpace(override.AgentRole)
+		base.setSource("agentRole", src)
 	}
 	if strings.TrimSpace(override.HermesGatewayURL) != "" {
 		base.HermesGatewayURL = strings.TrimSpace(override.HermesGatewayURL)
+		base.setSource("hermesGatewayUrl", src)
 	}
 	if strings.TrimSpace(override.HermesGatewayKey) != "" {
 		base.HermesGatewayKey = strings.TrimSpace(override.HermesGatewayKey)
+		base.setSource("hermesGatewayKey", src)
 	}
 	if strings.TrimSpace(override.HermesModel) != "" {
 		base.HermesModel = strings.TrimSpace(override.HermesModel)
+		base.setSource("hermesModel", src)
 	}
 	if strings.TrimSpace(override.HermesTodoMode) != "" {
 		base.HermesTodoMode = strings.TrimSpace(override.HermesTodoMode)
+		base.setSource("hermesTodoMode", src)
 	}
 	if override.TaskMaxConcurrentRuns > 0 {
 		base.TaskMaxConcurrentRuns = override.TaskMaxConcurrentRuns
+		base.setSource("task.maxConcurrentRuns", src)
 	}
 	if override.TaskQueueCapacity > 0 {
 		base.TaskQueueCapacity = override.TaskQueueCapacity
+		base.setSource("task.queueCapacity", src)
 	}
 	if override.TaskRunTimeout > 0 {
 		base.TaskRunTimeout = override.TaskRunTimeout
+		base.setSource("task.runTimeout", src)
 	}
 	if override.TaskQueueWaitTimeout > 0 {
 		base.TaskQueueWaitTimeout = override.TaskQueueWaitTimeout
+		base.setSource("task.queueWaitTimeout", src)
 	}
 	if strings.TrimSpace(override.WebhookURL) != "" {
 		base.WebhookURL = strings.TrimSpace(override.WebhookURL)
+		base.setSource("webhookUrl", src)
 	}
 	if strings.TrimSpace(override.LogFilePath) != "" {
 		base.LogFilePath = strings.TrimSpace(override.LogFilePath)
+		base.setSource("logFilePath", src)
 	}
 	if override.LogRotateMaxSizeMB > 0 {
 		base.LogRotateMaxSizeMB = override.LogRotateMaxSizeMB
+		base.setSource("logRotateMaxSizeMb", src)
 	}
 	if override.LogRotateMaxBackups > 0 {
 		base.LogRotateMaxBackups = override.LogRotateMaxBackups
+		base.setSource("logRotateMaxBackups", src)
 	}
 	if override.LogRotateMaxAgeDays > 0 {
 		base.LogRotateMaxAgeDays = override.LogRotateMaxAgeDays
+		base.setSource("logRotateMaxAgeDays", src)
 	}
 	if override.LogRotateCompress {
 		base.LogRotateCompress = true
+		base.setSource("logRotateCompress", src)
 	}
 	if len(override.DeliverablePrefixes) > 0 {
 		base.DeliverablePrefixes = append([]string(nil), override.DeliverablePrefixes...)
+		base.setSource("deliverablePrefixes", src)
 	}
 	if strings.TrimSpace(override.TransferDir) != "" {
 		base.TransferDir = strings.TrimSpace(override.TransferDir)
+		base.setSource("transferDir", src)
 	}
 	if override.TransferMaxFileSize > 0 {
 		base.TransferMaxFileSize = override.TransferMaxFileSize
+		base.setSource("transferMaxFileSize", src)
 	}
 	if override.TransferTTL > 0 {
 		base.TransferTTL = override.TransferTTL
+		base.setSource("transferTtl", src)
 	}
 	if strings.TrimSpace(override.LogLevel) != "" {
 		base.LogLevel = strings.TrimSpace(override.LogLevel)
+		base.setSource("logLevel", src)
 	}
 	if strings.TrimSpace(override.LogFormat) != "" {
 		base.LogFormat = strings.TrimSpace(override.LogFormat)
+		base.setSource("logFormat", src)
 	}
 	if override.LogAddSource {
 		base.LogAddSource = true
+		base.setSource("logAddSource", src)
 	}
 	return base
 }
