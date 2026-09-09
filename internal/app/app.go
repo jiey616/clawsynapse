@@ -262,6 +262,7 @@ func newAgentAdapter(cfg config.Config, nodeID string, log *slog.Logger, fs *sto
 			Model:        cfg.HermesModel,
 			ConfigPath:   cfg.HermesConfigPath,
 			TodoMode:     cfg.HermesTodoMode,
+			RoleAnchor:   cfg.RoleAnchor,
 			Task:         taskConfigFrom(cfg.Task),
 			TaskStore:    store.NewTaskStore(cfg.DataDir),
 		})

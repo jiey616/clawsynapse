@@ -34,6 +34,7 @@ func ApplyConfigWhitelist(dst *Config, src Config) {
 	if src.HermesTodoMode != "" {
 		dst.HermesTodoMode = src.HermesTodoMode
 	}
+	dst.RoleAnchor = src.RoleAnchor
 	if src.AgentAdapterTimeout != "" {
 		dst.AgentAdapterTimeout = src.AgentAdapterTimeout
 	}

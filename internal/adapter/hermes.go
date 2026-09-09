@@ -35,6 +35,11 @@ type HermesConfig struct {
 	//   - "runs" (default): POST /v1/runs, polled to terminal state
 	//   - "responses": POST /v1/responses with session_id continuation
 	TodoMode string
+	// RoleAnchor injects a per-request ephemeral "instructions" anchor
+	// (role + execution discipline) on every gateway create, so execution
+	// guidance survives context pruning (Phase 3.2). The config layer
+	// decides the default; the adapter only honors the flag.
+	RoleAnchor bool
 	// MaxConcurrentRuns caps the number of in-flight runs deliveries
 	// (default 8, leaving 2 spare slots under the gateway's global limit
 	// of 10). Zero or negative falls back to the default.
@@ -62,6 +67,7 @@ type HermesAdapter struct {
 	log          *slog.Logger
 	sessionStore *store.FSStore
 	agentRole    string
+	roleAnchor   bool
 
 	// sessionMap (T2.3) batches session-continuation persistence; nil
 	// when no SessionStore is configured (then the three mapping helpers
@@ -157,6 +163,7 @@ func NewHermesAdapter(cfg HermesConfig) (*HermesAdapter, error) {
 		sessionStore: cfg.SessionStore,
 		sessionMap:   newSessionMapper("hermes", cfg.SessionStore, cfg.Logger),
 		agentRole:    strings.ToLower(strings.TrimSpace(cfg.AgentRole)),
+		roleAnchor:   cfg.RoleAnchor,
 		// Timeout is driven by the caller-supplied context, not a fixed client timeout.
 		httpClient:      &http.Client{Timeout: 0},
 		baseURL:         baseURL,
@@ -334,7 +341,7 @@ func (a *HermesAdapter) taskSessionKey(req DeliverMessageRequest) string {
 func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted string, req DeliverMessageRequest) (*DeliverMessageResult, error) {
 	sid := a.taskSessionKey(req)
 
-	body := responsesRequest{Model: a.model, Input: formatted}
+	body := responsesRequest{Model: a.model, Input: formatted, Instructions: a.anchorText()}
 	if sid != "" {
 		body.Conversation = sid
 	}
@@ -408,7 +415,7 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 	chatKey := "chat:" + a.chatSessionKey(req)
 	prevID := a.loadMappedSessionID(chatKey)
 
-	body := responsesRequest{Model: a.model, Input: formatted}
+	body := responsesRequest{Model: a.model, Input: formatted, Instructions: a.anchorText()}
 	if prevID != "" {
 		body.PreviousResponseID = prevID
 	}
@@ -552,7 +559,7 @@ func (a *HermesAdapter) runsDeliveryBody(ctx context.Context, taskID, formatted 
 
 	// Continuation verified live (T2.4): session_id resumes; see
 	// runCreateRequest.SessionID.
-	body := runCreateRequest{Input: formatted, Model: a.model}
+	body := runCreateRequest{Input: formatted, Model: a.model, Instructions: a.anchorText()}
 	if prevID != "" {
 		body.SessionID = prevID
 	}
@@ -1028,6 +1035,15 @@ func (a *HermesAdapter) logStoreWarning(msg string, sessionKey string, err error
 	)
 }
 
+// anchorText returns the per-request instructions anchor, or "" when the
+// role anchor is disabled (config) — no field is sent then.
+func (a *HermesAdapter) anchorText() string {
+	if !a.roleAnchor {
+		return ""
+	}
+	return roleAnchorText(a.agentRole)
+}
+
 func (a *HermesAdapter) logGateway(operation, sessionKey string, hasContinuation bool) {
 	if a.log == nil {
 		return
@@ -1093,6 +1109,10 @@ type responsesRequest struct {
 	// task-scoped dialogue — `session_id` is only echoed back and does not
 	// drive continuation.
 	Conversation string `json:"conversation,omitempty"`
+	// Instructions: per-request ephemeral system anchor (Phase 3.2,
+	// live-verified on /v1/runs; /v1/responses mirrors the responses API
+	// contract). Empty sends no field.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 type responsesResponse struct {
@@ -1122,6 +1142,10 @@ type runCreateRequest struct {
 	// previous_response_id is silently ignored on /v1/runs (fresh session
 	// every time). session_id == run_id on a first run.
 	SessionID string `json:"session_id,omitempty"`
+	// Instructions: per-request ephemeral system anchor (Phase 3.2,
+	// live-verified 2026-09-09: the gateway forwards it to the model).
+	// Re-sent on every create so guidance survives context pruning.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 type runCreateResponse struct {

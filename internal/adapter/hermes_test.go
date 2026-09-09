@@ -20,8 +20,10 @@ type fakeGateway struct {
 
 	responsesPrev         []string // previous_response_id received on each /v1/responses call
 	responsesConversation []string // conversation received on each /v1/responses call
+	responsesInstructions []string // instructions received on each /v1/responses call
 	runsSessionID         []string // session_id received on each /v1/runs call
 	runsModel             []string // model received on each /v1/runs call
+	runsInstructions      []string // instructions received on each /v1/runs call
 
 	runStatusIdx map[string]int
 
@@ -69,6 +71,7 @@ func (fg *fakeGateway) handler() http.Handler {
 		fg.mu.Lock()
 		fg.responsesPrev = append(fg.responsesPrev, req.PreviousResponseID)
 		fg.responsesConversation = append(fg.responsesConversation, req.Conversation)
+		fg.responsesInstructions = append(fg.responsesInstructions, req.Instructions)
 		fg.responsesIdem = append(fg.responsesIdem, r.Header.Get("Idempotency-Key"))
 		id := fmt.Sprintf("resp-%d", len(fg.responsesPrev))
 		fg.mu.Unlock()
@@ -109,6 +112,7 @@ func (fg *fakeGateway) handler() http.Handler {
 		fg.mu.Lock()
 		fg.runsSessionID = append(fg.runsSessionID, req.SessionID)
 		fg.runsModel = append(fg.runsModel, req.Model)
+		fg.runsInstructions = append(fg.runsInstructions, req.Instructions)
 		fg.runsIdem = append(fg.runsIdem, r.Header.Get("Idempotency-Key"))
 		fg.mu.Unlock()
 

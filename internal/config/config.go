@@ -60,6 +60,7 @@ type Config struct {
 	HermesModel         string   `json:"hermesModel"`
 	HermesConfigPath    string   `json:"hermesConfigPath"`
 	HermesTodoMode      string   `json:"hermesTodoMode"`
+	RoleAnchor          bool     `json:"roleAnchor"`
 	Task                *TaskConfig `json:"task"`
 	WebhookURL          string   `json:"webhookUrl"`
 	LogLevel            string   `json:"logLevel"`
@@ -186,6 +187,8 @@ type configValues struct {
 	TrustMode           string
 	TrustAutoApprove    bool
 	TrustAutoApproveSet bool
+	RoleAnchor          bool
+	RoleAnchorSet       bool
 	AgentAdapter        string
 	AgentAdapterTimeout time.Duration
 	AgentRole           string
@@ -284,6 +287,10 @@ func LoadFromOS(args []string) (Config, error) {
 	}
 	hermesConfigPathDef := envOr("HERMES_CONFIG_PATH", merged.HermesConfigPath)
 	hermesTodoModeDef := envOr("HERMES_TODO_MODE", merged.HermesTodoMode)
+	roleAnchorDef := merged.RoleAnchor
+	if roleAnchorRaw := envOr("CLAWSYNAPSE_ROLE_ANCHOR", ""); roleAnchorRaw != "" {
+		roleAnchorDef = parseBoolValue(roleAnchorRaw)
+	}
 
 	var (
 		natsServers         = fs.String("nats-servers", strings.Join(merged.NATSServers, ","), "comma separated nats servers")
@@ -303,6 +310,7 @@ func LoadFromOS(args []string) (Config, error) {
 		hermesModel         = fs.String("hermes-model", hermesModelDef, "hermes gateway model name (env HERMES_MODEL)")
 		hermesConfigPath    = fs.String("hermes-config-path", hermesConfigPathDef, "hermes config.yaml path used by capability read/write (env HERMES_CONFIG_PATH)")
 		hermesTodoMode      = fs.String("hermes-todo-mode", hermesTodoModeDef, "hermes todo message mode: runs|responses (env HERMES_TODO_MODE)")
+		roleAnchor          = fs.Bool("role-anchor", roleAnchorDef, "inject per-request role anchor instructions (default on, env CLAWSYNAPSE_ROLE_ANCHOR)")
 		webhookURLFlag      = fs.String("webhook-url", merged.WebhookURL, "webhook url for webhook adapter")
 		logLevel            = fs.String("log-level", merged.LogLevel, "log level: debug|info|warn|error")
 		logFormat           = fs.String("log-format", merged.LogFormat, "log format: json|text")
@@ -423,6 +431,7 @@ func LoadFromOS(args []string) (Config, error) {
 		HermesModel:         strings.TrimSpace(*hermesModel),
 		HermesConfigPath:    strings.TrimSpace(*hermesConfigPath),
 		HermesTodoMode:      strings.TrimSpace(*hermesTodoMode),
+		RoleAnchor:          *roleAnchor,
 		Task:                taskCfg,
 		WebhookURL:          webhookURL,
 		LogFilePath:         resolvedLogFilePath,
@@ -455,6 +464,8 @@ func defaultConfigValues(defaultDataDir string) configValues {
 		TrustMode:           defaultTrustMode,
 		TrustAutoApprove:    false,
 		TrustAutoApproveSet: true,
+		RoleAnchor:          true,
+		RoleAnchorSet:       true,
 		AgentAdapter:        defaultAgentAdapter,
 		AgentAdapterTimeout: defaultAgentAdapterTimeout,
 		LogRotateMaxSizeMB:  defaultLogRotateMaxSizeMB,
@@ -497,6 +508,10 @@ func mergeConfigValues(base, override configValues) configValues {
 	if override.TrustAutoApproveSet {
 		base.TrustAutoApprove = override.TrustAutoApprove
 		base.TrustAutoApproveSet = true
+	}
+	if override.RoleAnchorSet {
+		base.RoleAnchor = override.RoleAnchor
+		base.RoleAnchorSet = true
 	}
 	if strings.TrimSpace(override.AgentAdapter) != "" {
 		base.AgentAdapter = strings.TrimSpace(override.AgentAdapter)

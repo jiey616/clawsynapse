@@ -21,6 +21,7 @@ type fileConfig struct {
 	AnnounceTTL         string   `yaml:"announceTtl"`
 	TrustMode           string   `yaml:"trustMode"`
 	TrustAutoApprove    *bool    `yaml:"trustAutoApprove"`
+	RoleAnchor          *bool    `yaml:"roleAnchor"`
 	AgentAdapter        string   `yaml:"agentAdapter"`
 	AgentAdapterTimeout string   `yaml:"agentAdapterTimeout"`
 	AgentRole           string   `yaml:"agentRole"`
@@ -48,6 +49,7 @@ type fileConfig struct {
 func toFileConfig(cfg Config) fileConfig {
 	las := cfg.LogAddSource
 	taa := cfg.TrustAutoApprove
+	ra := cfg.RoleAnchor
 	mfs := cfg.TransferMaxFileSize
 	var task *TaskConfig
 	if cfg.Task != nil {
@@ -86,6 +88,7 @@ func toFileConfig(cfg Config) fileConfig {
 		LogLevel:            cfg.LogLevel,
 		LogFormat:           cfg.LogFormat,
 		LogAddSource:        &las,
+		RoleAnchor:          &ra,
 	}
 }
 
@@ -148,6 +151,10 @@ func loadConfigValues(path string, required bool) (configValues, error) {
 	if cfg.TrustAutoApprove != nil {
 		values.TrustAutoApprove = *cfg.TrustAutoApprove
 		values.TrustAutoApproveSet = true
+	}
+	if cfg.RoleAnchor != nil {
+		values.RoleAnchor = *cfg.RoleAnchor
+		values.RoleAnchorSet = true
 	}
 	if cfg.Task != nil {
 		if cfg.Task.MaxConcurrentRuns > 0 {
@@ -262,6 +269,10 @@ func loadValuesFromMap(values map[string]string) configValues {
 	if trustAutoApproveRaw != "" {
 		cfg.TrustAutoApprove = parseBoolValue(trustAutoApproveRaw)
 		cfg.TrustAutoApproveSet = true
+	}
+	if roleAnchorRaw := strings.TrimSpace(values["CLAWSYNAPSE_ROLE_ANCHOR"]); roleAnchorRaw != "" {
+		cfg.RoleAnchor = parseBoolValue(roleAnchorRaw)
+		cfg.RoleAnchorSet = true
 	}
 	return cfg
 }
