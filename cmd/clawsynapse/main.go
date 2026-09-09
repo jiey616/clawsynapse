@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -122,6 +123,16 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 
 	client := api.NewClient(*apiAddr, *timeout)
+	// Phase 3.4: the local API requires a bearer token. Resolution order:
+	// CLAWSYNAPSE_API_TOKEN env -> <home>/.claw+synapse/api_token file.
+	if tok := strings.TrimSpace(os.Getenv("CLAWSYNAPSE_API_TOKEN")); tok != "" {
+		client.SetToken(tok)
+	} else if home, err := os.UserHomeDir(); err == nil {
+		tokenPath := filepath.Join(home, "."+"claw"+"synapse", "api_token")
+		if b, err := os.ReadFile(tokenPath); err == nil {
+			client.SetToken(strings.TrimSpace(string(b)))
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 

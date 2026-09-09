@@ -539,15 +539,17 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, _ *http.Request) {
 		Code:    "config.ok",
 		Message: "config fetched",
 		Data: map[string]any{
-			"config": s.cfg,
+			// Phase 3.4: secrets are masked; PUT keeps stored values when
+			// it receives the placeholder back.
+			"config": config.RedactConfig(s.cfg),
 		},
 		TS: time.Now().UnixMilli(),
 	})
 }
 
 func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
-	var cfg config.Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	var incoming config.Config
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
 		respondJSON(w, http.StatusBadRequest, types.APIResult{
 			OK:      false,
 			Code:    "invalid_argument",
@@ -557,7 +559,14 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := config.Validate(cfg); err != nil {
+	// Phase 3.4: start from the running config and apply only whitelisted
+	// fields, so a PUT can never rewrite identity paths, trust mode, NATS
+	// servers or storage layout — and redacted secrets are preserved.
+	merged := s.cfg
+	config.ApplyConfigWhitelist(&merged, incoming)
+	merged.ConfigPath = s.configPath
+
+	if err := config.Validate(merged); err != nil {
 		respondJSON(w, http.StatusBadRequest, types.APIResult{
 			OK:      false,
 			Code:    "config.invalid",
@@ -577,7 +586,7 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := config.SaveToFile(s.configPath, cfg); err != nil {
+	if err := config.SaveToFile(s.configPath, merged); err != nil {
 		respondJSON(w, http.StatusInternalServerError, types.APIResult{
 			OK:      false,
 			Code:    "config.save_failed",

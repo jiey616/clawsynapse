@@ -15,7 +15,12 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	token      string
 }
+
+// SetToken attaches a bearer token sent as "Authorization: Bearer <t>" on
+// every request (Phase 3.4 local API auth). Empty keeps legacy no-auth.
+func (c *Client) SetToken(token string) { c.token = token }
 
 func NewClient(baseURL string, timeout time.Duration) *Client {
 	if timeout <= 0 {
@@ -64,6 +69,9 @@ func (c *Client) do(ctx context.Context, method, endpoint string, payload any) (
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)

@@ -32,6 +32,7 @@ type Server struct {
 	version     string
 	cfg         config.Config
 	configPath  string
+	apiToken    string
 }
 
 type SelfInfo struct {
@@ -41,7 +42,7 @@ type SelfInfo struct {
 	TrustMode           string
 }
 
-func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, capabilitySvc *capability.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, version string, cfg config.Config) *Server {
+func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, trustSvc *trust.Service, messagingSvc *messaging.Service, transferSvc *transfer.Service, capabilitySvc *capability.Service, natsClient *natsbus.Client, agentAdapter adapter.AgentAdapter, agentAdapterName string, self SelfInfo, version string, cfg config.Config, apiToken string) *Server {
 	s := &Server{
 		peers:       peers,
 		auth:        authSvc,
@@ -56,8 +57,23 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 		version:     version,
 		cfg:         cfg,
 		configPath:  cfg.ConfigPath,
+		apiToken:    apiToken,
 	}
 
+	mux := s.routes()
+
+	s.httpServer = &http.Server{
+		Addr:              addr,
+		Handler:           requireBearer(s.apiToken, mux),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	return s
+}
+
+// routes registers all endpoints and returns the bare mux (auth is applied
+// by requireBearer in NewServer).
+func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/peers", s.handlePeers)
 	mux.HandleFunc("GET /v1/peers/{nodeId}/capabilities", s.handlePeerCapabilities)
@@ -80,13 +96,7 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 	mux.HandleFunc("GET /v1/config", s.handleConfigGet)
 	mux.HandleFunc("PUT /v1/config", s.handleConfigSave)
 
-	s.httpServer = &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	return s
+	return mux
 }
 
 func (s *Server) Start() error {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -26,11 +27,6 @@ func Run(args []string, stdout, stderr io.Writer, opts Options) error {
 		return err
 	}
 
-	client := opts.Client
-	if client == nil {
-		client = api.NewClient(cfg.APIAddr, cfg.Timeout)
-	}
-
 	logLines := opts.LogLines
 	if logLines <= 0 {
 		logLines = dashboardDefaultLogLines
@@ -40,6 +36,19 @@ func Run(args []string, stdout, stderr io.Writer, opts Options) error {
 	localCfg, cfgPath, cfgErr := loadLocalConfig()
 	if cfgErr == nil {
 		populateFieldsFromConfig(fields, localCfg)
+	}
+
+	client := opts.Client
+	if client == nil {
+		c := api.NewClient(cfg.APIAddr, cfg.Timeout)
+		// Phase 3.4: the local API requires a bearer token persisted under
+		// the data dir; read-only here — the daemon creates it.
+		if cfgErr == nil && localCfg.DataDir != "" {
+			if b, err := os.ReadFile(filepath.Join(localCfg.DataDir, "api_token")); err == nil {
+				c.SetToken(strings.TrimSpace(string(b)))
+			}
+		}
+		client = c
 	}
 
 	m := model{

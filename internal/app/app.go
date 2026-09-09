@@ -190,12 +190,21 @@ func New(cfg config.Config, version string) (*App, error) {
 		bus, peers, transferSvc, agentAdapter, nodeID, id,
 	)
 
+	// Phase 3.4: the local API requires a bearer token (persisted under
+	// the data dir with 0600, reused across restarts). Empty disables it
+	// only when the data dir is unavailable, which New returns earlier.
+	apiToken, err := api.LoadOrCreateAPIToken(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("init local api token: %w", err)
+	}
+	log.Info("local api token ready", slog.String("path", filepath.Join(cfg.DataDir, "api_token")))
+
 	apiServer := api.NewServer(cfg.LocalAPIAddr, peers, authSvc, trustSvc, messagingSvc, transferSvc, capabilitySvc, bus, agentAdapter, cfg.AgentAdapter, api.SelfInfo{
 		NodeID:              nodeID,
 		DID:                 nodeDID,
 		IdentityFingerprint: identity.Fingerprint(id.PublicKey),
 		TrustMode:           cfg.TrustMode,
-	}, version, cfg)
+	}, version, cfg, apiToken)
 
 	return &App{
 		log:       log,
