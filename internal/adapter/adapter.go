@@ -54,3 +54,20 @@ type DeliverMessageResult struct {
 type AgentStatus struct {
 	Healthy bool
 }
+
+// TaskStats is a point-in-time snapshot of task-run coordinator occupancy.
+type TaskStats struct {
+	Available     bool  `json:"available"`
+	InFlight      int   `json:"inFlight"`
+	QueueDepth    int   `json:"queueDepth"`
+	MaxConcurrent int   `json:"maxConcurrentRuns"`
+	AdmittedTotal int64 `json:"admittedTotal"`
+}
+
+// TaskStatsProvider is an optional capability interface implemented by
+// adapters that expose task-run coordinator statistics (Phase 3.3). The API
+// layer type-asserts AgentAdapter against it for /v1/health/detailed and
+// /metrics.
+type TaskStatsProvider interface {
+	TaskStats() TaskStats
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"clawsynapse/internal/store"
+	"clawsynapse/internal/obs"
 )
 
 // ErrQueueOverflow is returned when the task queue is full (QueueCapacity
@@ -336,7 +337,32 @@ func (tc *TaskCoordinator) ExecuteRun(
 
 // finishRun writes the terminal record, publishes it to any duplicate
 // waiting on the handle and removes the in-flight entry.
+// TaskStats returns a point-in-time snapshot of coordinator occupancy
+// (Phase 3.3 observability).
+func (tc *TaskCoordinator) TaskStats() TaskStats {
+	tc.mu.Lock()
+	inflight := len(tc.inflight)
+	tc.mu.Unlock()
+	admitted := tc.admitted.Load()
+	maxConcurrent := cap(tc.sem)
+	if maxConcurrent < 0 {
+		maxConcurrent = 0
+	}
+	queueDepth := int(admitted) - inflight
+	if queueDepth < 0 {
+		queueDepth = 0
+	}
+	return TaskStats{
+		Available:     true,
+		InFlight:      inflight,
+		QueueDepth:    queueDepth,
+		MaxConcurrent: maxConcurrent,
+		AdmittedTotal: admitted,
+	}
+}
+
 func (tc *TaskCoordinator) finishRun(taskID string, handle *taskRunHandle, terminal store.TaskRunRecord) {
+	obs.CounterInc("clawsynapse_task_runs_" + string(terminal.Status) + "_total")
 	if err := tc.store.SaveTaskRun(terminal); err != nil {
 		tc.log.Warn("task terminal write failed", "taskId", taskID, "err", err)
 	}
@@ -358,6 +384,7 @@ func (tc *TaskCoordinator) finishRun(taskID string, handle *taskRunHandle, termi
 // wakes duplicates with a failed pseudo-record and deletes the claim file
 // (only if it is still ours — a concurrent re-claim may have overwritten it).
 func (tc *TaskCoordinator) abandonClaim(taskID string, handle *taskRunHandle, claim store.TaskRunRecord) {
+	obs.CounterInc("clawsynapse_task_run_claims_abandoned_total")
 	if handle.cancel != nil {
 		handle.cancel() // no-op if runFn never started
 	}

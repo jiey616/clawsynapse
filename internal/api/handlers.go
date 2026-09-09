@@ -2,11 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
+	"clawsynapse/internal/adapter"
 	"clawsynapse/internal/config"
 	"clawsynapse/internal/messaging"
+	"clawsynapse/internal/obs"
 	"clawsynapse/internal/transfer"
 	"clawsynapse/pkg/types"
 )
@@ -104,7 +107,7 @@ func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) healthSnapshot(r *http.Request) map[string]any {
 	natsStatus := map[string]any{"connected": false, "status": "unavailable"}
 	if s.nats != nil {
 		st := s.nats.Status()
@@ -145,24 +148,75 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	return map[string]any{
+		"self": map[string]any{
+			"nodeId":              s.self.NodeID,
+			"did":                 s.self.DID,
+			"version":             s.version,
+			"identityFingerprint": s.self.IdentityFingerprint,
+			"trustMode":           s.self.TrustMode,
+		},
+		"peersCount": len(s.listRemotePeers()),
+		"nats":       natsStatus,
+		"adapter":    adapterStatus,
+	}
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, types.APIResult{
 		OK:      true,
 		Code:    "health.ok",
 		Message: "service healthy",
-		Data: map[string]any{
-			"self": map[string]any{
-				"nodeId":              s.self.NodeID,
-				"did":                 s.self.DID,
-				"version":             s.version,
-				"identityFingerprint": s.self.IdentityFingerprint,
-				"trustMode":           s.self.TrustMode,
-			},
-			"peersCount": len(s.listRemotePeers()),
-			"nats":       natsStatus,
-			"adapter":    adapterStatus,
-		},
-		TS: time.Now().UnixMilli(),
+		Data:    s.healthSnapshot(r),
+		TS:      time.Now().UnixMilli(),
 	})
+}
+
+// handleHealthDetailed serves GET /v1/health/detailed (Phase 3.3): the
+// /v1/health payload plus task-run coordinator occupancy (queue depth,
+// in-flight, concurrency limit) and process uptime. Authenticated (bearer).
+func (s *Server) handleHealthDetailed(w http.ResponseWriter, r *http.Request) {
+	data := s.healthSnapshot(r)
+
+	task := adapter.TaskStats{}
+	if tp, ok := s.adapter.(adapter.TaskStatsProvider); ok {
+		task = tp.TaskStats()
+	}
+	data["task"] = task
+	data["uptimeSeconds"] = int64(time.Since(s.startedAt) / time.Second)
+
+	respondJSON(w, http.StatusOK, types.APIResult{
+		OK:      true,
+		Code:    "health.ok",
+		Message: "service healthy",
+		Data:    data,
+		TS:      time.Now().UnixMilli(),
+	})
+}
+
+// handleMetrics serves GET /metrics in the Prometheus text exposition
+// format: task gauges (when a TaskStatsProvider adapter is wired) plus the
+// process-local counters from internal/obs. Authenticated (bearer).
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	task := adapter.TaskStats{}
+	if tp, ok := s.adapter.(adapter.TaskStatsProvider); ok {
+		task = tp.TaskStats()
+	}
+	if task.Available {
+		fmt.Fprintln(w, "# HELP clawsynapse_task_inflight Currently in-flight task runs.")
+		fmt.Fprintln(w, "# TYPE clawsynapse_task_inflight gauge")
+		fmt.Fprintln(w, "clawsynapse_task_inflight", task.InFlight)
+		fmt.Fprintln(w, "# HELP clawsynapse_task_queue_depth Task submissions waiting for a concurrency slot.")
+		fmt.Fprintln(w, "# TYPE clawsynapse_task_queue_depth gauge")
+		fmt.Fprintln(w, "clawsynapse_task_queue_depth", task.QueueDepth)
+		fmt.Fprintln(w, "# HELP clawsynapse_task_max_concurrent_runs Configured task run concurrency limit.")
+		fmt.Fprintln(w, "# TYPE clawsynapse_task_max_concurrent_runs gauge")
+		fmt.Fprintln(w, "clawsynapse_task_max_concurrent_runs", task.MaxConcurrent)
+	}
+
+	obs.WritePrometheus(w)
 }
 
 func (s *Server) handleTrustRequest(w http.ResponseWriter, r *http.Request) {

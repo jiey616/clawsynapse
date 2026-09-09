@@ -33,6 +33,7 @@ type Server struct {
 	cfg         config.Config
 	configPath  string
 	apiToken    string
+	startedAt   time.Time
 }
 
 type SelfInfo struct {
@@ -58,6 +59,7 @@ func NewServer(addr string, peers *discovery.Registry, authSvc *auth.Service, tr
 		cfg:         cfg,
 		configPath:  cfg.ConfigPath,
 		apiToken:    apiToken,
+		startedAt:   time.Now(),
 	}
 
 	mux := s.routes()
@@ -93,6 +95,8 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/transfer/{transferId}", s.handleTransfer)
 	mux.HandleFunc("DELETE /v1/transfer/{transferId}", s.handleTransferDelete)
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
+	mux.HandleFunc("GET /v1/health/detailed", s.handleHealthDetailed)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /v1/config", s.handleConfigGet)
 	mux.HandleFunc("PUT /v1/config", s.handleConfigSave)
 

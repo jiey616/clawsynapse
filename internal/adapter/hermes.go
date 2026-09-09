@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"clawsynapse/internal/store"
+	"clawsynapse/internal/obs"
 )
 
 // HermesConfig holds configuration for the Hermes agent adapter.
@@ -298,6 +299,16 @@ func isTaskType(msgType string) bool {
 // Prefers the upstream-provided SessionKey (set by Trustmesh to a stable value
 // within a conversation); falls back to a per-source key so the same sender
 // naturally continues the dialogue.
+// TaskStats implements TaskStatsProvider (Phase 3.3): coordinator
+// occupancy for /v1/health/detailed and /metrics. Zero value when the
+// task coordinator is not configured.
+func (a *HermesAdapter) TaskStats() TaskStats {
+	if a.taskCoord == nil {
+		return TaskStats{}
+	}
+	return a.taskCoord.TaskStats()
+}
+
 func (a *HermesAdapter) chatSessionKey(req DeliverMessageRequest) string {
 	if k := strings.TrimSpace(req.SessionKey); k != "" {
 		return k
@@ -339,6 +350,7 @@ func (a *HermesAdapter) taskSessionKey(req DeliverMessageRequest) string {
 // Unlike chat, there is no previous_response_id mapping to persist: hermes owns
 // the chaining once the conversation is named.
 func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted string, req DeliverMessageRequest) (*DeliverMessageResult, error) {
+	obs.CounterInc("clawsynapse_adapter_requests_responses_total")
 	sid := a.taskSessionKey(req)
 
 	body := responsesRequest{Model: a.model, Input: formatted, Instructions: a.anchorText()}
@@ -412,6 +424,7 @@ func (a *HermesAdapter) deliverTaskViaResponses(ctx context.Context, formatted s
 // ── Dialogue: Responses API (stateful, auto-continuation) ──────────
 
 func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted string, req DeliverMessageRequest) (*DeliverMessageResult, error) {
+	obs.CounterInc("clawsynapse_adapter_requests_responses_total")
 	chatKey := "chat:" + a.chatSessionKey(req)
 	prevID := a.loadMappedSessionID(chatKey)
 
@@ -499,6 +512,7 @@ func (a *HermesAdapter) deliverViaResponses(ctx context.Context, formatted strin
 // ── Task flow: Runs API (long-running, polled) ────────────────────
 
 func (a *HermesAdapter) deliverViaRuns(ctx context.Context, formatted string, req DeliverMessageRequest) (*DeliverMessageResult, error) {
+	obs.CounterInc("clawsynapse_adapter_requests_runs_total")
 	// Runs execution needs a stable task identity for idempotency, the
 	// single-task mutex and session continuation. Without one every message
 	// would share the bare "task:" key and pollute a common session — refuse
