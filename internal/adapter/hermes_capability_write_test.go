@@ -456,3 +456,62 @@ func contains(list []string, v string) bool {
 	}
 	return false
 }
+
+
+// ── skill.reload ───────────────────────────────────────────────────
+
+func TestApplySkillReloadBouncesGatewayWithoutConfigChange(t *testing.T) {
+	a, home := newWriteTestAdapter(t)
+	ctx, cancel := ctxForTest()
+	defer cancel()
+
+	restarts := 0
+	a.restartGatewayFn = func(context.Context) error { restarts++; return nil }
+
+	// Empty skill name must be accepted for reload (no file operation).
+	res, err := a.ApplyCapabilitySet(ctx, &CapabilitySetRequest{
+		Target: "skill", Action: "reload",
+	})
+	if err != nil {
+		t.Fatalf("ApplyCapabilitySet: %v", err)
+	}
+	if !res.OK || res.RestartStatus != "restarted" {
+		t.Fatalf("reload: ok=%v restart=%q err=%q", res.OK, res.RestartStatus, res.Error)
+	}
+	if restarts != 1 {
+		t.Fatalf("restart called %d times, want 1", restarts)
+	}
+
+	// No config mutation: the managed skill key stays untouched.
+	cfg := readConfigMap(t, a.hermesConfigPath())
+	skills, _ := cfg["skills"].(map[string]any)
+	if skills == nil {
+		t.Fatalf("skills section missing after reload")
+	}
+	managed := stringList(skills[managedConfigKey])
+	if len(managed) != 0 {
+		t.Errorf("managed skills = %v, want unchanged (empty)", managed)
+	}
+	_ = home
+}
+
+func TestApplySkillReloadRestartFailureReported(t *testing.T) {
+	a, _ := newWriteTestAdapter(t)
+	ctx, cancel := ctxForTest()
+	defer cancel()
+
+	a.restartGatewayFn = func(context.Context) error { return context.DeadlineExceeded }
+
+	res, err := a.ApplyCapabilitySet(ctx, &CapabilitySetRequest{
+		Target: "skill", Action: "reload", Skill: "tm-task-exec",
+	})
+	if err != nil {
+		t.Fatalf("ApplyCapabilitySet: %v", err)
+	}
+	if res.OK || res.RestartStatus != "restart_failed" {
+		t.Fatalf("reload: ok=%v restart=%q, want ok=false restart_failed", res.OK, res.RestartStatus)
+	}
+	if !strings.Contains(res.Error, "capability.restart_failed") {
+		t.Errorf("Error = %q, want capability.restart_failed prefix", res.Error)
+	}
+}

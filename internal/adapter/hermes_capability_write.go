@@ -37,6 +37,7 @@ var safeSkillNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 //
 //	skill: add/update (file → managed dir) · enable/disable (managed key)
 //	       → edit config.yaml + validate + restart gateway
+//	       reload → no file/config change; bounce the gateway (see below)
 //	model: add (custom_provider) · switch (config.model) · delete (provider,
 //	       deleting the current default is rejected)
 //	       → edit config.yaml + validate + restart gateway
@@ -74,6 +75,20 @@ func (a *HermesAdapter) ApplyCapabilitySet(ctx context.Context, req *CapabilityS
 // ── skill ──────────────────────────────────────────────────────────
 
 func (a *HermesAdapter) applySkillSet(_ context.Context, req *CapabilitySetRequest) (*CapabilitySetResult, error) {
+	// skill.reload: no file or config operation — bounce the gateway so its
+	// two-layer skills cache picks up every on-disk change. The in-process
+	// skills LRU is keyed WITHOUT file mtime, so in-place SKILL.md updates
+	// stay stale until the process exits; new/removed skill dirs are picked
+	// up per-turn anyway (cache key includes the external_dirs list and the
+	// gateway reloads config on every turn). There is no /reload slash
+	// command in the gateway (only /reload-mcp, which reconnects MCP
+	// servers), and posting "/reload" to /v1/responses runs a full LLM turn
+	// (verified against production) — so a restart is the only reliable
+	// node-side reload. The skill name may be empty for this action.
+	if req.Action == "reload" {
+		a.logCapabilitySet("skill", "reload", req.Skill, "")
+		return a.restartAndReport("skill", "reload", req.Skill, "")
+	}
 	if !safeSkillNameRe.MatchString(req.Skill) {
 		return skillFail(req, "capability.invalid: unsafe skill name")
 	}
