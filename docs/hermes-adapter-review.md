@@ -419,12 +419,12 @@ func (a *HermesAdapter) saveConfigMap(cfg map[string]any) error {
 
 | 位置 | 问题 |
 |------|------|
-| `hermes_capability_exec.go:286` | `sortExecutionsNewestFirst` 定义后从未被调用（死代码） |
-| `hermes_capability.go:263` | `jsonBody` 定义后从未被调用（死代码） |
-| `capability.go:87` | `boolAny` 定义后从未被调用（死代码） |
-| `hermes.go:50,92` | `agentRole` 字段赋值后从未被读取——角色技能装配实际由 `docker-entrypoint.sh` 完成，适配器层不需要该字段 |
-| `hermes_capability_exec.go:229-235` | `filePreview` 中第 2、3 个 `else if` 分支**不可达**：若 `strings.Index(content, "## Response") < 0`，则 `"\n## Response\n"` 必然也找不到 |
-| `adapter.go:23` | `DeliverMessageResult.SessionID` 字段 hermes 适配器从未填充 |
+| `hermes_capability_exec.go:286` | `sortExecutionsNewestFirst` 定义后从未被调用（死代码）——✅ 已删除（2026-09-09） |
+| `hermes_capability.go:263` | `jsonBody` 定义后从未被调用（死代码）——✅ 已删除（2026-09-09） |
+| `capability.go:87` | `boolAny` 定义后从未被调用（死代码）——✅ 已删除（2026-09-09） |
+| `hermes.go:50,92` | ~~`agentRole` 字段赋值后从未被读取~~ ——**已过时**：Phase 3.2 角色锚点（`roleAnchorText(a.agentRole)`）已使用该字段，保留 |
+| `hermes_capability_exec.go:229-235` | `filePreview` 中第 2 个 `else if` 分支**不可达**：若 `strings.Index(content, "## Response") < 0`，则 `"\n## Response\n"` 必然也找不到——✅ 已删除；第 3 个分支（单井号 `"\n# Response\n"`）经复核**可达**，保留 |
+| `adapter.go:23` | `DeliverMessageResult.SessionID` 字段 hermes 适配器从未填充——**保留**：codex/opencode 适配器正常填充，属接口契约而非死代码 |
 
 > 说明：Go 允许未使用的包级函数，所以这些死代码**不影响编译**，但会误导维护者以为这些能力已生效。
 

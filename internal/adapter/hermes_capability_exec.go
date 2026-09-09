@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -228,9 +227,8 @@ func filePreview(path string) string {
 	// (or a standalone "Response" marker) and preview from there.
 	if idx := strings.Index(content, "## Response"); idx >= 0 {
 		content = content[idx:]
-	} else if idx := strings.Index(content, "\n## Response\n"); idx >= 0 {
-		content = content[idx:]
 	} else if idx := strings.Index(content, "\n# Response\n"); idx >= 0 {
+		// Standalone single-# "Response" heading (not "## Response").
 		content = content[idx:]
 	}
 
@@ -282,9 +280,3 @@ func (a *HermesAdapter) loadJobExecutions(ctx context.Context, jobs []protocol.C
 	}
 }
 
-// sortExecutionsNewestFirst orders executions by start time descending.
-func sortExecutionsNewestFirst(execs []protocol.ExecutionInfo) {
-	sort.SliceStable(execs, func(i, j int) bool {
-		return execs[i].StartedAt > execs[j].StartedAt
-	})
-}

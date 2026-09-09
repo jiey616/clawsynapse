@@ -83,8 +83,3 @@ func strAny(v any) string {
 	return strings.TrimSpace(s)
 }
 
-// boolAny extracts a boolean from an arbitrary map value.
-func boolAny(v any) bool {
-	b, _ := v.(bool)
-	return b
-}

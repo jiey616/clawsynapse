@@ -34,3 +34,21 @@ docker-compose.roundtable.yml
 
 # ── Local git recovery backups ──
 .git-broken*/
+
+# ── Local build artifacts & scratch (Phase 3.6 cleanup) ──
+_build/
+_scratch_probe/
+bin-fresh/
+*.new
+config.example.yaml.orig
+docker-entrypoint.sh.*-bak
+docker-entrypoint.nohermes.sh
+Dockerfile.nohermes
+Dockerfile.claw5-fresh
+Dockerfile.rt2-soul
+Dockerfile.rt3-fix
+Dockerfile.rt4-final
+awesome-dsh-plugin-main*
+docker-compose.claw*.yml
+docker-compose.second.yml
+docker-compose.third.yml

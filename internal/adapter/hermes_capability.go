@@ -259,10 +259,3 @@ func (a *HermesAdapter) hermesHomeDir() string {
 	return filepath.Dir(a.hermesConfigPath())
 }
 
-// jsonBody is a small helper for endpoints that return raw JSON objects.
-func jsonBody(ctx context.Context, body []byte, out any) error {
-	if len(body) == 0 {
-		return nil
-	}
-	return json.Unmarshal(body, out)
-}
